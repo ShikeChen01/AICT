@@ -1,0 +1,14 @@
+tmp/
+node_modules/
+.env
+dist/
+*.aux
+*.log
+*.out
+*.pdf
+*.toc
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+package-lock.json
+node_modules/

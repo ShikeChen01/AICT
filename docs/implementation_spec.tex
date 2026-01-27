@@ -1,0 +1,739 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{tabularx}
+
+\title{AICT Detailed Implementation Specification}
+\author{}
+\date{2026-01-27}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section{Scope}
+This document provides detailed implementation specifications for the minimal folder layout
+listed in \texttt{docs/general\_tech\_spec.md}. It defines required imports, module exports, and
+module-level responsibilities for each folder in the minimal layout.
+
+\section{Conventions}
+\begin{itemize}[noitemsep]
+  \item All source files are TypeScript unless otherwise noted.
+  \item Files under \texttt{src/shared/} must avoid runtime dependencies on VS Code APIs or webview globals.
+  \item All exported symbols must be documented in the module spec sections below.
+  \item Internal imports use workspace-relative paths (e.g., \texttt{src/shared/types/rpc}).
+\end{itemize}
+
+\section{Extension Host: \texttt{src/extension}}
+
+\subsection{\texttt{src/extension/rpc}}
+\paragraph{Purpose} Typed RPC server bridging the webview UI and extension host.
+
+\paragraph{Required imports}
+\begin{itemize}[noitemsep]
+  \item External: \texttt{vscode}, \texttt{zod}
+  \item Node: \texttt{node:events}, \texttt{node:crypto}, \texttt{node:timers}
+  \item Internal: \texttt{src/shared/types/rpc}, \texttt{src/shared/schemas/rpcSchema},
+        \texttt{src/extension/policy}, \texttt{src/extension/runner}, \texttt{src/extension/patch},
+        \texttt{src/extension/repoIndex}, \texttt{src/extension/storage}, \texttt{src/extension/cloud}
+\end{itemize}
+
+\paragraph{Exported modules}
+\begin{itemize}[noitemsep]
+  \item \texttt{rpcServer.ts} -- Create and manage the RPC server lifecycle.
+  \item \texttt{rpcHandlers.ts} -- Register RPC method handlers and dependency wiring.
+  \item \texttt{rpcValidation.ts} -- Validate and coerce request/response payloads.
+  \item \texttt{rpcTransport.ts} -- Webview transport adapter and message bridge.
+\end{itemize}
+
+\paragraph{Module specifications}
+\subsubsection*{Module: \texttt{rpcServer.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{createRpcServer(options)}, \texttt{RpcServer}, \texttt{RpcServerOptions}
+  \item Responsibilities:
+    \begin{itemize}[noitemsep]
+      \item Listen on the transport and route requests to handlers.
+      \item Track active requests and enforce timeouts.
+      \item Emit server events for job status, logs, and repo index updates.
+    \end{itemize}
+  \item Inputs/Outputs: accepts \texttt{RpcTransport} and handler registry; emits \texttt{RpcResponse} and events.
+  \item Failure modes: malformed payloads, unknown method, handler errors -> structured error response.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{rpcHandlers.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{RpcHandlerRegistry}, \texttt{registerCoreHandlers(deps)}
+  \item Responsibilities: provide handlers for \texttt{startWork}, \texttt{runTests}, \texttt{applyPatch},
+        \texttt{repoIndex}, \texttt{exportBundle}, and \texttt{cancelJob}.
+  \item Dependencies: policy engine, runner, patch engine, repo index, storage, cloud gateway.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{rpcValidation.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{validateRpcRequest}, \texttt{validateRpcResponse}
+  \item Responsibilities: validate payloads with Zod and return typed data or structured errors.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{rpcTransport.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{createWebviewTransport(webview)}, \texttt{RpcTransport}
+  \item Responsibilities: wrap \texttt{webview.postMessage} and \texttt{onDidReceiveMessage} into
+        a typed transport that assigns request ids.
+\end{itemize}
+
+\subsection{\texttt{src/extension/policy}}
+\paragraph{Purpose} Guardrails enforcing scope fences, allowlists, and dependency/network rules.
+
+\paragraph{Required imports}
+\begin{itemize}[noitemsep]
+  \item External: \texttt{minimatch}
+  \item Node: \texttt{node:path}, \texttt{node:fs}
+  \item Internal: \texttt{src/shared/types}, \texttt{src/shared/schemas}
+\end{itemize}
+
+\paragraph{Exported modules}
+\begin{itemize}[noitemsep]
+  \item \texttt{policyEngine.ts} -- Central policy evaluation and decision API.
+  \item \texttt{scopeFence.ts} -- Path scoping and normalization.
+  \item \texttt{commandAllowlist.ts} -- Allowed command detection and validation.
+  \item \texttt{dependencyGate.ts} -- Detect and gate dependency changes.
+  \item \texttt{networkPolicy.ts} -- Network access rules for tests and tools.
+\end{itemize}
+
+\paragraph{Module specifications}
+\subsubsection*{Module: \texttt{policyEngine.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{PolicyEngine}, \texttt{PolicyDecision}, \texttt{PolicyContext}
+  \item Responsibilities: evaluate all policies for a request and return allow/deny plus reasons.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{scopeFence.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{ScopeFence}, \texttt{isPathAllowed(path)}, \texttt{normalizeScope(scope)}
+  \item Responsibilities: enforce allowed and forbidden paths and the maximum file count.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{commandAllowlist.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{CommandAllowlist}, \texttt{isCommandAllowed(command)}
+  \item Responsibilities: check commands against the allowlist before the runner executes them.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{dependencyGate.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{DependencyGate}, \texttt{detectDependencyChanges(diff)}
+  \item Responsibilities: scan diffs for manifest or lockfile edits and require approval when found.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{networkPolicy.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{NetworkPolicy}, \texttt{NetworkPolicyDecision}
+  \item Responsibilities: allow or block network calls during tests and tool runs.
+\end{itemize}
+
+\subsection{\texttt{src/extension/patch}}
+\paragraph{Purpose} Validate, dry-run, and apply unified diffs with optional formatting.
+
+\paragraph{Required imports}
+\begin{itemize}[noitemsep]
+  \item External: \texttt{parse-diff} (or equivalent unified diff parser)
+  \item Node: \texttt{node:fs}, \texttt{node:path}, \texttt{node:child\_process}, \texttt{node:os}
+  \item Internal: \texttt{src/shared/types/diff}, \texttt{src/shared/schemas/diffSchema},
+        \texttt{src/extension/policy}
+\end{itemize}
+
+\paragraph{Exported modules}
+\begin{itemize}[noitemsep]
+  \item \texttt{patchEngine.ts} -- Orchestrate validation, dry-run, format, and apply.
+  \item \texttt{diffValidator.ts} -- Unified diff validation rules.
+  \item \texttt{patchApplier.ts} -- Apply or revert patches on disk.
+  \item \texttt{formatRunner.ts} -- Run formatters or linters as configured.
+  \item \texttt{patchTypes.ts} -- Patch-related types for internal use.
+\end{itemize}
+
+\paragraph{Module specifications}
+\subsubsection*{Module: \texttt{patchEngine.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{PatchEngine}, \texttt{PatchApplyResult}
+  \item Responsibilities: check policy gates, run a dry-run, optionally format, then apply the patch.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{diffValidator.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{validateUnifiedDiff(diff)}, \texttt{DiffValidationError}
+  \item Responsibilities: validate diff headers and paths and ensure they are in scope.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{patchApplier.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{applyPatchDryRun}, \texttt{applyPatch}
+  \item Responsibilities: apply a unified diff to a temp tree and optionally to the real tree.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{formatRunner.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{runFormatters(commands)}
+  \item Responsibilities: run configured format or lint commands after allowlist checks.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{patchTypes.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{Patch}, \texttt{PatchFile}, \texttt{PatchHunk}
+  \item Responsibilities: define normalized patch structures for the patch engine.
+\end{itemize}
+
+\subsection{\texttt{src/extension/runner}}
+\paragraph{Purpose} Safe command execution with allowlists, queueing, and output control.
+
+\paragraph{Required imports}
+\begin{itemize}[noitemsep]
+  \item Node: \texttt{node:child\_process}, \texttt{node:events}, \texttt{node:os}, \texttt{node:stream}, \texttt{node:timers}
+  \item Internal: \texttt{src/extension/policy}, \texttt{src/extension/storage}, \texttt{src/shared/types/jobs}
+\end{itemize}
+
+\paragraph{Exported modules}
+\begin{itemize}[noitemsep]
+  \item \texttt{commandRunner.ts} -- Execute a single command with timeouts and env controls.
+  \item \texttt{runQueue.ts} -- Serialize and prioritize command runs.
+  \item \texttt{outputTruncation.ts} -- Truncate and normalize large outputs.
+\end{itemize}
+
+\paragraph{Module specifications}
+\subsubsection*{Module: \texttt{commandRunner.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{runCommand(spec)}, \texttt{CommandResult}
+  \item Responsibilities: spawn the process, stream output, enforce timeouts, and return a structured result.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{runQueue.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{RunQueue}, \texttt{QueueJob}
+  \item Responsibilities: limit concurrency and enforce FIFO or priority order.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{outputTruncation.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{truncateOutput(text, maxBytes)}
+  \item Responsibilities: truncate long outputs while preserving the head and tail.
+\end{itemize}
+
+\subsection{\texttt{src/extension/repoIndex}}
+\paragraph{Purpose} Build a cached repo index with file tree, manifests, import graph, and exports.
+
+\paragraph{Required imports}
+\begin{itemize}[noitemsep]
+  \item External: \texttt{fast-glob}, \texttt{typescript}, \texttt{simple-git}
+  \item Node: \texttt{node:fs}, \texttt{node:path}, \texttt{node:child\_process}
+  \item Internal: \texttt{src/shared/types}, \texttt{src/shared/schemas}, \texttt{src/extension/storage}
+\end{itemize}
+
+\paragraph{Exported modules}
+\begin{itemize}[noitemsep]
+  \item \texttt{repoIndexer.ts} -- Build or refresh the full repo index.
+  \item \texttt{manifestScanner.ts} -- Discover package manifests and test scripts.
+  \item \texttt{importGraph.ts} -- Build import graph across supported languages.
+  \item \texttt{testCommandDiscovery.ts} -- Extract runnable test commands.
+  \item \texttt{symbolTable.ts} -- Extract exported symbols from files.
+\end{itemize}
+
+\paragraph{Module specifications}
+\subsubsection*{Module: \texttt{repoIndexer.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{buildRepoIndex(root)}, \texttt{RepoIndex}
+  \item Responsibilities: orchestrate file scanning, manifest scanning, import graph building, and symbol extraction.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{manifestScanner.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{scanManifests(root)}, \texttt{ManifestInfo}
+  \item Responsibilities: parse \texttt{package.json}, \texttt{pyproject.toml}, and other manifests to collect scripts.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{importGraph.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{buildImportGraph(files)}, \texttt{ImportGraph}
+  \item Responsibilities: parse TS/JS with the TypeScript compiler API and Python with an AST runner.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{testCommandDiscovery.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{discoverTestCommands(manifests)}, \texttt{TestCommand}
+  \item Responsibilities: extract test commands, normalize them, and populate the runner allowlist.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{symbolTable.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{extractExportedSymbols(files)}, \texttt{SymbolInfo}
+  \item Responsibilities: generate best-effort export lists for UI display.
+\end{itemize}
+
+\subsection{\texttt{src/extension/storage}}
+\paragraph{Purpose} Load and persist workspace state and cached repo index data.
+
+\paragraph{Required imports}
+\begin{itemize}[noitemsep]
+  \item External: \texttt{zod}
+  \item Node: \texttt{node:fs/promises}, \texttt{node:path}
+  \item Internal: \texttt{src/shared/schemas}, \texttt{src/shared/types}
+\end{itemize}
+
+\paragraph{Exported modules}
+\begin{itemize}[noitemsep]
+  \item \texttt{workspaceStore.ts} -- Read and write \texttt{.vibecanvas.json}.
+  \item \texttt{cacheStore.ts} -- Read and write \texttt{.vibecanvas.cache.json}.
+  \item \texttt{storagePaths.ts} -- Resolve workspace file paths.
+  \item \texttt{storageTypes.ts} -- Storage-specific types and errors.
+\end{itemize}
+
+\paragraph{Module specifications}
+\subsubsection*{Module: \texttt{workspaceStore.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{loadWorkspaceState()}, \texttt{saveWorkspaceState(state)}
+  \item Responsibilities: validate JSON against the schema and write it atomically.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{cacheStore.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{loadCache()}, \texttt{saveCache(cache)}
+  \item Responsibilities: read, write, and version the cache.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{storagePaths.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{getWorkspaceFilePath(root)}, \texttt{getCacheFilePath(root)}
+  \item Responsibilities: return normalized absolute paths for storage files.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{storageTypes.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{WorkspaceState}, \texttt{CacheState}, \texttt{StorageError}
+  \item Responsibilities: define shared types for storage read/write functions.
+\end{itemize}
+
+\subsection{\texttt{src/extension/cloud}}
+\paragraph{Purpose} Provider gateway for plan, patch, review, and test explanations.
+
+\paragraph{Required imports}
+\begin{itemize}[noitemsep]
+  \item External: none required beyond standard HTTP (use global \texttt{fetch})
+  \item Node: \texttt{node:crypto}, \texttt{node:timers}, \texttt{node:stream}
+  \item Internal: \texttt{src/shared/types}, \texttt{src/shared/schemas}, \texttt{src/extension/policy}
+\end{itemize}
+
+\paragraph{Exported modules}
+\begin{itemize}[noitemsep]
+  \item \texttt{gatewayClient.ts} -- Unified gateway for all provider calls.
+  \item \texttt{providerAdapter.ts} -- Adapter interfaces and common types.
+  \item \texttt{openaiAdapter.ts} -- OpenAI Responses adapter.
+  \item \texttt{claudeAdapter.ts} -- Claude Messages adapter.
+  \item \texttt{geminiAdapter.ts} -- Gemini API adapter.
+  \item \texttt{contextPackager.ts} -- Context bundle builder and size caps.
+  \item \texttt{batchPlanner.ts} -- PLAN to PATCH batching.
+  \item \texttt{outputValidators.ts} -- Validate plan, review, and diff outputs.
+  \item \texttt{rateLimiter.ts} -- Provider concurrency and backoff.
+\end{itemize}
+
+\paragraph{Module specifications}
+\subsubsection*{Module: \texttt{gatewayClient.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{CloudGateway}, \texttt{GatewayOptions}
+  \item Responsibilities: route calls to adapters, enforce retries, and return structured outputs.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{providerAdapter.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{ProviderAdapter}, \texttt{ProviderName}
+  \item Responsibilities: define the adapter interface for plan, patch, review, and explain-failure.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{openaiAdapter.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{OpenAIAdapter}
+  \item Responsibilities: implement OpenAI requests, parse streaming responses, and map errors.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{claudeAdapter.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{ClaudeAdapter}
+  \item Responsibilities: implement Claude requests, parse streaming responses, and map errors.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{geminiAdapter.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{GeminiAdapter}
+  \item Responsibilities: implement Gemini requests, parse streaming responses, and map errors.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{contextPackager.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{buildContextBundle(scope)}, \texttt{ContextBundle}
+  \item Responsibilities: assemble context files, summaries, and logs within byte and token caps.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{batchPlanner.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{planBatches(scope)}, \texttt{BatchPlan}
+  \item Responsibilities: split work into staged plan batches and patch batches.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{outputValidators.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{validatePlan}, \texttt{validateReview}, \texttt{validateDiff}
+  \item Responsibilities: validate agent outputs against their schemas.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{rateLimiter.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{RateLimiter}
+  \item Responsibilities: enforce per-provider concurrency limits and backoff rules.
+\end{itemize}
+
+\section{Webview UI: \texttt{src/webview}}
+
+\subsection{\texttt{src/webview/canvas}}
+\paragraph{Purpose} Render the canvas, nodes, edges, and selection behaviors.
+
+\paragraph{Required imports}
+\begin{itemize}[noitemsep]
+  \item External: \texttt{react}, \texttt{reactflow}, \texttt{zustand}
+  \item Internal: \texttt{src/shared/types}, \texttt{src/shared/schemas}, \texttt{src/webview/store}
+\end{itemize}
+
+\paragraph{Exported modules}
+\begin{itemize}[noitemsep]
+  \item \texttt{CanvasView.tsx} -- Main canvas component.
+  \item \texttt{nodeTypes.tsx} -- Node renderers and type mapping.
+  \item \texttt{edgeTypes.tsx} -- Edge renderers and type mapping.
+  \item \texttt{layoutHelpers.ts} -- Grid, snapping, and layout helpers.
+  \item \texttt{selectionController.ts} -- Selection and multi-select logic.
+\end{itemize}
+
+\paragraph{Module specifications}
+\subsubsection*{Module: \texttt{CanvasView.tsx}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{CanvasView}
+  \item Responsibilities: mount React Flow, bind node and edge types, and handle selection events.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{nodeTypes.tsx}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{nodeTypes}
+  \item Responsibilities: provide renderers for bucket, module, and block nodes.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{edgeTypes.tsx}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{edgeTypes}
+  \item Responsibilities: provide renderers for containment and dependency edges.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{layoutHelpers.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{snapToGrid}, \texttt{computeBounds}
+  \item Responsibilities: supply deterministic layout helpers for drag and drop.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{selectionController.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{useSelectionController}
+  \item Responsibilities: track selection state and keyboard modifiers.
+\end{itemize}
+
+\subsection{\texttt{src/webview/inspector}}
+\paragraph{Purpose} Edit entity metadata and validation state.
+
+\paragraph{Required imports}
+\begin{itemize}[noitemsep]
+  \item External: \texttt{react}, \texttt{zustand}
+  \item Internal: \texttt{src/shared/types}, \texttt{src/shared/schemas}, \texttt{src/webview/store}
+\end{itemize}
+
+\paragraph{Exported modules}
+\begin{itemize}[noitemsep]
+  \item \texttt{InspectorPanel.tsx} -- Main inspector panel container.
+  \item \texttt{EntityForm.tsx} -- Entity editing form.
+  \item \texttt{ExportsImportsEditor.tsx} -- Exports and imports editor.
+  \item \texttt{AcceptanceCriteriaList.tsx} -- Acceptance criteria checklist UI.
+  \item \texttt{TestStrategyEditor.tsx} -- Test strategy editor.
+\end{itemize}
+
+\paragraph{Module specifications}
+\subsubsection*{Module: \texttt{InspectorPanel.tsx}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{InspectorPanel}
+  \item Responsibilities: bind the selected entity, render editors, and submit updates.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{EntityForm.tsx}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{EntityForm}
+  \item Responsibilities: edit name, description, and size hints with validation.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{ExportsImportsEditor.tsx}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{ExportsImportsEditor}
+  \item Responsibilities: provide an editor for exports and imports with autocomplete and validation.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{AcceptanceCriteriaList.tsx}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{AcceptanceCriteriaList}
+  \item Responsibilities: edit checklist items and track completion state.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{TestStrategyEditor.tsx}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{TestStrategyEditor}
+  \item Responsibilities: update test commands and expectations for the selected entity.
+\end{itemize}
+
+\subsection{\texttt{src/webview/agentPanel}}
+\paragraph{Purpose} Display chat, job progress, diff preview, and approvals.
+
+\paragraph{Required imports}
+\begin{itemize}[noitemsep]
+  \item External: \texttt{react}
+  \item Internal: \texttt{src/shared/types}, \texttt{src/webview/rpcClient}, \texttt{src/webview/store}
+\end{itemize}
+
+\paragraph{Exported modules}
+\begin{itemize}[noitemsep]
+  \item \texttt{AgentPanel.tsx} -- Container for agent UI.
+  \item \texttt{ChatThread.tsx} -- Conversation list and input.
+  \item \texttt{JobStatusList.tsx} -- Job progress list.
+  \item \texttt{DiffPreview.tsx} -- Render unified diff preview.
+  \item \texttt{ApprovalPrompt.tsx} -- Approve or reject patches.
+\end{itemize}
+
+\paragraph{Module specifications}
+\subsubsection*{Module: \texttt{AgentPanel.tsx}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{AgentPanel}
+  \item Responsibilities: coordinate the chat, job status, and diff preview panels.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{ChatThread.tsx}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{ChatThread}
+  \item Responsibilities: render conversation history and the input box.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{JobStatusList.tsx}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{JobStatusList}
+  \item Responsibilities: display the job queue and status updates from the host.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{DiffPreview.tsx}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{DiffPreview}
+  \item Responsibilities: render unified diffs with syntax highlighting and line numbers.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{ApprovalPrompt.tsx}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{ApprovalPrompt}
+  \item Responsibilities: collect user approval or rejection of a patch.
+\end{itemize}
+
+\subsection{\texttt{src/webview/store}}
+\paragraph{Purpose} Global state management for UI, selection, and job updates.
+
+\paragraph{Required imports}
+\begin{itemize}[noitemsep]
+  \item External: \texttt{zustand}
+  \item Internal: \texttt{src/shared/types}, \texttt{src/webview/rpcClient}
+\end{itemize}
+
+\paragraph{Exported modules}
+\begin{itemize}[noitemsep]
+  \item \texttt{appStore.ts} -- Global app state and actions.
+  \item \texttt{canvasStore.ts} -- Canvas-specific state.
+  \item \texttt{selectors.ts} -- Derived selectors.
+  \item \texttt{actions.ts} -- Action creators for mutations.
+\end{itemize}
+
+\paragraph{Module specifications}
+\subsubsection*{Module: \texttt{appStore.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{useAppStore}, \texttt{AppState}, \texttt{AppActions}
+  \item Responsibilities: maintain entities, jobs, and UI layout state.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{canvasStore.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{useCanvasStore}, \texttt{CanvasState}, \texttt{CanvasActions}
+  \item Responsibilities: maintain canvas viewport, selection, and edge/node state.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{selectors.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{selectActiveEntity}, \texttt{selectJobById}
+  \item Responsibilities: return memoized selectors for UI components.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{actions.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{createEntity}, \texttt{updateEntity}, \texttt{setJobStatus}
+  \item Responsibilities: define action creators for store mutations.
+\end{itemize}
+
+\subsection{\texttt{src/webview/rpcClient}}
+\paragraph{Purpose} Typed RPC client for webview to extension host.
+
+\paragraph{Required imports}
+\begin{itemize}[noitemsep]
+  \item External: none
+  \item Internal: \texttt{src/shared/types/rpc}, \texttt{src/shared/schemas/rpcSchema}
+\end{itemize}
+
+\paragraph{Exported modules}
+\begin{itemize}[noitemsep]
+  \item \texttt{rpcClient.ts} -- Create and use the RPC client.
+  \item \texttt{messageChannel.ts} -- Low-level postMessage channel wrapper.
+  \item \texttt{requestTracker.ts} -- Track request ids and promises.
+\end{itemize}
+
+\paragraph{Module specifications}
+\subsubsection*{Module: \texttt{rpcClient.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{createRpcClient()}, \texttt{RpcClient}
+  \item Responsibilities: send requests, wait for responses, and emit events.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{messageChannel.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{createMessageChannel()}
+  \item Responsibilities: wrap \texttt{postMessage} and message listeners in a typed API.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{requestTracker.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{RequestTracker}
+  \item Responsibilities: track pending requests and resolve them on response or timeout.
+\end{itemize}
+
+\section{Shared Types and Schemas: \texttt{src/shared}}
+
+\subsection{\texttt{src/shared/schemas}}
+\paragraph{Purpose} Zod schemas for validation across UI and extension host.
+
+\paragraph{Required imports}
+\begin{itemize}[noitemsep]
+  \item External: \texttt{zod}
+  \item Internal: \texttt{src/shared/types}
+\end{itemize}
+
+\paragraph{Exported modules}
+\begin{itemize}[noitemsep]
+  \item \texttt{entitySchema.ts} -- Schemas for bucket, module, and block entities.
+  \item \texttt{rpcSchema.ts} -- Schemas for RPC requests and responses.
+  \item \texttt{planSchema.ts} -- Schemas for plan and stage outputs.
+  \item \texttt{diffSchema.ts} -- Schemas for unified diff outputs.
+  \item \texttt{jobSchema.ts} -- Schemas for job status and updates.
+  \item \texttt{contextSchema.ts} -- Schemas for context bundles.
+\end{itemize}
+
+\paragraph{Module specifications}
+\subsubsection*{Module: \texttt{entitySchema.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{EntitySchema}, \texttt{BucketSchema}, \texttt{ModuleSchema}, \texttt{BlockSchema}
+  \item Responsibilities: validate persisted entity state and incoming UI edits.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{rpcSchema.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{RpcRequestSchema}, \texttt{RpcResponseSchema}, \texttt{RpcEventSchema}
+  \item Responsibilities: validate RPC envelopes and their method payloads.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{planSchema.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{PlanSchema}, \texttt{StageSchema}
+  \item Responsibilities: validate plan outputs produced by provider adapters.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{diffSchema.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{UnifiedDiffSchema}
+  \item Responsibilities: validate unified diff output before patching.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{jobSchema.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{JobSchema}, \texttt{JobStatusSchema}
+  \item Responsibilities: validate job state and job status updates.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{contextSchema.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{ContextBundleSchema}
+  \item Responsibilities: validate context bundles consumed by providers.
+\end{itemize}
+
+\subsection{\texttt{src/shared/types}}
+\paragraph{Purpose} Shared TypeScript types for RPC, plan, diff, and job data.
+
+\paragraph{Required imports}
+\begin{itemize}[noitemsep]
+  \item External: none
+\end{itemize}
+
+\paragraph{Exported modules}
+\begin{itemize}[noitemsep]
+  \item \texttt{entities.ts} -- Entity and relationship types.
+  \item \texttt{rpc.ts} -- RPC method and payload types.
+  \item \texttt{plan.ts} -- Plan and stage types.
+  \item \texttt{diff.ts} -- Unified diff types.
+  \item \texttt{jobs.ts} -- Job types and status enums.
+  \item \texttt{context.ts} -- Context bundle types.
+  \item \texttt{index.ts} -- Barrel re-exports for shared types.
+\end{itemize}
+
+\paragraph{Module specifications}
+\subsubsection*{Module: \texttt{entities.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{Entity}, \texttt{Bucket}, \texttt{Module}, \texttt{Block}, \texttt{EntityId}
+  \item Responsibilities: define the core data model types for the canvas.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{rpc.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{RpcRequest}, \texttt{RpcResponse}, \texttt{RpcEvent}, \texttt{RpcMethod}
+  \item Responsibilities: define the request, response, and event payload contracts.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{plan.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{Plan}, \texttt{PlanStage}, \texttt{WorkItem}
+  \item Responsibilities: define types for staged plan outputs and work items.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{diff.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{UnifiedDiff}, \texttt{DiffFile}, \texttt{DiffHunk}
+  \item Responsibilities: define types for unified diff structures used in validation and preview.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{jobs.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{Job}, \texttt{JobStatus}, \texttt{JobType}
+  \item Responsibilities: define types for background jobs and state transitions.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{context.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: \texttt{ContextBundle}, \texttt{ContextFile}, \texttt{ContextLog}
+  \item Responsibilities: define types for context payloads sent to provider adapters.
+\end{itemize}
+
+\subsubsection*{Module: \texttt{index.ts}}
+\begin{itemize}[noitemsep]
+  \item Exports: re-export all shared types for convenient imports.
+  \item Responsibilities: provide a single entry point for shared types.
+\end{itemize}
+
+\end{document}
