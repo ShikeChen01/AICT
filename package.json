@@ -4,9 +4,9 @@
   "type": "module",
   "scripts": {
     "test": "tsx --test tests/**/*.test.ts",
-    "dev": "vite",
-    "build:webview": "vite build",
-    "preview": "vite preview"
+    "dev": "npm --prefix extension/ai-canvas run dev:webview",
+    "build:webview": "npm --prefix extension/ai-canvas run build:webview",
+    "preview": "npm --prefix extension/ai-canvas run preview:webview"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
