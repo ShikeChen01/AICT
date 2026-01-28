@@ -1,7 +1,7 @@
 {
-  "name": "AICVS",
-  "displayName": "AI Canvas",
-  "description": "canvas based dynamic agent scheduler",
+  "name": "ai-canvas",
+  "displayName": "AI-Canvas",
+  "description": "Canvas based AI Agent Manager",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.108.1"
@@ -14,7 +14,7 @@
   "contributes": {
     "commands": [
       {
-        "command": "AICVS.helloWorld",
+        "command": "ai-canvas.helloWorld",
         "title": "Hello World"
       }
     ]
