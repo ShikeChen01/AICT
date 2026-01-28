@@ -8,6 +8,10 @@
     "fast-glob": "^3.3.3",
     "minimatch": "^10.0.1",
     "parse-diff": "^0.11.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "reactflow": "^11.11.4",
+    "zustand": "^4.5.5",
     "zod": "^3.24.1"
   },
   "engines": {
@@ -43,6 +47,8 @@
     "@types/vscode": "^1.108.1",
     "@types/mocha": "^10.0.10",
     "@types/diff": "^5.2.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
     "@types/node": "22.x",
     "typescript-eslint": "^8.52.0",
     "eslint": "^9.39.2",

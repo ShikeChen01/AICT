@@ -1,33 +1,24 @@
 import { minimatch } from "minimatch";
 
-export type CommandAllowlistConfig = {
+export type CommandBlocklistConfig = {
   patterns: string[];
 };
 
-export class CommandAllowlist {
+export class CommandBlocklist {
   private readonly patterns: string[];
 
-  constructor(config?: Partial<CommandAllowlistConfig>) {
-    this.patterns = config?.patterns ?? [
-      "npm test",
-      "npm run *",
-      "pnpm test",
-      "pnpm run *",
-      "yarn test",
-      "yarn run *",
-      "pytest*",
-      "python -m pytest*",
-    ];
+  constructor(config?: Partial<CommandBlocklistConfig>) {
+    this.patterns = config?.patterns ?? [];
   }
 
-  isCommandAllowed(command: string): boolean {
+  isCommandBlocked(command: string): boolean {
     return this.patterns.some((pattern) => minimatch(command, pattern));
   }
 }
 
-export const isCommandAllowed = (command: string, allowlist?: CommandAllowlist): boolean => {
-  if (!allowlist) {
+export const isCommandAllowed = (command: string, blocklist?: CommandBlocklist): boolean => {
+  if (!blocklist) {
     return true;
   }
-  return allowlist.isCommandAllowed(command);
+  return !blocklist.isCommandBlocked(command);
 };

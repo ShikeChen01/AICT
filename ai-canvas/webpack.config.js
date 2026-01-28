@@ -25,7 +25,7 @@ const extensionConfig = {
   },
   resolve: {
     // support reading TypeScript and JavaScript files, 📖 -> https://github.com/TypeStrong/ts-loader
-    extensions: ['.ts', '.js'],
+    extensions: ['.ts', '.tsx', '.js'],
     alias: {
       src: path.resolve(__dirname, 'src'),
     }
@@ -48,4 +48,37 @@ const extensionConfig = {
     level: "log", // enables logging required for problem matchers
   },
 };
-module.exports = [ extensionConfig ];
+
+/** @type WebpackConfig */
+const webviewConfig = {
+  target: 'web',
+  mode: 'none',
+  entry: './src/webview/index.tsx',
+  output: {
+    path: path.resolve(__dirname, 'dist'),
+    filename: 'webview.js',
+  },
+  resolve: {
+    extensions: ['.ts', '.tsx', '.js'],
+    alias: {
+      src: path.resolve(__dirname, 'src'),
+    }
+  },
+  module: {
+    rules: [
+      {
+        test: /\.(ts|tsx)$/,
+        exclude: /node_modules/,
+        use: [
+          {
+            loader: 'ts-loader'
+          }
+        ]
+      }
+    ]
+  },
+  devtool: 'source-map',
+};
+
+module.exports = [ extensionConfig, webviewConfig ];
+

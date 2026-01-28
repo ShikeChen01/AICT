@@ -1,6 +1,6 @@
 import type { Guardrails } from "src/shared/types/rpc";
 import type { UnifiedDiff } from "src/shared/types/diff";
-import { CommandAllowlist } from "src/extension/policy/commandAllowlist";
+import { CommandBlocklist } from "src/extension/policy/commandAllowlist";
 import { DependencyGate } from "src/extension/policy/dependencyGate";
 import { NetworkPolicy } from "src/extension/policy/networkPolicy";
 import { ScopeFence } from "src/extension/policy/scopeFence";
@@ -22,16 +22,16 @@ export type PolicyContext = {
 };
 
 export class PolicyEngine {
-  private readonly allowlist: CommandAllowlist;
+  private readonly blocklist: CommandBlocklist;
   private readonly dependencyGate: DependencyGate;
   private readonly networkPolicy: NetworkPolicy;
 
   constructor(options?: {
-    allowlist?: CommandAllowlist;
+    blocklist?: CommandBlocklist;
     dependencyGate?: DependencyGate;
     networkPolicy?: NetworkPolicy;
   }) {
-    this.allowlist = options?.allowlist ?? new CommandAllowlist();
+    this.blocklist = options?.blocklist ?? new CommandBlocklist();
     this.dependencyGate = options?.dependencyGate ?? new DependencyGate();
     this.networkPolicy = options?.networkPolicy ?? new NetworkPolicy(true);
   }
@@ -39,8 +39,8 @@ export class PolicyEngine {
   evaluate(context: PolicyContext): PolicyDecision {
     const reasons: string[] = [];
 
-    if (context.command && !this.allowlist.isCommandAllowed(context.command)) {
-      reasons.push(`Command not allowlisted: ${context.command}`);
+    if (context.command && this.blocklist.isCommandBlocked(context.command)) {
+      reasons.push(`Command blocked: ${context.command}`);
     }
 
     if (context.diff && context.guardrails?.block_deps) {

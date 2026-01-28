@@ -47,7 +47,7 @@ export function activate(context: vscode.ExtensionContext) {
       server.dispose();
     });
 
-    panel.webview.html = getWebviewHtml();
+    panel.webview.html = getWebviewHtml(panel.webview, context.extensionUri);
   });
 
   context.subscriptions.push(disposable);
@@ -55,25 +55,26 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {}
 
-function getWebviewHtml(): string {
+function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+  const scriptUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, "dist", "webview.js"),
+  );
+  const nonce = Date.now().toString();
+
   return `<!doctype html>
   <html lang="en">
     <head>
       <meta charset="UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <title>AI Canvas</title>
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https:; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}';" />
       <style>
-        body { font-family: sans-serif; margin: 0; padding: 24px; }
-        .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; max-width: 640px; }
-        h1 { margin: 0 0 8px; }
-        p { margin: 0; color: #444; }
+        body { margin: 0; padding: 0; }
       </style>
     </head>
     <body>
-      <div class="card">
-        <h1>AI Canvas</h1>
-        <p>The command is wired. Next step is to mount the webview UI here.</p>
-      </div>
+      <div id="root"></div>
+      <script nonce="${nonce}" src="${scriptUri}"></script>
     </body>
   </html>`;
 }
