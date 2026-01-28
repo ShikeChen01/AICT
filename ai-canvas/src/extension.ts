@@ -1,26 +1,79 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
-import * as vscode from 'vscode';
+import * as vscode from "vscode";
+import { createRpcServer } from "src/extension/rpc/rpcServer";
+import { createWebviewTransport } from "src/extension/rpc/rpcTransport";
+import { registerCoreHandlers } from "src/extension/rpc/rpcHandlers";
+import { PolicyEngine } from "src/extension/policy/policyEngine";
+import { PatchEngine } from "src/extension/patch/patchEngine";
+import { repoIndexer } from "src/extension/repoIndex/repoIndexer";
+import { runCommand } from "src/extension/runner/commandRunner";
+import { workspaceStore } from "src/extension/storage/workspaceStore";
+import { cacheStore } from "src/extension/storage/cacheStore";
+import { CloudGateway } from "src/extension/cloud/gatewayClient";
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
+  const disposable = vscode.commands.registerCommand("ai-canvas.openCanvas", () => {
+    const panel = vscode.window.createWebviewPanel(
+      "aiCanvas",
+      "AI Canvas",
+      vscode.ViewColumn.One,
+      { enableScripts: true },
+    );
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "ai-canvas" is now active!');
+    const transport = createWebviewTransport(panel.webview);
+    const policy = new PolicyEngine();
+    const runner = { runCommand };
+    const patchEngine = new PatchEngine({ runner, policy });
+    const cloud = new CloudGateway();
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	const disposable = vscode.commands.registerCommand('ai-canvas.helloWorld', () => {
-		// The code you place here will be executed every time your command is executed
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Hello World from AI-Canvas!');
-	});
+    const handlers = registerCoreHandlers({
+      workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd(),
+      policy,
+      runner,
+      patchEngine,
+      repoIndexer,
+      workspaceStore,
+      cacheStore,
+      cloud,
+    });
 
-	context.subscriptions.push(disposable);
+    const server = createRpcServer({
+      transport,
+      handlers,
+    });
+
+    server.start();
+
+    panel.onDidDispose(() => {
+      server.dispose();
+    });
+
+    panel.webview.html = getWebviewHtml();
+  });
+
+  context.subscriptions.push(disposable);
 }
 
-// This method is called when your extension is deactivated
 export function deactivate() {}
+
+function getWebviewHtml(): string {
+  return `<!doctype html>
+  <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>AI Canvas</title>
+      <style>
+        body { font-family: sans-serif; margin: 0; padding: 24px; }
+        .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; max-width: 640px; }
+        h1 { margin: 0 0 8px; }
+        p { margin: 0; color: #444; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <h1>AI Canvas</h1>
+        <p>The command is wired. Next step is to mount the webview UI here.</p>
+      </div>
+    </body>
+  </html>`;
+}

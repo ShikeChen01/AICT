@@ -3,19 +3,28 @@
   "displayName": "AI-Canvas",
   "description": "Canvas based AI Agent Manager",
   "version": "0.0.1",
+  "dependencies": {
+    "diff": "^5.2.0",
+    "fast-glob": "^3.3.3",
+    "minimatch": "^10.0.1",
+    "parse-diff": "^0.11.1",
+    "zod": "^3.24.1"
+  },
   "engines": {
     "vscode": "^1.108.1"
   },
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:ai-canvas.openCanvas"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "ai-canvas.helloWorld",
-        "title": "Hello World"
+        "command": "ai-canvas.openCanvas",
+        "title": "AI Canvas: Open"
       }
     ]
   },
@@ -33,6 +42,7 @@
   "devDependencies": {
     "@types/vscode": "^1.108.1",
     "@types/mocha": "^10.0.10",
+    "@types/diff": "^5.2.0",
     "@types/node": "22.x",
     "typescript-eslint": "^8.52.0",
     "eslint": "^9.39.2",
