@@ -2,7 +2,7 @@
  * Canvas-specific types for ReactFlow nodes/edges and UI state.
  */
 
-import type { Node, Edge } from 'reactflow';
+import type { Node, Edge } from '@xyflow/react';
 import type { Entity, EntityId } from './entities';
 
 export type FocusMode = 'workspace' | 'bucket' | 'module';
@@ -13,10 +13,12 @@ export interface Viewport {
   zoom: number;
 }
 
-export interface BaseNodeData {
+export interface BaseNodeData extends Record<string, unknown> {
   entity: Entity;
   isInScope: boolean;
   isDimmed: boolean;
+  width?: number;
+  height?: number;
 }
 
 export interface BucketNodeData extends BaseNodeData {
@@ -49,7 +51,7 @@ export interface ApiContract {
   version: string;
 }
 
-export interface DependencyEdgeData {
+export interface DependencyEdgeData extends Record<string, unknown> {
   dependencyType: 'depends_on';
   hasApiContract: boolean;
   apiContract?: ApiContract;

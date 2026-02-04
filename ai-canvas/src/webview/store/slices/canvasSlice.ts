@@ -3,7 +3,7 @@
  */
 
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import type { Node, Edge } from 'reactflow';
+import type { Node, Edge } from '@xyflow/react';
 import type { EntityId } from '../../../shared/types/entities';
 import type { Viewport, DependencyEdgeData, ApiContract } from '../../../shared/types/canvas';
 
@@ -12,8 +12,14 @@ export interface NodePosition {
   y: number;
 }
 
+export interface NodeDimensions {
+  width: number;
+  height: number;
+}
+
 export interface CanvasState {
   nodePositions: Record<EntityId, NodePosition>;
+  nodeSizes: Record<EntityId, NodeDimensions>;
   edges: Edge<DependencyEdgeData>[];
   viewport: Viewport;
 }
@@ -26,6 +32,7 @@ const defaultViewport: Viewport = {
 
 const initialState: CanvasState = {
   nodePositions: {},
+  nodeSizes: {},
   edges: [],
   viewport: defaultViewport,
 };
@@ -51,6 +58,14 @@ const canvasSlice = createSlice({
 
     removeNodePosition(state, action: PayloadAction<EntityId>) {
       delete state.nodePositions[action.payload];
+    },
+
+    setNodeSize(
+      state,
+      action: PayloadAction<{ id: EntityId; size: NodeDimensions }>
+    ) {
+      const { id, size } = action.payload;
+      state.nodeSizes[id] = size;
     },
 
     setViewport(state, action: PayloadAction<Partial<Viewport>>) {
@@ -135,12 +150,14 @@ const canvasSlice = createSlice({
       state,
       action: PayloadAction<{
         nodePositions?: Record<EntityId, NodePosition>;
+        nodeSizes?: Record<EntityId, NodeDimensions>;
         edges?: Edge<DependencyEdgeData>[];
         viewport?: Viewport;
       }>
     ) {
-      const { nodePositions, edges, viewport } = action.payload;
+      const { nodePositions, nodeSizes, edges, viewport } = action.payload;
       if (nodePositions) state.nodePositions = nodePositions;
+      if (nodeSizes) state.nodeSizes = nodeSizes;
       if (edges) state.edges = edges;
       if (viewport) state.viewport = viewport;
     },
@@ -179,6 +196,7 @@ const canvasSlice = createSlice({
 export const {
   setNodePosition,
   setNodePositions,
+  setNodeSize,
   removeNodePosition,
   setViewport,
   addEdge,

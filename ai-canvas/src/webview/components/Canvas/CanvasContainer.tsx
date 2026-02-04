@@ -1,7 +1,6 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import {
   ReactFlow,
-  ReactFlowProvider,
   Controls,
   MiniMap,
   Background,
@@ -10,15 +9,22 @@ import {
   type OnNodesChange,
   type OnEdgesChange,
   type NodeMouseHandler,
-} from 'reactflow';
-import 'reactflow/dist/style.css';
+  type NodeTypes,
+  type EdgeTypes,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
 import { selectVisibleEntities } from '../../store/selectors/scopeSelectors';
 import { selectSelectedIds } from '../../store/selectors/scopeSelectors';
-import { setNodePosition, setViewport } from '../../store/slices/canvasSlice';
-import { setSelection, enterScope, setContextMenuWithPosition } from '../../store/slices/uiSlice';
+import { setNodePosition, setNodeSize, setViewport } from '../../store/slices/canvasSlice';
+import type { NodeDimensions } from '../../store/slices/canvasSlice';
+import { setSelection, enterScope, setContextMenuWithPosition, setDraggedNode, setPotentialParent } from '../../store/slices/uiSlice';
+import { setParent } from '../../store/slices/entitiesSlice';
+import { getParentId } from '../../store/selectors/entitySelectors';
+import type { Entity } from '../../../shared/types/entities';
+import { findPotentialParent } from '../../utils/collision';
 import type { EntityId } from '../../../shared/types/entities';
-import type { BucketNodeData, ModuleNodeData, BlockNodeData } from '../../../shared/types/canvas';
+import type { BucketNodeData, ModuleNodeData, BlockNodeData, CanvasNode, CanvasEdge } from '../../../shared/types/canvas';
 import type { Bucket, Module as ModuleEntity, Block } from '../../../shared/types/entities';
 import { BucketNode, ModuleNode, BlockNode } from '../nodes';
 import { DependencyEdge } from '../edges/DependencyEdge';
@@ -37,11 +43,15 @@ function buildNodeData(
   entity: Bucket | ModuleEntity | Block,
   selectedIds: EntityId[],
   byId: Record<EntityId, import('../../../shared/types/entities').Entity>,
-  edgesFromState: { source: string; target: string }[]
+  edgesFromState: { source: string; target: string }[],
+  nodeSizes: Record<EntityId, NodeDimensions>
 ): BucketNodeData | ModuleNodeData | BlockNodeData {
   const isInScope = true;
   const isDimmed = false;
   const selected = selectedIds.includes(entity.id);
+  const size = nodeSizes[entity.id];
+  const width = size?.width;
+  const height = size?.height;
 
   if (entity.type === 'bucket') {
     let modulesCount = 0;
@@ -55,6 +65,8 @@ function buildNodeData(
       entity,
       isInScope,
       isDimmed,
+      width,
+      height,
       modulesCount,
       blocksCount,
       progress: { done: 0, total: entity.children.length || 1 },
@@ -69,6 +81,8 @@ function buildNodeData(
       entity,
       isInScope,
       isDimmed,
+      width,
+      height,
       depsCount,
       blocksCount,
       progress: { done: 0, total: blocksCount || 1 },
@@ -82,6 +96,8 @@ function buildNodeData(
     entity,
     isInScope,
     isDimmed,
+    width,
+    height,
     fileIcon,
     testPassed: false,
   };
@@ -92,27 +108,34 @@ function CanvasInner() {
   const visibleEntities = useAppSelector(selectVisibleEntities);
   const selectedIds = useAppSelector(selectSelectedIds);
   const nodePositions = useAppSelector((s) => s.canvas.nodePositions);
+  const nodeSizes = useAppSelector((s) => s.canvas.nodeSizes);
   const edgesFromState = useAppSelector((s) => s.canvas.edges);
   const byId = useAppSelector((s) => s.entities.byId);
   const viewport = useAppSelector((s) => s.canvas.viewport);
+  const potentialParentId = useAppSelector((s) => s.ui.potentialParentId);
 
+  const originalParentRef = useRef<EntityId | null>(null);
   const visibleIds = useMemo(() => new Set(visibleEntities.map((e) => e.id)), [visibleEntities]);
 
-  const nodes: Node[] = useMemo(() => {
+  const entitiesArray = useMemo(() => Object.values(byId).filter(Boolean) as Entity[], [byId]);
+
+  const nodes: CanvasNode[] = useMemo(() => {
     return visibleEntities.map((entity) => {
       const position = nodePositions[entity.id] ?? { x: 0, y: 0 };
-      const data = buildNodeData(entity, selectedIds, byId, edgesFromState);
+      const data = buildNodeData(entity, selectedIds, byId, edgesFromState, nodeSizes);
+      const size = nodeSizes[entity.id];
       return {
         id: entity.id,
         type: entity.type,
         position,
         data,
         selected: selectedIds.includes(entity.id),
+        ...(size && { width: size.width, height: size.height }),
       };
     });
-  }, [visibleEntities, nodePositions, selectedIds, byId, edgesFromState]);
+  }, [visibleEntities, nodePositions, nodeSizes, selectedIds, byId, edgesFromState]);
 
-  const flowEdges: Edge[] = useMemo(() => {
+  const flowEdges: CanvasEdge[] = useMemo(() => {
     return edgesFromState.filter(
       (e) => visibleIds.has(e.source) && visibleIds.has(e.target)
     );
@@ -126,6 +149,18 @@ function CanvasInner() {
             setNodePosition({
               id: change.id,
               position: change.position,
+            })
+          );
+        }
+        if (change.type === 'dimensions' && change.dimensions) {
+          console.log('[CanvasContainer] dimensions change:', change.id, change.dimensions);
+          dispatch(
+            setNodeSize({
+              id: change.id,
+              size: {
+                width: change.dimensions.width,
+                height: change.dimensions.height,
+              },
             })
           );
         }
@@ -180,6 +215,54 @@ function CanvasInner() {
     [dispatch]
   );
 
+  const onNodeDragStart: NodeMouseHandler = useCallback(
+    (_event, node) => {
+      dispatch(setDraggedNode(node.id));
+      const parentId = getParentId(entitiesArray, node.id);
+      originalParentRef.current = parentId;
+    },
+    [dispatch, entitiesArray]
+  );
+
+  const onNodeDrag: NodeMouseHandler = useCallback(
+    (_event, node) => {
+      if (!node.position) return;
+      const size = nodeSizes[node.id] ?? { width: 160, height: 80 };
+      const allNodesWithSizes: Array<{
+        id: EntityId;
+        position: { x: number; y: number };
+        size: { width: number; height: number };
+        type: string;
+      }> = visibleEntities.map((e) => ({
+        id: e.id,
+        position: nodePositions[e.id] ?? { x: 0, y: 0 },
+        size: nodeSizes[e.id] ?? { width: 160, height: 80 },
+        type: e.type,
+      }));
+      const potentialParent = findPotentialParent(
+        node.id,
+        node.position,
+        size,
+        allNodesWithSizes,
+        byId
+      );
+      dispatch(setPotentialParent(potentialParent));
+    },
+    [dispatch, nodeSizes, visibleEntities, nodePositions, byId]
+  );
+
+  const onNodeDragStop: NodeMouseHandler = useCallback(
+    (_event, node) => {
+      if (potentialParentId && potentialParentId !== originalParentRef.current) {
+        dispatch(setParent({ childId: node.id, parentId: potentialParentId }));
+      }
+      dispatch(setDraggedNode(null));
+      dispatch(setPotentialParent(null));
+      originalParentRef.current = null;
+    },
+    [dispatch, potentialParentId]
+  );
+
   return (
     <ReactFlow
       nodes={nodes}
@@ -191,10 +274,13 @@ function CanvasInner() {
       onNodeDoubleClick={onNodeDoubleClick}
       onNodeContextMenu={onNodeContextMenu}
       onPaneClick={onPaneClick}
+      onNodeDragStart={onNodeDragStart}
+      onNodeDrag={onNodeDrag}
+      onNodeDragStop={onNodeDragStop}
       onMove={(_e, viewport) => onViewportChange(viewport)}
       onMoveEnd={(_e, viewport) => onViewportChange(viewport)}
-      nodeTypes={nodeTypes}
-      edgeTypes={edgeTypes}
+      nodeTypes={nodeTypes as NodeTypes}
+      edgeTypes={edgeTypes as EdgeTypes}
       fitView
       fitViewOptions={{ padding: 0.2 }}
       minZoom={0.2}
@@ -217,10 +303,8 @@ function CanvasInner() {
 
 export function CanvasContainer() {
   return (
-    <ReactFlowProvider>
-      <div style={{ width: '100%', height: '100%' }}>
-        <CanvasInner />
-      </div>
-    </ReactFlowProvider>
+    <div style={{ width: '100%', height: '100%' }}>
+      <CanvasInner />
+    </div>
   );
 }

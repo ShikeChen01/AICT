@@ -59,16 +59,18 @@ export const selectStateForSave = createSelector(
   [
     (state: RootState) => selectAllEntities(state),
     (state: RootState) => state.canvas.nodePositions,
+    (state: RootState) => state.canvas.nodeSizes,
     (state: RootState) => state.canvas.edges,
     (state: RootState) => state.canvas.viewport,
   ],
-  (entities, nodePositions, edges, viewport) => ({
+  (entities, nodePositions, nodeSizes, edges, viewport) => ({
     entities,
     canvas: {
       nodes: entities.map((e) => ({
         id: e.id,
         position: nodePositions[e.id] ?? { x: 0, y: 0 },
         type: e.type,
+        size: nodeSizes[e.id],
       })),
       edges: edges.map((e) => ({
         id: e.id,

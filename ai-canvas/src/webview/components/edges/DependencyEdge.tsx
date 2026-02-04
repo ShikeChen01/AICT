@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import {
   getBezierPath,
   BaseEdge,
+  type Edge,
   type EdgeProps,
-} from 'reactflow';
+} from '@xyflow/react';
 import type { DependencyEdgeData, ApiContract } from '../../../shared/types/canvas';
 
 const CONTRACT_CIRCLE_R = 8;
@@ -48,7 +49,7 @@ export function DependencyEdge({
   targetPosition,
   data,
   markerEnd,
-}: EdgeProps<DependencyEdgeData>) {
+}: EdgeProps<Edge<DependencyEdgeData>>) {
   const [path, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -58,15 +59,16 @@ export function DependencyEdge({
     targetPosition,
   });
   const [showTooltip, setShowTooltip] = useState(false);
-  const hasContract = data?.hasApiContract && data?.apiContract;
-  const contract = data?.apiContract;
+  const edgeData = data as DependencyEdgeData | undefined;
+  const hasContract = edgeData?.hasApiContract && edgeData?.apiContract;
+  const contract = edgeData?.apiContract;
 
   return (
     <>
       <BaseEdge
         id={id}
         path={path}
-        markerEnd={markerEnd}
+        markerEnd={markerEnd ?? undefined}
         style={{ strokeDasharray: '5,5' }}
       />
       {hasContract && contract && (

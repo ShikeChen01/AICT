@@ -82,7 +82,7 @@ export const selectVisibleEntityIds = createSelector(
     }
     const scopeEntity = entities.find((e) => e.id === scopeEntityId);
     if (!scopeEntity) return entities.map((e) => e.id);
-    const visibleIds = new Set<EntityId>([scopeEntity.id]);
+    const visibleIds = new Set<EntityId>();
     for (const childId of scopeEntity.children) {
       visibleIds.add(childId);
     }

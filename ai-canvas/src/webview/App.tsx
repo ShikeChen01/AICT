@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';
+import { ReactFlowProvider } from '@xyflow/react';
 import { store, type RootState } from './store/store';
 import { useAppSelector, useAppDispatch } from './store/hooks';
 import { loadEntities } from './store/slices/entitiesSlice';
@@ -67,8 +68,10 @@ function AppContent({ getApi }: { getApi: () => MessageChannelApi }) {
         dispatch(loadEntities(result.entities));
         if (result.canvas) {
           const nodePositions: Record<string, { x: number; y: number }> = {};
+          const nodeSizes: Record<string, { width: number; height: number }> = {};
           for (const n of result.canvas.nodes ?? []) {
             nodePositions[n.id] = n.position;
+            if (n.size) nodeSizes[n.id] = n.size;
           }
           const edges = (result.canvas.edges ?? []).map((e) => ({
             id: e.id,
@@ -83,6 +86,7 @@ function AppContent({ getApi }: { getApi: () => MessageChannelApi }) {
           dispatch(
             loadCanvas({
               nodePositions,
+              nodeSizes,
               edges,
               viewport: result.canvas.viewport,
             })
@@ -276,9 +280,11 @@ export function mountApp(getApi: () => MessageChannelApi) {
   const reactRoot = createRoot(root);
   reactRoot.render(
     <Provider store={store}>
-      <ErrorBoundary>
-        <App getApi={getApi} />
-      </ErrorBoundary>
+      <ReactFlowProvider>
+        <ErrorBoundary>
+          <App getApi={getApi} />
+        </ErrorBoundary>
+      </ReactFlowProvider>
     </Provider>
   );
 }

@@ -21,6 +21,8 @@ export interface UiState {
   contextMenuEntityId: EntityId | null;
   contextMenuPosition: { x: number; y: number } | null;
   bucketCreationOpen: boolean;
+  draggedNodeId: EntityId | null;
+  potentialParentId: EntityId | null;
 }
 
 const initialState: UiState = {
@@ -38,6 +40,8 @@ const initialState: UiState = {
   contextMenuEntityId: null,
   contextMenuPosition: null,
   bucketCreationOpen: false,
+  draggedNodeId: null,
+  potentialParentId: null,
 };
 
 const uiSlice = createSlice({
@@ -148,6 +152,14 @@ const uiSlice = createSlice({
     setBucketCreationOpen(state, action: PayloadAction<boolean>) {
       state.bucketCreationOpen = action.payload;
     },
+
+    setDraggedNode(state, action: PayloadAction<EntityId | null>) {
+      state.draggedNodeId = action.payload;
+    },
+
+    setPotentialParent(state, action: PayloadAction<EntityId | null>) {
+      state.potentialParentId = action.payload;
+    },
   },
 });
 
@@ -168,6 +180,8 @@ export const {
   setContextMenu,
   setContextMenuWithPosition,
   setBucketCreationOpen,
+  setDraggedNode,
+  setPotentialParent,
 } = uiSlice.actions;
 
 export default uiSlice.reducer;

@@ -35,7 +35,12 @@ export function isRpcError(r: RpcResponse): r is RpcResponseError {
 }
 
 export interface CanvasLayout {
-  nodes: Array<{ id: string; position: { x: number; y: number }; type?: string }>;
+  nodes: Array<{
+    id: string;
+    position: { x: number; y: number };
+    type?: string;
+    size?: { width: number; height: number };
+  }>;
   edges: Array<{ id: string; source: string; target: string; type?: string }>;
   viewport?: { x: number; y: number; zoom: number };
 }
