@@ -8,16 +8,18 @@ import {
   type Edge,
   type OnNodesChange,
   type OnEdgesChange,
+  type OnConnect,
   type NodeMouseHandler,
   type NodeTypes,
   type EdgeTypes,
+  ConnectionLineType,
+  ConnectionMode,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
 import { selectVisibleEntities } from '../../store/selectors/scopeSelectors';
 import { selectSelectedIds } from '../../store/selectors/scopeSelectors';
-import { setNodePosition, setNodeSize, setViewport } from '../../store/slices/canvasSlice';
-import type { NodeDimensions } from '../../store/slices/canvasSlice';
+import { setNodePosition, setNodeSize, setViewport, addEdge } from '../../store/slices/canvasSlice';
 import { setSelection, enterScope, setContextMenuWithPosition, setDraggedNode, setPotentialParent } from '../../store/slices/uiSlice';
 import { setParent } from '../../store/slices/entitiesSlice';
 import { getParentId } from '../../store/selectors/entitySelectors';
@@ -43,15 +45,10 @@ function buildNodeData(
   entity: Bucket | ModuleEntity | Block,
   selectedIds: EntityId[],
   byId: Record<EntityId, import('../../../shared/types/entities').Entity>,
-  edgesFromState: { source: string; target: string }[],
-  nodeSizes: Record<EntityId, NodeDimensions>
+  edgesFromState: { source: string; target: string }[]
 ): BucketNodeData | ModuleNodeData | BlockNodeData {
   const isInScope = true;
   const isDimmed = false;
-  const selected = selectedIds.includes(entity.id);
-  const size = nodeSizes[entity.id];
-  const width = size?.width;
-  const height = size?.height;
 
   if (entity.type === 'bucket') {
     let modulesCount = 0;
@@ -65,8 +62,6 @@ function buildNodeData(
       entity,
       isInScope,
       isDimmed,
-      width,
-      height,
       modulesCount,
       blocksCount,
       progress: { done: 0, total: entity.children.length || 1 },
@@ -81,8 +76,6 @@ function buildNodeData(
       entity,
       isInScope,
       isDimmed,
-      width,
-      height,
       depsCount,
       blocksCount,
       progress: { done: 0, total: blocksCount || 1 },
@@ -96,8 +89,6 @@ function buildNodeData(
     entity,
     isInScope,
     isDimmed,
-    width,
-    height,
     fileIcon,
     testPassed: false,
   };
@@ -122,7 +113,7 @@ function CanvasInner() {
   const nodes: CanvasNode[] = useMemo(() => {
     return visibleEntities.map((entity) => {
       const position = nodePositions[entity.id] ?? { x: 0, y: 0 };
-      const data = buildNodeData(entity, selectedIds, byId, edgesFromState, nodeSizes);
+      const data = buildNodeData(entity, selectedIds, byId, edgesFromState);
       const size = nodeSizes[entity.id];
       return {
         id: entity.id,
@@ -170,6 +161,18 @@ function CanvasInner() {
   );
 
   const onEdgesChange: OnEdgesChange = useCallback(() => {}, []);
+
+  const onConnect: OnConnect = useCallback(
+    (connection) => {
+      if (connection.source && connection.target && connection.source !== connection.target) {
+        dispatch(addEdge({
+          source: connection.source,
+          target: connection.target,
+        }));
+      }
+    },
+    [dispatch]
+  );
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
@@ -270,6 +273,7 @@ function CanvasInner() {
       defaultViewport={{ x: viewport.x, y: viewport.y, zoom: viewport.zoom }}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
+      onConnect={onConnect}
       onNodeClick={onNodeClick}
       onNodeDoubleClick={onNodeDoubleClick}
       onNodeContextMenu={onNodeContextMenu}
@@ -281,6 +285,12 @@ function CanvasInner() {
       onMoveEnd={(_e, viewport) => onViewportChange(viewport)}
       nodeTypes={nodeTypes as NodeTypes}
       edgeTypes={edgeTypes as EdgeTypes}
+      connectionMode={ConnectionMode.Loose}
+      connectionLineType={ConnectionLineType.Bezier}
+      connectionLineStyle={{ stroke: 'var(--color-focus-border)', strokeWidth: 2 }}
+      nodesDraggable
+      nodesConnectable
+      elementsSelectable
       fitView
       fitViewOptions={{ padding: 0.2 }}
       minZoom={0.2}

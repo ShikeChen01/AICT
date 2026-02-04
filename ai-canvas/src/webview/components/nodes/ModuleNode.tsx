@@ -1,5 +1,5 @@
 import React from 'react';
-import { type Node, type NodeProps, NodeResizer } from '@xyflow/react';
+import { type Node, type NodeProps, NodeResizer, Handle, Position } from '@xyflow/react';
 import { useAppSelector } from '../../store/hooks';
 import type { ModuleNodeData } from '../../../shared/types/canvas';
 
@@ -37,13 +37,11 @@ const summaryStyle: React.CSSProperties = {
 
 export function ModuleNode(props: NodeProps<Node<ModuleNodeData, 'module'>>) {
   const { data, selected, id } = props;
-  const { entity, isDimmed, blocksCount, depsCount, progress, width, height } = data;
+  const { entity, isDimmed, blocksCount, depsCount, progress } = data;
   const potentialParentId = useAppSelector((s) => s.ui.potentialParentId);
   const isDropTarget = potentialParentId === id;
   const total = progress.total || 1;
   const done = progress.done ?? 0;
-  const w = width ?? MODULE_DEFAULT_WIDTH;
-  const h = height ?? MODULE_DEFAULT_HEIGHT;
 
   return (
     <>
@@ -56,11 +54,15 @@ export function ModuleNode(props: NodeProps<Node<ModuleNodeData, 'module'>>) {
         color="var(--color-module)"
         handleStyle={{ borderRadius: 2 }}
       />
+      {/* Connection handles - 4 side middles only (corners reserved for NodeResizer) */}
+      <Handle type="source" position={Position.Top} id="top" isConnectable style={{ left: '50%' }} />
+      <Handle type="source" position={Position.Left} id="left" isConnectable style={{ top: '50%' }} />
+      <Handle type="source" position={Position.Right} id="right" isConnectable style={{ top: '50%' }} />
+      <Handle type="source" position={Position.Bottom} id="bottom" isConnectable style={{ left: '50%' }} />
+
       <div
         style={{
           ...cardStyle,
-          width: w,
-          height: h,
           opacity: isDimmed ? 0.5 : 1,
           border: isDropTarget ? '3px dashed var(--color-focus-border)' : cardStyle.border,
           transition: 'border 0.15s ease',

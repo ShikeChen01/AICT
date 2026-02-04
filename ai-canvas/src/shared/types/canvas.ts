@@ -17,8 +17,6 @@ export interface BaseNodeData extends Record<string, unknown> {
   entity: Entity;
   isInScope: boolean;
   isDimmed: boolean;
-  width?: number;
-  height?: number;
 }
 
 export interface BucketNodeData extends BaseNodeData {

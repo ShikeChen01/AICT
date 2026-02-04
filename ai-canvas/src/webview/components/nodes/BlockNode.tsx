@@ -1,5 +1,5 @@
 import React from 'react';
-import { type Node, type NodeProps, NodeResizer } from '@xyflow/react';
+import { type Node, type NodeProps, NodeResizer, Handle, Position } from '@xyflow/react';
 import { useAppSelector } from '../../store/hooks';
 import type { BlockNodeData } from '../../../shared/types/canvas';
 
@@ -32,13 +32,11 @@ const extBadgeStyle: React.CSSProperties = {
 
 export function BlockNode(props: NodeProps<Node<BlockNodeData, 'block'>>) {
   const { data, selected, id } = props;
-  const { entity, isDimmed, fileIcon, testPassed, width, height } = data;
+  const { entity, isDimmed, fileIcon, testPassed } = data;
   const potentialParentId = useAppSelector((s) => s.ui.potentialParentId);
   const isDropTarget = potentialParentId === id;
   const path = (entity as { path?: string }).path ?? '';
   const ext = path ? path.split('.').pop() ?? '' : '';
-  const w = width ?? BLOCK_DEFAULT_WIDTH;
-  const h = height ?? BLOCK_DEFAULT_HEIGHT;
 
   return (
     <>
@@ -51,11 +49,15 @@ export function BlockNode(props: NodeProps<Node<BlockNodeData, 'block'>>) {
         color="var(--color-block)"
         handleStyle={{ borderRadius: 2 }}
       />
+      {/* Connection handles - 4 side middles only (corners reserved for NodeResizer) */}
+      <Handle type="source" position={Position.Top} id="top" isConnectable style={{ left: '50%' }} />
+      <Handle type="source" position={Position.Left} id="left" isConnectable style={{ top: '50%' }} />
+      <Handle type="source" position={Position.Right} id="right" isConnectable style={{ top: '50%' }} />
+      <Handle type="source" position={Position.Bottom} id="bottom" isConnectable style={{ left: '50%' }} />
+
       <div
         style={{
           ...chipStyle,
-          width: w,
-          height: h,
           opacity: isDimmed ? 0.5 : 1,
           border: isDropTarget ? '3px dashed var(--color-focus-border)' : chipStyle.border,
           transition: 'border 0.15s ease',
