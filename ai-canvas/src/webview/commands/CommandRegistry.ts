@@ -21,6 +21,7 @@ import {
   addEdge,
   updateEdge,
   removeEdge,
+  removeEdgesForNode,
   setNodePosition,
   setNodeSize,
   setViewport,
@@ -44,14 +45,28 @@ export class CommandRegistry {
 
   execute(command: CanvasCommand): CommandResult {
     try {
-      const inverse = this.computeInverse(command);
+      let inverse = this.computeInverse(command);
       const result = this.executeCommand(command);
-      if (result.success && inverse) {
-        this.history.push({
-          command,
-          inverse,
-          timestamp: Date.now(),
-        });
+      if (result.success) {
+        if (!inverse && command.type === 'CREATE_EDGE' && result.data) {
+          inverse = {
+            type: 'DELETE_EDGE',
+            payload: { id: (result.data as { id: string }).id },
+          };
+        }
+        if (!inverse && command.type === 'CREATE_ENTITY' && result.data) {
+          inverse = {
+            type: 'DELETE_ENTITY',
+            payload: { id: (result.data as Entity).id },
+          };
+        }
+        if (inverse) {
+          this.history.push({
+            command,
+            inverse,
+            timestamp: Date.now(),
+          });
+        }
       }
       return result;
     } catch (e) {
@@ -119,6 +134,7 @@ export class CommandRegistry {
         return { success: true };
       }
       case 'DELETE_ENTITY': {
+        this.dispatch(removeEdgesForNode(command.payload.id));
         this.dispatch(removeEntity(command.payload.id));
         return { success: true };
       }

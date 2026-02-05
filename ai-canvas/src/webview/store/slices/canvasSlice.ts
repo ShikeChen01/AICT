@@ -114,6 +114,13 @@ const canvasSlice = createSlice({
       state.edges = state.edges.filter((e) => e.id !== action.payload);
     },
 
+    removeEdgesForNode(state, action: PayloadAction<string>) {
+      const nodeId = action.payload;
+      state.edges = state.edges.filter(
+        (e) => e.nodes[0] !== nodeId && e.nodes[1] !== nodeId
+      );
+    },
+
     updateEdgeData(
       state,
       action: PayloadAction<{
@@ -202,6 +209,7 @@ export const {
   addEdge,
   updateEdge,
   removeEdge,
+  removeEdgesForNode,
   updateEdgeData,
   setEdgeApiContract,
   loadCanvas,

@@ -40,6 +40,7 @@ export interface DependencyEdgeViewProps {
   pos0: Position;
   pos1: Position;
   onEndpointPointerDown: (index: 0 | 1, e: React.PointerEvent) => void;
+  onEdgeClick?: () => void;
 }
 
 export const DependencyEdgeView = memo(function DependencyEdgeView({
@@ -47,6 +48,7 @@ export const DependencyEdgeView = memo(function DependencyEdgeView({
   pos0,
   pos1,
   onEndpointPointerDown,
+  onEdgeClick,
 }: DependencyEdgeViewProps) {
   const [showTooltip, setShowTooltip] = useState(false);
   const pathD = model.getPath(pos0, pos1);
@@ -60,13 +62,26 @@ export const DependencyEdgeView = memo(function DependencyEdgeView({
 
   return (
     <g className={`dependency-edge ${model.selected ? 'selected' : ''}`}>
+      {onEdgeClick && (
+        <path
+          d={pathD}
+          fill="none"
+          stroke="transparent"
+          strokeWidth={12}
+          style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdgeClick();
+          }}
+        />
+      )}
       <path
         d={pathD}
         fill="none"
         stroke="var(--color-foreground)"
         strokeWidth={2}
         strokeDasharray="5,5"
-        style={{ filter: 'invert(1) hue-rotate(180deg)' }}
+        style={{ filter: 'invert(1) hue-rotate(180deg)', pointerEvents: 'none' }}
       />
       {hasContract && contract && (
         <g

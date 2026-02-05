@@ -107,6 +107,19 @@ function CanvasInner() {
     interactionRef.current = { type: null }; // reconnect is handled separately
   }, [controller]);
 
+  const handleEdgeClick = useCallback((edgeId: string) => {
+    controller.select(edgeId);
+  }, [controller]);
+
+  const handleHandlePointerDown = useCallback(
+    (nodeId: string, handlePos: Position, e: React.PointerEvent) => {
+      controller.startConnect(nodeId, handlePos);
+      interactionRef.current = { type: 'connect' };
+      containerRef.current?.setPointerCapture(e.pointerId);
+    },
+    [controller]
+  );
+
   // Pointer event handlers
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (!containerRef.current) return;
@@ -296,12 +309,14 @@ function CanvasInner() {
           edges={edges}
           nodes={nodes}
           onEdgeEndpointPointerDown={handleEdgeEndpointPointerDown}
+          onEdgeClick={handleEdgeClick}
         />
         <NodeLayer
           nodes={nodes}
           onSelect={handleSelect}
           onDoubleClick={handleDoubleClick}
           onContextMenu={handleContextMenu}
+          onHandlePointerDown={handleHandlePointerDown}
         />
       </div>
       

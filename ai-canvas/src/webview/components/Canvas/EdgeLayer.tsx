@@ -2,6 +2,8 @@ import React from 'react';
 import type { BaseEdge } from '../FlowDiagram/core/BaseEdge';
 import type { BaseNode } from '../FlowDiagram/core/BaseNode';
 import type { EndpointIndex, Position } from '../FlowDiagram/core/types';
+import { DependencyEdgeView } from '../edges/DependencyEdge';
+import type { DependencyEdgeModel } from '../edges/DependencyEdgeModel';
 
 interface EdgeLayerProps {
   edges: BaseEdge[];
@@ -14,6 +16,7 @@ interface EdgeLayerProps {
     pos1: Position,
     e: React.PointerEvent
   ) => void;
+  onEdgeClick: (edgeId: string) => void;
 }
 
 function getConnectionPoint(
@@ -38,6 +41,7 @@ export function EdgeLayer({
   edges,
   nodes,
   onEdgeEndpointPointerDown,
+  onEdgeClick,
 }: EdgeLayerProps) {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
@@ -50,7 +54,7 @@ export function EdgeLayer({
         left: 0,
         width: '100%',
         height: '100%',
-        pointerEvents: 'none',
+        pointerEvents: 'auto',
       }}
     >
       {edges.map((edge) => {
@@ -59,9 +63,36 @@ export function EdgeLayer({
         if (!node0 || !node1) return null;
         const pos0 = getConnectionPoint(node0, node1);
         const pos1 = getConnectionPoint(node1, node0);
+
+        if (edge.type === 'dependency') {
+          return (
+            <g
+              key={edge.id}
+              className={`edge ${edge.type}-edge ${edge.selected ? 'selected' : ''}`}
+              style={{ pointerEvents: 'stroke' }}
+            >
+              <DependencyEdgeView
+                model={edge as DependencyEdgeModel}
+                pos0={pos0}
+                pos1={pos1}
+                onEndpointPointerDown={(index, e) =>
+                  onEdgeEndpointPointerDown(
+                    edge.id,
+                    index,
+                    edge.nodes,
+                    pos0,
+                    pos1,
+                    e
+                  )
+                }
+                onEdgeClick={() => onEdgeClick(edge.id)}
+              />
+            </g>
+          );
+        }
+
         const pathD = edge.getPath(pos0, pos1);
         const endpoints = edge.getEndpointBounds(pos0, pos1);
-
         return (
           <g
             key={edge.id}
@@ -71,9 +102,20 @@ export function EdgeLayer({
             <path
               d={pathD}
               fill="none"
+              stroke="transparent"
+              strokeWidth={12}
+              style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdgeClick(edge.id);
+              }}
+            />
+            <path
+              d={pathD}
+              fill="none"
               stroke="var(--color-foreground)"
               strokeWidth={2}
-              style={{ filter: 'invert(1) hue-rotate(180deg)' }}
+              style={{ filter: 'invert(1) hue-rotate(180deg)', pointerEvents: 'none' }}
             />
             {edge.selected && (
               <>
