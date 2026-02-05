@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';
-import { ReactFlowProvider } from '@xyflow/react';
 import { store, type RootState } from './store/store';
 import { useAppSelector, useAppDispatch } from './store/hooks';
 import { loadEntities } from './store/slices/entitiesSlice';
@@ -75,8 +74,7 @@ function AppContent({ getApi }: { getApi: () => MessageChannelApi }) {
           }
           const edges = (result.canvas.edges ?? []).map((e) => ({
             id: e.id,
-            source: e.source,
-            target: e.target,
+            nodes: [e.source, e.target] as [string, string],
             type: 'dependency' as const,
             data: {
               dependencyType: 'depends_on' as const,
@@ -195,8 +193,7 @@ function AppContent({ getApi }: { getApi: () => MessageChannelApi }) {
                     }
                     const edges = (result.canvas.edges ?? []).map((e) => ({
                       id: e.id,
-                      source: e.source,
-                      target: e.target,
+                      nodes: [e.source, e.target] as [string, string],
                       type: 'dependency' as const,
                       data: { dependencyType: 'depends_on' as const, hasApiContract: false },
                     }));
@@ -280,11 +277,9 @@ export function mountApp(getApi: () => MessageChannelApi) {
   const reactRoot = createRoot(root);
   reactRoot.render(
     <Provider store={store}>
-      <ReactFlowProvider>
-        <ErrorBoundary>
-          <App getApi={getApi} />
-        </ErrorBoundary>
-      </ReactFlowProvider>
+      <ErrorBoundary>
+        <App getApi={getApi} />
+      </ErrorBoundary>
     </Provider>
   );
 }

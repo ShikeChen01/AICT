@@ -1,12 +1,9 @@
-import React from 'react';
-import { type Node, type NodeProps, NodeResizer, Handle, Position } from '@xyflow/react';
-import { useAppSelector } from '../../store/hooks';
-import type { BucketNodeData } from '../../../shared/types/canvas';
+import React, { memo } from 'react';
+import type { Bucket } from '../../../shared/types/entities';
+import type { BucketNodeModel } from './BucketNodeModel';
 
 const BUCKET_MIN_WIDTH = 200;
 const BUCKET_MIN_HEIGHT = 120;
-const BUCKET_DEFAULT_WIDTH = 280;
-const BUCKET_DEFAULT_HEIGHT = 140;
 
 const frameStyle: React.CSSProperties = {
   minWidth: BUCKET_MIN_WIDTH,
@@ -46,50 +43,56 @@ const bodyStyle: React.CSSProperties = {
   color: 'var(--color-foreground)',
 };
 
-export function BucketNode(props: NodeProps<Node<BucketNodeData, 'bucket'>>) {
-  const { data, selected, id } = props;
-  const { entity, isDimmed, modulesCount, blocksCount, progress } = data;
-  const potentialParentId = useAppSelector((s) => s.ui.potentialParentId);
-  const isDropTarget = potentialParentId === id;
-  const total = progress.total || 1;
-  const done = progress.done ?? 0;
+export interface BucketNodeViewProps {
+  model: BucketNodeModel;
+  onSelect: () => void;
+  onDoubleClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+  isDropTarget?: boolean;
+}
+
+export const BucketNodeView = memo(function BucketNodeView({
+  model,
+  onSelect,
+  onDoubleClick,
+  onContextMenu,
+  isDropTarget,
+}: BucketNodeViewProps) {
+  const entity = model.data as Bucket;
+  const modulesCount = Array.isArray(entity.children) ? entity.children.length : 0;
+  const blocksCount = 0;
+  const total = modulesCount || 1;
+  const done = 0;
 
   return (
-    <>
-      <NodeResizer
-        isVisible={selected}
-        minWidth={BUCKET_MIN_WIDTH}
-        minHeight={BUCKET_MIN_HEIGHT}
-        maxWidth={800}
-        maxHeight={600}
-        color="var(--color-bucket)"
-        handleStyle={{ borderRadius: 2 }}
-      />
-      {/* Connection handles - 4 side middles only (corners reserved for NodeResizer) */}
-      <Handle type="source" position={Position.Top} id="top" isConnectable style={{ left: '50%' }} />
-      <Handle type="source" position={Position.Left} id="left" isConnectable style={{ top: '50%' }} />
-      <Handle type="source" position={Position.Right} id="right" isConnectable style={{ top: '50%' }} />
-      <Handle type="source" position={Position.Bottom} id="bottom" isConnectable style={{ left: '50%' }} />
-
-      <div
-        style={{
-          ...frameStyle,
-          opacity: isDimmed ? 0.5 : 1,
-          border: isDropTarget ? '3px dashed var(--color-focus-border)' : frameStyle.border,
-          transition: 'border 0.15s ease',
-        }}
-      >
-        <div style={headerStyle}>
-          <span>{entity.name}</span>
-          <span style={{ fontSize: 'var(--font-size-xs)', opacity: 0.9 }}>Bucket</span>
-        </div>
-        <div style={statusStripStyle}>
-          {done}/{total} · {modulesCount} modules · {blocksCount} blocks
-        </div>
-        <div style={bodyStyle}>
-          {entity.purpose || 'No description'}
-        </div>
+    <div
+      role="button"
+      tabIndex={0}
+      style={{
+        position: 'absolute',
+        left: model.position.x,
+        top: model.position.y,
+        width: model.size.width,
+        height: model.size.height,
+        ...frameStyle,
+        border: isDropTarget ? '3px dashed var(--color-focus-border)' : frameStyle.border,
+        boxShadow: model.selected ? '0 0 0 2px var(--color-focus-border)' : undefined,
+        transition: 'border 0.15s ease, box-shadow 0.15s ease',
+      }}
+      onClick={(e) => { e.stopPropagation(); onSelect(); }}
+      onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick(); }}
+      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e); }}
+    >
+      <div style={headerStyle}>
+        <span>{entity.name}</span>
+        <span style={{ fontSize: 'var(--font-size-xs)', opacity: 0.9 }}>Bucket</span>
       </div>
-    </>
+      <div style={statusStripStyle}>
+        {done}/{total} · {modulesCount} modules · {blocksCount} blocks
+      </div>
+      <div style={bodyStyle}>
+        {entity.purpose || 'No description'}
+      </div>
+    </div>
   );
-}
+});

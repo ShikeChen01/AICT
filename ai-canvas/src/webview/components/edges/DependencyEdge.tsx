@@ -1,11 +1,7 @@
-import React, { useState } from 'react';
-import {
-  getBezierPath,
-  BaseEdge,
-  type Edge,
-  type EdgeProps,
-} from '@xyflow/react';
+import React, { useState, memo } from 'react';
 import type { DependencyEdgeData, ApiContract } from '../../../shared/types/canvas';
+import type { DependencyEdgeModel } from './DependencyEdgeModel';
+import type { Position } from '../FlowDiagram/core/types';
 
 const CONTRACT_CIRCLE_R = 8;
 
@@ -39,41 +35,42 @@ function ContractTooltip({ contract, x, y }: { contract: ApiContract; x: number;
   );
 }
 
-export function DependencyEdge({
-  id,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
-  sourcePosition,
-  targetPosition,
-  data,
-  markerEnd,
-}: EdgeProps<Edge<DependencyEdgeData>>) {
-  const [path, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-  });
+export interface DependencyEdgeViewProps {
+  model: DependencyEdgeModel;
+  pos0: Position;
+  pos1: Position;
+  onEndpointPointerDown: (index: 0 | 1, e: React.PointerEvent) => void;
+}
+
+export const DependencyEdgeView = memo(function DependencyEdgeView({
+  model,
+  pos0,
+  pos1,
+  onEndpointPointerDown,
+}: DependencyEdgeViewProps) {
   const [showTooltip, setShowTooltip] = useState(false);
-  const edgeData = data as DependencyEdgeData | undefined;
+  const pathD = model.getPath(pos0, pos1);
+  const edgeData = model.data as DependencyEdgeData | undefined;
   const hasContract = edgeData?.hasApiContract && edgeData?.apiContract;
   const contract = edgeData?.apiContract;
+  
+  // Calculate midpoint for contract indicator
+  const midX = (pos0.x + pos1.x) / 2;
+  const midY = (pos0.y + pos1.y) / 2;
 
   return (
-    <>
-      <BaseEdge
-        id={id}
-        path={path}
-        markerEnd={markerEnd ?? undefined}
-        style={{ strokeDasharray: '5,5' }}
+    <g className={`dependency-edge ${model.selected ? 'selected' : ''}`}>
+      <path
+        d={pathD}
+        fill="none"
+        stroke="var(--color-foreground)"
+        strokeWidth={2}
+        strokeDasharray="5,5"
+        style={{ filter: 'invert(1) hue-rotate(180deg)' }}
       />
       {hasContract && contract && (
         <g
-          transform={`translate(${labelX}, ${labelY})`}
+          transform={`translate(${midX}, ${midY})`}
           onMouseEnter={() => setShowTooltip(true)}
           onMouseLeave={() => setShowTooltip(false)}
           style={{ cursor: 'pointer' }}
@@ -89,6 +86,37 @@ export function DependencyEdge({
           )}
         </g>
       )}
-    </>
+      {/* Endpoint circles for reconnection (only visible when selected) */}
+      {model.selected && (
+        <>
+          <circle
+            cx={pos0.x}
+            cy={pos0.y}
+            r={6}
+            fill="var(--color-focus-border)"
+            stroke="var(--color-background)"
+            strokeWidth={2}
+            style={{ cursor: 'grab', pointerEvents: 'all' }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              onEndpointPointerDown(0, e);
+            }}
+          />
+          <circle
+            cx={pos1.x}
+            cy={pos1.y}
+            r={6}
+            fill="var(--color-focus-border)"
+            stroke="var(--color-background)"
+            strokeWidth={2}
+            style={{ cursor: 'grab', pointerEvents: 'all' }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              onEndpointPointerDown(1, e);
+            }}
+          />
+        </>
+      )}
+    </g>
   );
-}
+});

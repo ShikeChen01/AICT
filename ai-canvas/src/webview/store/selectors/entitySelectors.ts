@@ -74,8 +74,8 @@ export const selectStateForSave = createSelector(
       })),
       edges: edges.map((e) => ({
         id: e.id,
-        source: e.source,
-        target: e.target,
+        source: e.nodes[0],
+        target: e.nodes[1],
         type: e.type,
       })),
       viewport,

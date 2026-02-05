@@ -1,12 +1,9 @@
-import React from 'react';
-import { type Node, type NodeProps, NodeResizer, Handle, Position } from '@xyflow/react';
-import { useAppSelector } from '../../store/hooks';
-import type { BlockNodeData } from '../../../shared/types/canvas';
+import React, { memo } from 'react';
+import type { BlockNodeModel } from './BlockNodeModel';
+import type { Block } from '../../../shared/types/entities';
 
 const BLOCK_MIN_WIDTH = 90;
 const BLOCK_MIN_HEIGHT = 32;
-const BLOCK_DEFAULT_WIDTH = 120;
-const BLOCK_DEFAULT_HEIGHT = 36;
 
 const chipStyle: React.CSSProperties = {
   display: 'inline-flex',
@@ -30,44 +27,47 @@ const extBadgeStyle: React.CSSProperties = {
   marginLeft: 2,
 };
 
-export function BlockNode(props: NodeProps<Node<BlockNodeData, 'block'>>) {
-  const { data, selected, id } = props;
-  const { entity, isDimmed, fileIcon, testPassed } = data;
-  const potentialParentId = useAppSelector((s) => s.ui.potentialParentId);
-  const isDropTarget = potentialParentId === id;
-  const path = (entity as { path?: string }).path ?? '';
-  const ext = path ? path.split('.').pop() ?? '' : '';
-
-  return (
-    <>
-      <NodeResizer
-        isVisible={selected}
-        minWidth={BLOCK_MIN_WIDTH}
-        minHeight={BLOCK_MIN_HEIGHT}
-        maxWidth={300}
-        maxHeight={100}
-        color="var(--color-block)"
-        handleStyle={{ borderRadius: 2 }}
-      />
-      {/* Connection handles - 4 side middles only (corners reserved for NodeResizer) */}
-      <Handle type="source" position={Position.Top} id="top" isConnectable style={{ left: '50%' }} />
-      <Handle type="source" position={Position.Left} id="left" isConnectable style={{ top: '50%' }} />
-      <Handle type="source" position={Position.Right} id="right" isConnectable style={{ top: '50%' }} />
-      <Handle type="source" position={Position.Bottom} id="bottom" isConnectable style={{ left: '50%' }} />
-
-      <div
-        style={{
-          ...chipStyle,
-          opacity: isDimmed ? 0.5 : 1,
-          border: isDropTarget ? '3px dashed var(--color-focus-border)' : chipStyle.border,
-          transition: 'border 0.15s ease',
-          boxShadow: testPassed ? '0 0 8px rgba(76, 175, 80, 0.5)' : undefined,
-        }}
-      >
-        <span style={{ fontSize: '1em' }}>{fileIcon === '📄' ? '📄' : `[${fileIcon}]`}</span>
-        <span>{entity.name}</span>
-        {ext && <span style={extBadgeStyle}>.{ext}</span>}
-      </div>
-    </>
-  );
+export interface BlockNodeViewProps {
+  model: BlockNodeModel;
+  onSelect: () => void;
+  onDoubleClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+  isDropTarget?: boolean;
 }
+
+export const BlockNodeView = memo(function BlockNodeView({
+  model,
+  onSelect,
+  onDoubleClick,
+  onContextMenu,
+  isDropTarget,
+}: BlockNodeViewProps) {
+  const entity = model.data as Block;
+  const path = entity.path ?? '';
+  const ext = path ? path.split('.').pop() ?? '' : '';
+  const fileIcon = ext ? `.${ext}` : '📄';
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      style={{
+        position: 'absolute',
+        left: model.position.x,
+        top: model.position.y,
+        width: model.size.width,
+        height: model.size.height,
+        ...chipStyle,
+        border: isDropTarget ? '3px dashed var(--color-focus-border)' : chipStyle.border,
+        boxShadow: model.selected ? '0 0 0 2px var(--color-focus-border)' : undefined,
+        transition: 'border 0.15s ease, box-shadow 0.15s ease',
+      }}
+      onClick={(e) => { e.stopPropagation(); onSelect(); }}
+      onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick(); }}
+      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e); }}
+    >
+      <span style={{ fontSize: '1em' }}>{fileIcon === '📄' ? '📄' : `[${fileIcon}]`}</span>
+      <span>{entity.name}</span>
+      {ext && <span style={extBadgeStyle}>.{ext}</span>}
+    </div>
+  );
+});

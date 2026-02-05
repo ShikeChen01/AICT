@@ -1,11 +1,15 @@
 /**
- * Redux slice for ReactFlow canvas state: nodes, edges, viewport.
+ * Redux slice for canvas state: nodes, edges, viewport.
  */
 
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import type { Node, Edge } from '@xyflow/react';
 import type { EntityId } from '../../../shared/types/entities';
-import type { Viewport, DependencyEdgeData, ApiContract } from '../../../shared/types/canvas';
+import type {
+  Viewport,
+  CanvasEdge,
+  DependencyEdgeData,
+  ApiContract,
+} from '../../../shared/types/canvas';
 
 export interface NodePosition {
   x: number;
@@ -20,7 +24,7 @@ export interface NodeDimensions {
 export interface CanvasState {
   nodePositions: Record<EntityId, NodePosition>;
   nodeSizes: Record<EntityId, NodeDimensions>;
-  edges: Edge<DependencyEdgeData>[];
+  edges: CanvasEdge[];
   viewport: Viewport;
 }
 
@@ -75,20 +79,19 @@ const canvasSlice = createSlice({
     addEdge(
       state,
       action: PayloadAction<{
-        source: EntityId;
-        target: EntityId;
+        id: string;
+        nodes: [EntityId, EntityId];
+        type?: 'dependency' | 'api';
         data?: Partial<DependencyEdgeData>;
       }>
     ) {
-      const { source, target, data = {} } = action.payload;
-      const id = `e-${source}-${target}`;
+      const { id, nodes, type = 'dependency', data = {} } = action.payload;
       const existing = state.edges.find((e) => e.id === id);
       if (existing) return;
       state.edges.push({
         id,
-        source,
-        target,
-        type: 'dependency',
+        nodes,
+        type,
         data: {
           dependencyType: 'depends_on',
           hasApiContract: false,
@@ -97,32 +100,29 @@ const canvasSlice = createSlice({
       });
     },
 
-    removeEdge(
+    updateEdge(
       state,
-      action: PayloadAction<{ source: EntityId; target: EntityId } | string>
+      action: PayloadAction<{ id: string; nodes: [EntityId, EntityId] }>
     ) {
-      if (typeof action.payload === 'string') {
-        state.edges = state.edges.filter((e) => e.id !== action.payload);
-        return;
+      const idx = state.edges.findIndex((e) => e.id === action.payload.id);
+      if (idx !== -1) {
+        state.edges[idx].nodes = action.payload.nodes;
       }
-      const { source, target } = action.payload;
-      state.edges = state.edges.filter(
-        (e) => !(e.source === source && e.target === target)
-      );
+    },
+
+    removeEdge(state, action: PayloadAction<string>) {
+      state.edges = state.edges.filter((e) => e.id !== action.payload);
     },
 
     updateEdgeData(
       state,
       action: PayloadAction<{
-        source: EntityId;
-        target: EntityId;
+        id: string;
         data: Partial<DependencyEdgeData>;
       }>
     ) {
-      const { source, target, data } = action.payload;
-      const edge = state.edges.find(
-        (e) => e.source === source && e.target === target
-      );
+      const { id, data } = action.payload;
+      const edge = state.edges.find((e) => e.id === id);
       if (edge?.data) {
         edge.data = { ...edge.data, ...data };
       }
@@ -131,15 +131,12 @@ const canvasSlice = createSlice({
     setEdgeApiContract(
       state,
       action: PayloadAction<{
-        source: EntityId;
-        target: EntityId;
+        id: string;
         apiContract: ApiContract | null;
       }>
     ) {
-      const { source, target, apiContract } = action.payload;
-      const edge = state.edges.find(
-        (e) => e.source === source && e.target === target
-      );
+      const { id, apiContract } = action.payload;
+      const edge = state.edges.find((e) => e.id === id);
       if (edge?.data) {
         edge.data.hasApiContract = !!apiContract;
         edge.data.apiContract = apiContract ?? undefined;
@@ -151,7 +148,7 @@ const canvasSlice = createSlice({
       action: PayloadAction<{
         nodePositions?: Record<EntityId, NodePosition>;
         nodeSizes?: Record<EntityId, NodeDimensions>;
-        edges?: Edge<DependencyEdgeData>[];
+        edges?: CanvasEdge[];
         viewport?: Viewport;
       }>
     ) {
@@ -177,16 +174,19 @@ const canvasSlice = createSlice({
         }
       }
       if (layoutEdges) {
-        state.edges = layoutEdges.map((e) => ({
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          type: 'dependency',
-          data: {
-            dependencyType: 'depends_on',
-            hasApiContract: false,
-          },
-        }));
+        state.edges = layoutEdges.map((e: CanvasEdge | { id: string; source: string; target: string }) =>
+          'nodes' in e
+            ? e
+            : {
+                id: e.id,
+                nodes: [e.source, e.target] as [EntityId, EntityId],
+                type: 'dependency' as const,
+                data: {
+                  dependencyType: 'depends_on' as const,
+                  hasApiContract: false,
+                },
+              }
+        );
       }
       if (viewport) state.viewport = viewport;
     },
@@ -200,6 +200,7 @@ export const {
   removeNodePosition,
   setViewport,
   addEdge,
+  updateEdge,
   removeEdge,
   updateEdgeData,
   setEdgeApiContract,

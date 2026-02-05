@@ -1,313 +1,326 @@
-import React, { useCallback, useMemo, useRef } from 'react';
-import {
-  ReactFlow,
-  Controls,
-  MiniMap,
-  Background,
-  type Node,
-  type Edge,
-  type OnNodesChange,
-  type OnEdgesChange,
-  type OnConnect,
-  type NodeMouseHandler,
-  type NodeTypes,
-  type EdgeTypes,
-  ConnectionLineType,
-  ConnectionMode,
-} from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
+import { useCanvasController } from './CanvasController';
+import { NodeLayer } from './NodeLayer';
+import { EdgeLayer } from './EdgeLayer';
+import { ConnectionLine } from './ConnectionLine';
 import { selectVisibleEntities } from '../../store/selectors/scopeSelectors';
-import { selectSelectedIds } from '../../store/selectors/scopeSelectors';
-import { setNodePosition, setNodeSize, setViewport, addEdge } from '../../store/slices/canvasSlice';
-import { setSelection, enterScope, setContextMenuWithPosition, setDraggedNode, setPotentialParent } from '../../store/slices/uiSlice';
+import { getTransformStyle, screenToCanvas } from '../FlowDiagram/core/viewportUtils';
+import { setContextMenuWithPosition, setDraggedNode, setPotentialParent, enterScope } from '../../store/slices/uiSlice';
 import { setParent } from '../../store/slices/entitiesSlice';
 import { getParentId } from '../../store/selectors/entitySelectors';
-import type { Entity } from '../../../shared/types/entities';
 import { findPotentialParent } from '../../utils/collision';
-import type { EntityId } from '../../../shared/types/entities';
-import type { BucketNodeData, ModuleNodeData, BlockNodeData, CanvasNode, CanvasEdge } from '../../../shared/types/canvas';
-import type { Bucket, Module as ModuleEntity, Block } from '../../../shared/types/entities';
-import { BucketNode, ModuleNode, BlockNode } from '../nodes';
-import { DependencyEdge } from '../edges/DependencyEdge';
+import type { Entity, EntityId } from '../../../shared/types/entities';
+import type { BaseNode } from '../FlowDiagram/core/BaseNode';
+import type { EndpointIndex, Position } from '../FlowDiagram/core/types';
 
-const nodeTypes = {
-  bucket: BucketNode,
-  module: ModuleNode,
-  block: BlockNode,
-};
-
-const edgeTypes = {
-  dependency: DependencyEdge,
-};
-
-function buildNodeData(
-  entity: Bucket | ModuleEntity | Block,
-  selectedIds: EntityId[],
-  byId: Record<EntityId, import('../../../shared/types/entities').Entity>,
-  edgesFromState: { source: string; target: string }[]
-): BucketNodeData | ModuleNodeData | BlockNodeData {
-  const isInScope = true;
-  const isDimmed = false;
-
-  if (entity.type === 'bucket') {
-    let modulesCount = 0;
-    let blocksCount = 0;
-    for (const cid of entity.children) {
-      const c = byId[cid];
-      if (c?.type === 'module') modulesCount++;
-      else if (c?.type === 'block') blocksCount++;
-    }
-    return {
-      entity,
-      isInScope,
-      isDimmed,
-      modulesCount,
-      blocksCount,
-      progress: { done: 0, total: entity.children.length || 1 },
-      activeAgents: 0,
-    };
-  }
-
-  if (entity.type === 'module') {
-    const blocksCount = entity.children.filter((id: EntityId) => byId[id]?.type === 'block').length;
-    const depsCount = edgesFromState.filter((e) => e.source === entity.id).length;
-    return {
-      entity,
-      isInScope,
-      isDimmed,
-      depsCount,
-      blocksCount,
-      progress: { done: 0, total: blocksCount || 1 },
-    };
-  }
-
-  const path = (entity as Block).path ?? '';
-  const ext = path.split('.').pop() ?? '';
-  const fileIcon = ext ? `.${ext}` : '📄';
-  return {
-    entity,
-    isInScope,
-    isDimmed,
-    fileIcon,
-    testPassed: false,
-  };
-}
+type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
 function CanvasInner() {
   const dispatch = useAppDispatch();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const controller = useCanvasController();
+  
   const visibleEntities = useAppSelector(selectVisibleEntities);
-  const selectedIds = useAppSelector(selectSelectedIds);
   const nodePositions = useAppSelector((s) => s.canvas.nodePositions);
   const nodeSizes = useAppSelector((s) => s.canvas.nodeSizes);
   const edgesFromState = useAppSelector((s) => s.canvas.edges);
   const byId = useAppSelector((s) => s.entities.byId);
-  const viewport = useAppSelector((s) => s.canvas.viewport);
   const potentialParentId = useAppSelector((s) => s.ui.potentialParentId);
 
   const originalParentRef = useRef<EntityId | null>(null);
-  const visibleIds = useMemo(() => new Set(visibleEntities.map((e) => e.id)), [visibleEntities]);
-
   const entitiesArray = useMemo(() => Object.values(byId).filter(Boolean) as Entity[], [byId]);
+  
+  // Track which interaction mode we're in
+  const interactionRef = useRef<{
+    type: 'drag' | 'resize' | 'connect' | 'pan' | null;
+    nodeId?: string;
+    corner?: Corner;
+  }>({ type: null });
 
-  const nodes: CanvasNode[] = useMemo(() => {
-    return visibleEntities.map((entity) => {
-      const position = nodePositions[entity.id] ?? { x: 0, y: 0 };
-      const data = buildNodeData(entity, selectedIds, byId, edgesFromState);
-      const size = nodeSizes[entity.id];
-      return {
-        id: entity.id,
-        type: entity.type,
-        position,
-        data,
-        selected: selectedIds.includes(entity.id),
-        ...(size && { width: size.width, height: size.height }),
-      };
-    });
-  }, [visibleEntities, nodePositions, nodeSizes, selectedIds, byId, edgesFromState]);
+  // Build nodes and edges from state
+  const visibleByIdForCanvas = useMemo(() => {
+    const result: Record<string, Entity> = {};
+    for (const e of visibleEntities) {
+      result[e.id] = e;
+    }
+    return result;
+  }, [visibleEntities]);
 
-  const flowEdges: CanvasEdge[] = useMemo(() => {
-    return edgesFromState.filter(
-      (e) => visibleIds.has(e.source) && visibleIds.has(e.target)
-    );
-  }, [edgesFromState, visibleIds]);
+  const nodes = useMemo(() => 
+    controller.buildNodes(visibleByIdForCanvas, nodePositions, nodeSizes),
+    [controller, visibleByIdForCanvas, nodePositions, nodeSizes]
+  );
 
-  const onNodesChange: OnNodesChange = useCallback(
-    (changes) => {
-      for (const change of changes) {
-        if (change.type === 'position' && change.position) {
-          dispatch(
-            setNodePosition({
-              id: change.id,
-              position: change.position,
-            })
-          );
-        }
-        if (change.type === 'dimensions' && change.dimensions) {
-          console.log('[CanvasContainer] dimensions change:', change.id, change.dimensions);
-          dispatch(
-            setNodeSize({
-              id: change.id,
-              size: {
-                width: change.dimensions.width,
-                height: change.dimensions.height,
-              },
-            })
-          );
-        }
+  const edges = useMemo(() => 
+    controller.buildEdges(edgesFromState),
+    [controller, edgesFromState]
+  );
+
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const isCtrlOrCmd = e.ctrlKey || e.metaKey;
+      if (isCtrlOrCmd && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        controller.commandRegistry.undo();
+      } else if (isCtrlOrCmd && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        controller.commandRegistry.redo();
       }
-    },
-    [dispatch]
-  );
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [controller.commandRegistry]);
 
-  const onEdgesChange: OnEdgesChange = useCallback(() => {}, []);
+  // Selection handlers
+  const handleSelect = useCallback((id: string, additive?: boolean) => {
+    controller.select(id, additive);
+  }, [controller]);
 
-  const onConnect: OnConnect = useCallback(
-    (connection) => {
-      if (connection.source && connection.target && connection.source !== connection.target) {
-        dispatch(addEdge({
-          source: connection.source,
-          target: connection.target,
-        }));
-      }
-    },
-    [dispatch]
-  );
+  const handleDoubleClick = useCallback((id: string) => {
+    const entity = byId[id];
+    if (entity?.type === 'bucket') {
+      dispatch(enterScope({ entityId: id, mode: 'bucket' }));
+    } else if (entity?.type === 'module') {
+      dispatch(enterScope({ entityId: id, mode: 'module' }));
+    }
+  }, [byId, dispatch]);
 
-  const onNodeClick: NodeMouseHandler = useCallback(
-    (_event, node) => {
-      dispatch(setSelection([node.id]));
-    },
-    [dispatch]
-  );
-
-  const onNodeDoubleClick: NodeMouseHandler = useCallback(
-    (_event, node) => {
-      const entity = byId[node.id];
-      if (entity?.type === 'bucket') {
-        dispatch(enterScope({ entityId: node.id, mode: 'bucket' }));
-      } else if (entity?.type === 'module') {
-        dispatch(enterScope({ entityId: node.id, mode: 'module' }));
-      }
-    },
-    [dispatch, byId]
-  );
-
-  const onPaneClick = useCallback(() => {
-    dispatch(setSelection([]));
+  const handleContextMenu = useCallback((id: string, e: React.MouseEvent) => {
+    dispatch(setContextMenuWithPosition({
+      entityId: id,
+      x: e.clientX,
+      y: e.clientY,
+    }));
   }, [dispatch]);
 
-  const onNodeContextMenu = useCallback(
-    (event: React.MouseEvent, node: { id: string }) => {
-      event.preventDefault();
-      dispatch(
-        setContextMenuWithPosition({
-          entityId: node.id,
-          x: event.clientX,
-          y: event.clientY,
-        })
-      );
-    },
-    [dispatch]
-  );
+  const handleEdgeEndpointPointerDown = useCallback((
+    edgeId: string,
+    endpointIndex: EndpointIndex,
+    edgeNodes: [string, string],
+    pos0: Position,
+    pos1: Position,
+    e: React.PointerEvent
+  ) => {
+    controller.handleEdgeEndpointPointerDown(edgeId, endpointIndex, edgeNodes, pos0, pos1);
+    interactionRef.current = { type: null }; // reconnect is handled separately
+  }, [controller]);
 
-  const onViewportChange = useCallback(
-    (viewport: { x: number; y: number; zoom: number }) => {
-      dispatch(setViewport(viewport));
-    },
-    [dispatch]
-  );
+  // Pointer event handlers
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    const canvasPos = screenToCanvas(screenX, screenY, controller.viewport);
+    
+    // Find node under pointer
+    const hitNode = controller.findNodeAt(nodes, canvasPos.x, canvasPos.y);
+    
+    if (hitNode) {
+      // Check if clicking on resize handle (only for selected nodes)
+      if (hitNode.selected) {
+        const corner = controller.findResizeHandle(hitNode, canvasPos.x, canvasPos.y);
+        if (corner) {
+          interactionRef.current = { type: 'resize', nodeId: hitNode.id, corner };
+          controller.startResize(
+            hitNode.id,
+            corner,
+            {
+              x: hitNode.position.x,
+              y: hitNode.position.y,
+              width: hitNode.size.width,
+              height: hitNode.size.height,
+            },
+            { x: e.clientX, y: e.clientY },
+            hitNode.minSize,
+            hitNode.maxSize
+          );
+          e.currentTarget.setPointerCapture(e.pointerId);
+          return;
+        }
+      }
+      
+      // Start dragging the node
+      interactionRef.current = { type: 'drag', nodeId: hitNode.id };
+      controller.startDrag(hitNode.id, hitNode.position, { x: e.clientX, y: e.clientY });
+      dispatch(setDraggedNode(hitNode.id));
+      originalParentRef.current = getParentId(entitiesArray, hitNode.id);
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } else {
+      // Click on empty canvas - start panning
+      interactionRef.current = { type: 'pan' };
+      controller.startPan({ x: e.clientX, y: e.clientY });
+      controller.clearSelection();
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+  }, [controller, nodes, dispatch, entitiesArray]);
 
-  const onNodeDragStart: NodeMouseHandler = useCallback(
-    (_event, node) => {
-      dispatch(setDraggedNode(node.id));
-      const parentId = getParentId(entitiesArray, node.id);
-      originalParentRef.current = parentId;
-    },
-    [dispatch, entitiesArray]
-  );
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const screenPos = { x: e.clientX, y: e.clientY };
+    
+    // Handle reconnect drag (from edge endpoints)
+    if (controller.isReconnecting()) {
+      controller.onReconnectDrag(screenPos);
+      return;
+    }
 
-  const onNodeDrag: NodeMouseHandler = useCallback(
-    (_event, node) => {
-      if (!node.position) return;
-      const size = nodeSizes[node.id] ?? { width: 160, height: 80 };
-      const allNodesWithSizes: Array<{
-        id: EntityId;
-        position: { x: number; y: number };
-        size: { width: number; height: number };
-        type: string;
-      }> = visibleEntities.map((e) => ({
+    const interaction = interactionRef.current;
+    
+    if (interaction.type === 'drag' && interaction.nodeId) {
+      controller.onDrag(screenPos);
+      
+      // Update potential parent for drag-and-drop reparenting
+      const nodePos = nodePositions[interaction.nodeId] ?? { x: 0, y: 0 };
+      const nodeSize = nodeSizes[interaction.nodeId] ?? { width: 160, height: 80 };
+      const allNodesWithSizes = visibleEntities.map((e) => ({
         id: e.id,
         position: nodePositions[e.id] ?? { x: 0, y: 0 },
         size: nodeSizes[e.id] ?? { width: 160, height: 80 },
         type: e.type,
       }));
       const potentialParent = findPotentialParent(
-        node.id,
-        node.position,
-        size,
+        interaction.nodeId,
+        nodePos,
+        nodeSize,
         allNodesWithSizes,
         byId
       );
       dispatch(setPotentialParent(potentialParent));
-    },
-    [dispatch, nodeSizes, visibleEntities, nodePositions, byId]
-  );
+    } else if (interaction.type === 'resize') {
+      controller.onResize(screenPos);
+    } else if (interaction.type === 'pan') {
+      controller.onPan(screenPos);
+    } else if (interaction.type === 'connect') {
+      controller.onConnectDrag(screenPos);
+    }
+  }, [controller, nodePositions, nodeSizes, visibleEntities, byId, dispatch]);
 
-  const onNodeDragStop: NodeMouseHandler = useCallback(
-    (_event, node) => {
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    const canvasPos = screenToCanvas(screenX, screenY, controller.viewport);
+    
+    // Handle reconnect end
+    if (controller.isReconnecting()) {
+      const hitNode = controller.findNodeAt(nodes, canvasPos.x, canvasPos.y);
+      controller.endReconnect(hitNode?.id ?? null);
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      return;
+    }
+
+    const interaction = interactionRef.current;
+    
+    if (interaction.type === 'drag' && interaction.nodeId) {
+      const finalPos = nodePositions[interaction.nodeId] ?? { x: 0, y: 0 };
+      controller.endDrag(finalPos);
+      
+      // Handle reparenting
       if (potentialParentId && potentialParentId !== originalParentRef.current) {
-        dispatch(setParent({ childId: node.id, parentId: potentialParentId }));
+        dispatch(setParent({ childId: interaction.nodeId, parentId: potentialParentId }));
       }
       dispatch(setDraggedNode(null));
       dispatch(setPotentialParent(null));
       originalParentRef.current = null;
-    },
-    [dispatch, potentialParentId]
-  );
+    } else if (interaction.type === 'resize' && interaction.nodeId) {
+      controller.endResize();
+    } else if (interaction.type === 'pan') {
+      controller.endPan();
+    } else if (interaction.type === 'connect') {
+      const hitNode = controller.findNodeAt(nodes, canvasPos.x, canvasPos.y);
+      controller.endConnect(hitNode?.id ?? null);
+    }
+    
+    interactionRef.current = { type: null };
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  }, [controller, nodes, nodePositions, nodeSizes, potentialParentId, dispatch]);
+
+  // Wheel handler for zoom
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    controller.onWheel(e.nativeEvent, rect);
+  }, [controller]);
 
   return (
-    <ReactFlow
-      nodes={nodes}
-      edges={flowEdges}
-      defaultViewport={{ x: viewport.x, y: viewport.y, zoom: viewport.zoom }}
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
-      onConnect={onConnect}
-      onNodeClick={onNodeClick}
-      onNodeDoubleClick={onNodeDoubleClick}
-      onNodeContextMenu={onNodeContextMenu}
-      onPaneClick={onPaneClick}
-      onNodeDragStart={onNodeDragStart}
-      onNodeDrag={onNodeDrag}
-      onNodeDragStop={onNodeDragStop}
-      onMove={(_e, viewport) => onViewportChange(viewport)}
-      onMoveEnd={(_e, viewport) => onViewportChange(viewport)}
-      nodeTypes={nodeTypes as NodeTypes}
-      edgeTypes={edgeTypes as EdgeTypes}
-      connectionMode={ConnectionMode.Loose}
-      connectionLineType={ConnectionLineType.Bezier}
-      connectionLineStyle={{ stroke: 'var(--color-focus-border)', strokeWidth: 2 }}
-      nodesDraggable
-      nodesConnectable
-      elementsSelectable
-      fitView
-      fitViewOptions={{ padding: 0.2 }}
-      minZoom={0.2}
-      maxZoom={2}
-      defaultEdgeOptions={{
-        type: 'dependency',
+    <div
+      ref={containerRef}
+      className="canvas-container"
+      style={{
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+        position: 'relative',
+        background: 'var(--color-background)',
+        cursor: controller.isPanning() ? 'grabbing' : 'default',
       }}
-      style={{ background: 'var(--color-background)' }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onWheel={handleWheel}
     >
-      <Background color="var(--color-widget-border)" gap={16} />
-      <Controls showInteractive={false} />
-      <MiniMap
-        nodeColor="var(--color-description)"
-        maskColor="rgba(0,0,0,0.6)"
-        style={{ background: 'var(--color-sidebar-background)' }}
+      {/* Background grid */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundImage: `
+            linear-gradient(to right, var(--color-widget-border) 1px, transparent 1px),
+            linear-gradient(to bottom, var(--color-widget-border) 1px, transparent 1px)
+          `,
+          backgroundSize: `${16 * controller.viewport.zoom}px ${16 * controller.viewport.zoom}px`,
+          backgroundPosition: `${controller.viewport.x}px ${controller.viewport.y}px`,
+          pointerEvents: 'none',
+        }}
       />
-    </ReactFlow>
+      
+      {/* Transformed canvas content */}
+      <div
+        className="canvas-transform-layer"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          ...getTransformStyle(controller.viewport),
+        }}
+      >
+        <EdgeLayer
+          edges={edges}
+          nodes={nodes}
+          onEdgeEndpointPointerDown={handleEdgeEndpointPointerDown}
+        />
+        <NodeLayer
+          nodes={nodes}
+          onSelect={handleSelect}
+          onDoubleClick={handleDoubleClick}
+          onContextMenu={handleContextMenu}
+        />
+      </div>
+      
+      {/* Connection drag line (in screen space) */}
+      {controller.dragLine && (
+        <ConnectionLine
+          start={controller.dragLine.start}
+          end={controller.dragLine.end}
+        />
+      )}
+      
+      {/* Reconnect drag line */}
+      {controller.reconnectDragLine && (
+        <ConnectionLine
+          start={controller.reconnectDragLine.anchor}
+          end={controller.reconnectDragLine.moving}
+        />
+      )}
+    </div>
   );
 }
 

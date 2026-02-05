@@ -1,8 +1,7 @@
 /**
- * Canvas-specific types for ReactFlow nodes/edges and UI state.
+ * Canvas-specific types for nodes/edges and UI state.
  */
 
-import type { Node, Edge } from '@xyflow/react';
 import type { Entity, EntityId } from './entities';
 
 export type FocusMode = 'workspace' | 'bucket' | 'module';
@@ -39,7 +38,15 @@ export interface BlockNodeData extends BaseNodeData {
 
 export type NodeData = BucketNodeData | ModuleNodeData | BlockNodeData;
 
-export type CanvasNode = Node<NodeData, 'bucket' | 'module' | 'block'>;
+export type CanvasEdgeType = 'dependency' | 'api';
+
+/** Custom canvas edge: bidirectional, stored as nodes tuple. */
+export interface CanvasEdge {
+  id: string;
+  nodes: [string, string];
+  type: CanvasEdgeType;
+  data?: DependencyEdgeData;
+}
 
 export interface ApiContract {
   name: string;
@@ -55,7 +62,6 @@ export interface DependencyEdgeData extends Record<string, unknown> {
   apiContract?: ApiContract;
 }
 
-export type CanvasEdge = Edge<DependencyEdgeData>;
 
 export interface ChatMessage {
   id: string;
