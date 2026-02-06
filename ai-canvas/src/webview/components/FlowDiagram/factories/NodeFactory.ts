@@ -31,7 +31,7 @@ export class NodeFactory {
     const Ctor = this.registry.get(options.type);
     if (!Ctor) throw new Error(`Unknown node type: ${options.type}`);
     const size = options.size ?? DEFAULT_SIZES[options.type];
-    return new Ctor({ ...options, size });
+    return new Ctor({ ...options, size, selected: options.selected ?? false });
   }
 
   createFromState(
@@ -51,6 +51,7 @@ export class NodeFactory {
         position,
         size,
         data: entity,
+        selected,
       });
     });
   }

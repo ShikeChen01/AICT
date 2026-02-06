@@ -13,8 +13,7 @@ import { findPotentialParent } from '../../utils/collision';
 import type { Entity, EntityId } from '../../../shared/types/entities';
 import type { BaseNode } from '../FlowDiagram/core/BaseNode';
 import type { EndpointIndex, Position } from '../FlowDiagram/core/types';
-
-type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+import type { Corner } from './ResizeHandles';
 
 function CanvasInner() {
   const dispatch = useAppDispatch();
@@ -37,6 +36,9 @@ function CanvasInner() {
     nodeId?: string;
     corner?: Corner;
   }>({ type: null });
+
+  // Double-click detection (since pointer capture prevents native dblclick on nodes)
+  const lastClickRef = useRef<{ nodeId: string; time: number } | null>(null);
 
   // Build nodes and edges from state
   const visibleByIdForCanvas = useMemo(() => {
@@ -120,6 +122,29 @@ function CanvasInner() {
     [controller]
   );
 
+  const handleResizePointerDown = useCallback(
+    (nodeId: string, corner: Corner, e: React.PointerEvent) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+      interactionRef.current = { type: 'resize', nodeId, corner };
+      controller.startResize(
+        nodeId,
+        corner,
+        {
+          x: node.position.x,
+          y: node.position.y,
+          width: node.size.width,
+          height: node.size.height,
+        },
+        { x: e.clientX, y: e.clientY },
+        node.minSize,
+        node.maxSize
+      );
+      containerRef.current?.setPointerCapture(e.pointerId);
+    },
+    [controller, nodes]
+  );
+
   // Pointer event handlers
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (!containerRef.current) return;
@@ -155,7 +180,8 @@ function CanvasInner() {
         }
       }
       
-      // Start dragging the node
+      // Select and start dragging the node
+      controller.select(hitNode.id);
       interactionRef.current = { type: 'drag', nodeId: hitNode.id };
       controller.startDrag(hitNode.id, hitNode.position, { x: e.clientX, y: e.clientY });
       dispatch(setDraggedNode(hitNode.id));
@@ -231,6 +257,8 @@ function CanvasInner() {
     
     if (interaction.type === 'drag' && interaction.nodeId) {
       const finalPos = nodePositions[interaction.nodeId] ?? { x: 0, y: 0 };
+      const startPos = controller.getDragStartPos?.() ?? finalPos;
+      const dragMoved = Math.abs(finalPos.x - startPos.x) > 3 || Math.abs(finalPos.y - startPos.y) > 3;
       controller.endDrag(finalPos);
       
       // Handle reparenting
@@ -240,6 +268,24 @@ function CanvasInner() {
       dispatch(setDraggedNode(null));
       dispatch(setPotentialParent(null));
       originalParentRef.current = null;
+
+      // Double-click detection: if the "drag" was really just a click (no movement),
+      // check if it's a double-click on the same node
+      if (!dragMoved) {
+        const now = Date.now();
+        if (
+          lastClickRef.current &&
+          lastClickRef.current.nodeId === interaction.nodeId &&
+          now - lastClickRef.current.time < 400
+        ) {
+          lastClickRef.current = null;
+          handleDoubleClick(interaction.nodeId);
+        } else {
+          lastClickRef.current = { nodeId: interaction.nodeId, time: now };
+        }
+      } else {
+        lastClickRef.current = null;
+      }
     } else if (interaction.type === 'resize' && interaction.nodeId) {
       controller.endResize();
     } else if (interaction.type === 'pan') {
@@ -317,6 +363,7 @@ function CanvasInner() {
           onDoubleClick={handleDoubleClick}
           onContextMenu={handleContextMenu}
           onHandlePointerDown={handleHandlePointerDown}
+          onResizePointerDown={handleResizePointerDown}
         />
       </div>
       

@@ -27,7 +27,7 @@ export function useCanvasController() {
 
   const { viewport, startPan, onPan, endPan, onWheel, isPanning } =
     useViewport(commandRegistry);
-  const { startDrag, onDrag, endDrag, isDragging } = useNodeDrag(
+  const { startDrag, onDrag, endDrag, isDragging, getDragStartPos } = useNodeDrag(
     viewport,
     commandRegistry
   );
@@ -136,6 +136,7 @@ export function useCanvasController() {
     onDrag,
     endDrag,
     isDragging,
+    getDragStartPos,
     startResize,
     onResize,
     endResize,

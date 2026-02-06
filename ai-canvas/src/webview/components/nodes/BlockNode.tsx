@@ -33,6 +33,8 @@ export interface BlockNodeViewProps {
   onDoubleClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   isDropTarget?: boolean;
+  onPointerEnter?: () => void;
+  onPointerLeave?: () => void;
 }
 
 export const BlockNodeView = memo(function BlockNodeView({
@@ -41,6 +43,8 @@ export const BlockNodeView = memo(function BlockNodeView({
   onDoubleClick,
   onContextMenu,
   isDropTarget,
+  onPointerEnter,
+  onPointerLeave,
 }: BlockNodeViewProps) {
   const entity = model.data as Block;
   const path = entity.path ?? '';
@@ -51,12 +55,12 @@ export const BlockNodeView = memo(function BlockNodeView({
       role="button"
       tabIndex={0}
       style={{
+        ...chipStyle,
         position: 'absolute',
         left: model.position.x,
         top: model.position.y,
         width: model.size.width,
         height: model.size.height,
-        ...chipStyle,
         border: isDropTarget ? '3px dashed var(--color-focus-border)' : chipStyle.border,
         boxShadow: model.selected ? '0 0 0 2px var(--color-focus-border)' : undefined,
         transition: 'border 0.15s ease, box-shadow 0.15s ease',
@@ -64,6 +68,8 @@ export const BlockNodeView = memo(function BlockNodeView({
       onClick={(e) => { e.stopPropagation(); onSelect(); }}
       onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick(); }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e); }}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
     >
       <span style={{ fontSize: '1em' }}>{fileIcon === '📄' ? '📄' : `[${fileIcon}]`}</span>
       <span>{entity.name}</span>
@@ -71,3 +77,5 @@ export const BlockNodeView = memo(function BlockNodeView({
     </div>
   );
 });
+
+

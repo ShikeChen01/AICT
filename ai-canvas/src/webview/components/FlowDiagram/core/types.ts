@@ -60,6 +60,7 @@ export interface CreateNodeOptions {
   position: Position;
   size?: Size;
   data: unknown;
+  selected?: boolean;
 }
 
 export interface CreateEdgeOptions {

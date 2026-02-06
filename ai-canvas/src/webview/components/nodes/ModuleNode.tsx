@@ -38,6 +38,8 @@ export interface ModuleNodeViewProps {
   onDoubleClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   isDropTarget?: boolean;
+  onPointerEnter?: () => void;
+  onPointerLeave?: () => void;
 }
 
 export const ModuleNodeView = memo(function ModuleNodeView({
@@ -46,6 +48,8 @@ export const ModuleNodeView = memo(function ModuleNodeView({
   onDoubleClick,
   onContextMenu,
   isDropTarget,
+  onPointerEnter,
+  onPointerLeave,
 }: ModuleNodeViewProps) {
   const entity = model.data as Module;
   return (
@@ -53,12 +57,12 @@ export const ModuleNodeView = memo(function ModuleNodeView({
       role="button"
       tabIndex={0}
       style={{
+        ...cardStyle,
         position: 'absolute',
         left: model.position.x,
         top: model.position.y,
         width: model.size.width,
         height: model.size.height,
-        ...cardStyle,
         border: isDropTarget ? '3px dashed var(--color-focus-border)' : cardStyle.border,
         boxShadow: model.selected ? '0 0 0 2px var(--color-focus-border)' : undefined,
         transition: 'border 0.15s ease, box-shadow 0.15s ease',
@@ -66,6 +70,8 @@ export const ModuleNodeView = memo(function ModuleNodeView({
       onClick={(e) => { e.stopPropagation(); onSelect(); }}
       onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick(); }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e); }}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
     >
       <div style={headerStyle}>{entity.name}</div>
       <div style={summaryStyle}>

@@ -3,8 +3,10 @@ import type { Size, HandleDef, CreateNodeOptions } from '../FlowDiagram/core/typ
 
 export class BlockNodeModel extends BaseNode {
   readonly handles: HandleDef[] = [
-    { id: 'left', position: 'left' },
+    { id: 'top', position: 'top' },
     { id: 'right', position: 'right' },
+    { id: 'bottom', position: 'bottom' },
+    { id: 'left', position: 'left' },
   ];
   readonly minSize: Size = { width: 100, height: 40 };
   readonly maxSize: Size = { width: 400, height: 200 };
@@ -15,7 +17,7 @@ export class BlockNodeModel extends BaseNode {
       type: 'block',
       position: opts.position,
       size: opts.size ?? { width: 160, height: 80 },
-      selected: false,
+      selected: opts.selected ?? false,
       data: opts.data,
     });
   }

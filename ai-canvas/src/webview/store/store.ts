@@ -17,5 +17,8 @@ export const store = configureStore({
   },
 });
 
+// Expose store for E2E testing/debugging
+(window as unknown as Record<string, unknown>).__store = store;
+
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;

@@ -65,5 +65,6 @@ export function useNodeDrag(
     onDrag,
     endDrag,
     isDragging: () => dragRef.current !== null,
+    getDragStartPos: () => dragRef.current?.startPos ?? null,
   };
 }

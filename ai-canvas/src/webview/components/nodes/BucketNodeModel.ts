@@ -3,8 +3,10 @@ import type { Size, HandleDef, CreateNodeOptions } from '../FlowDiagram/core/typ
 
 export class BucketNodeModel extends BaseNode {
   readonly handles: HandleDef[] = [
-    { id: 'left', position: 'left' },
+    { id: 'top', position: 'top' },
     { id: 'right', position: 'right' },
+    { id: 'bottom', position: 'bottom' },
+    { id: 'left', position: 'left' },
   ];
   readonly minSize: Size = { width: 200, height: 150 };
   readonly maxSize: Size = { width: 600, height: 500 };
@@ -15,7 +17,7 @@ export class BucketNodeModel extends BaseNode {
       type: 'bucket',
       position: opts.position,
       size: opts.size ?? { width: 280, height: 200 },
-      selected: false,
+      selected: opts.selected ?? false,
       data: opts.data,
     });
   }

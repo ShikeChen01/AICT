@@ -49,6 +49,8 @@ export interface BucketNodeViewProps {
   onDoubleClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   isDropTarget?: boolean;
+  onPointerEnter?: () => void;
+  onPointerLeave?: () => void;
 }
 
 export const BucketNodeView = memo(function BucketNodeView({
@@ -57,6 +59,8 @@ export const BucketNodeView = memo(function BucketNodeView({
   onDoubleClick,
   onContextMenu,
   isDropTarget,
+  onPointerEnter,
+  onPointerLeave,
 }: BucketNodeViewProps) {
   const entity = model.data as Bucket;
   const modulesCount = Array.isArray(entity.children) ? entity.children.length : 0;
@@ -69,12 +73,12 @@ export const BucketNodeView = memo(function BucketNodeView({
       role="button"
       tabIndex={0}
       style={{
+        ...frameStyle,
         position: 'absolute',
         left: model.position.x,
         top: model.position.y,
         width: model.size.width,
         height: model.size.height,
-        ...frameStyle,
         border: isDropTarget ? '3px dashed var(--color-focus-border)' : frameStyle.border,
         boxShadow: model.selected ? '0 0 0 2px var(--color-focus-border)' : undefined,
         transition: 'border 0.15s ease, box-shadow 0.15s ease',
@@ -82,6 +86,8 @@ export const BucketNodeView = memo(function BucketNodeView({
       onClick={(e) => { e.stopPropagation(); onSelect(); }}
       onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick(); }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e); }}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
     >
       <div style={headerStyle}>
         <span>{entity.name}</span>

@@ -60,134 +60,29 @@ body {
   color: var(--color-foreground);
 }
 
-/* React Flow overrides for theme */
-.react-flow {
-  background: var(--color-background);
+/* ── Custom Canvas Styles ── */
+
+/* Resize handles: square corners on selected nodes */
+.resize-handle {
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.resize-handle:hover {
+  background: var(--color-focus-border) !important;
+  border-color: var(--color-focus-border) !important;
 }
 
-.react-flow__background {
-  background: var(--color-background);
-}
-
-.react-flow__background-pattern {
-  stroke: var(--color-widget-border);
-}
-
-.react-flow__controls {
-  background: var(--color-sidebar-background);
-  border: 1px solid var(--color-widget-border);
-  border-radius: var(--radius-md);
-}
-
-.react-flow__controls-button {
-  background: var(--color-sidebar-background);
-  border-bottom: 1px solid var(--color-widget-border);
-  color: var(--color-foreground);
-}
-
-.react-flow__controls-button:hover {
-  background: var(--color-input-background);
-}
-
-.react-flow__minimap {
-  background: var(--color-sidebar-background);
-  border: 1px solid var(--color-widget-border);
-  border-radius: var(--radius-md);
-}
-
-.react-flow__minimap-mask {
+/* Edge endpoint dots (on selected edges) */
+.edge-endpoint {
   fill: var(--color-focus-border);
-  opacity: 0.2;
+  stroke: var(--color-background);
+  stroke-width: 2;
+  transition: r 0.1s ease;
+}
+.edge-endpoint:hover {
+  r: 8;
 }
 
-.react-flow__minimap-node {
-  fill: var(--color-description);
-  stroke: none;
-}
-
-/* Edge styles - inverted background for maximum contrast */
-.react-flow__edge-path {
-  stroke: var(--color-foreground);
+/* Edge selection highlight */
+.edge.selected path {
   stroke-width: 3;
-  filter: invert(1) hue-rotate(180deg);
-  opacity: 0.8;
-}
-
-.react-flow__edge.selected .react-flow__edge-path {
-  stroke: var(--color-foreground);
-  filter: invert(1) hue-rotate(180deg);
-  stroke-width: 4;
-  opacity: 1;
-}
-
-/* Hide arrows - connections are bidirectional conceptually */
-.react-flow__edge .react-flow__edge-path {
-  marker-end: none;
-  marker-start: none;
-}
-
-.react-flow__edge-text {
-  fill: var(--color-foreground);
-  font-size: var(--font-size-xs);
-}
-
-/* Connection line while dragging */
-.react-flow__connectionline {
-  stroke: var(--color-foreground);
-  stroke-width: 3;
-  filter: invert(1) hue-rotate(180deg);
-  opacity: 0.8;
-}
-
-/* Selection box */
-.react-flow__selection {
-  background: var(--color-focus-border);
-  opacity: 0.1;
-  border: 1px solid var(--color-focus-border);
-}
-
-/* Connection handles - 4 bidirectional points (side middles only) */
-.react-flow__handle {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2px solid var(--color-foreground);
-  background: var(--color-background);
-  opacity: 0;
-  transition: all 0.2s ease;
-  cursor: crosshair;
-  z-index: 10;
-}
-
-/* Show handles on hover or selection */
-.react-flow__node:hover .react-flow__handle,
-.react-flow__node.selected .react-flow__handle {
-  opacity: 1;
-}
-
-/* Handle hover state - indicates connectable */
-.react-flow__handle:hover {
-  background: var(--color-focus-border);
-  transform: scale(1.4);
-  border-color: var(--color-focus-border);
-  box-shadow: 0 0 8px var(--color-focus-border);
-}
-
-/* Handle when actively connecting */
-.react-flow__handle.connecting {
-  background: var(--color-focus-border);
-  opacity: 1;
-}
-
-/* Handle when valid connection target */
-.react-flow__handle.valid {
-  background: #4caf50;
-  border-color: #4caf50;
-  transform: scale(1.4);
-}
-
-/* Handle when invalid connection target */
-.react-flow__handle.invalid {
-  background: var(--color-error);
-  border-color: var(--color-error);
 }
