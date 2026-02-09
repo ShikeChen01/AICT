@@ -1,0 +1,193 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+
+\geometry{margin=1in}
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\textbf{AICT Product Specification}}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\title{\textbf{AICT Multi-Agent Management Platform} \\ \Large Product Specification}
+\author{AICT Project}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%% ============================================================
+\section{Product Definition}
+%% ============================================================
+
+\subsection{One-line Pitch}
+
+A web application where the \textbf{client} (user) talks to a \textbf{GM (General Manager)} agent who orchestrates \textbf{Operation Masters} and \textbf{Engineers} to build software---with a real-time kanban pipeline showing what every agent is doing, and a master specification folder (LaTeX to PDF) as the source of truth.
+
+\subsection{Metaphor}
+
+\begin{itemize}
+  \item \textbf{Client} = the customer who hired a software firm.
+  \item \textbf{GM} = the firm's general manager; single point of contact, reports to the client.
+  \item \textbf{Operation Master} = project manager + QA; breaks down work, writes specs and acceptance tests, ensures engineers don't conflict.
+  \item \textbf{Engineer} = developer; writes code, writes tests, ships.
+\end{itemize}
+
+The client never needs to talk to individual engineers. The client talks to the GM, sees the board, and reads the specs.
+
+\subsection{Non-goals (Initial Release)}
+
+\begin{itemize}
+  \item No direct client-to-Engineer chat (always through GM or visible on the board).
+  \item No CI/CD integration (agents run tests locally; CI is future).
+  \item No multi-project support (one project/workspace at a time).
+\end{itemize}
+
+%% ============================================================
+\section{Agent Roles}
+%% ============================================================
+
+\subsection{GM (exactly 1)}
+
+\begin{itemize}
+  \item \textbf{Owns}: Top-level specification, workflow definition, master spec folder (LaTeX sources and compiled PDFs).
+  \item \textbf{Talks to}: Client (always), Operation Masters, Engineers.
+  \item \textbf{Busy queue}: When GM is processing a client request or talking to another agent, incoming agent requests (from Operation Masters/Engineers) go into a FIFO queue. Client messages always take priority.
+  \item \textbf{Responsibilities}: Understand client needs, translate to high-level specs, assign Operation Masters, approve major decisions, maintain the spec folder.
+\end{itemize}
+
+\subsection{Operation Master (0 or more, scaled by load)}
+
+\begin{itemize}
+  \item \textbf{Owns}: Requirement breakdown, spec-level acceptance tests, task assignment.
+  \item \textbf{Talks to}: GM (queued if GM busy), Engineers under them, other Operation Masters.
+  \item \textbf{Responsibilities}: Break GM specs into tasks, ensure tasks are non-conflicting (by module/feature/git branch), define ``done'' criteria (spec-level tests that must pass), review Engineer output against spec.
+  \item \textbf{Git-aware}: Assigns work so Engineers operate on separate modules/branches to avoid merge conflicts.
+\end{itemize}
+
+\subsection{Engineer (multiple: Level 1 and Level 2)}
+
+Two tiers by model and use:
+
+\begin{itemize}
+  \item \textbf{Engineer L1}: Well-balanced model (e.g.\ Claude 4.5). Used for routine implementation; good cost/performance. Owns implementation + unit/integration tests for assigned tasks.
+  \item \textbf{Engineer L2}: Ultra-performance model (e.g.\ Claude 4.6). Used for hard or critical tasks; highest capability but token-heavy (``token nightmare''). Same responsibilities as L1, reserved for when L1 is insufficient or quality is paramount.
+\end{itemize}
+
+\noindent Both levels:
+\begin{itemize}
+  \item \textbf{Talks to}: GM (queued if GM busy), their Operation Master, other Engineers.
+  \item \textbf{Responsibilities}: Implement assigned task, write tests, ensure tests pass, report completion.
+\end{itemize}
+
+%% ============================================================
+\section{Client Surface}
+%% ============================================================
+
+The client interacts with the platform through three main views.
+
+\subsection{View 1: Chat with GM}
+
+\begin{itemize}
+  \item Single persistent conversation thread between client and GM.
+  \item Client describes what they want; GM responds with clarifications, plans, status updates.
+  \item GM can attach or reference spec documents from the master spec folder.
+  \item Shows GM status: \texttt{available} / \texttt{busy} (and what GM is busy with, e.g.\ ``talking to Operation Master-1'').
+\end{itemize}
+
+\subsection{View 2: Pipeline / Kanban Board (real-time)}
+
+One unified board showing all work. Columns represent task status:
+
+\begin{center}
+  Backlog $\to$ Specifying $\to$ Assigned $\to$ In Progress $\to$ In Review $\to$ Done
+\end{center}
+
+\noindent Each card shows:
+\begin{itemize}
+  \item Task title and brief description.
+  \item Assigned agent (Operation Master or Engineer) with role badge.
+  \item Progress indicator (e.g.\ subtask completion, test pass rate).
+  \item Current activity (e.g.\ ``Engineer-2 writing tests'', ``Operation Master-1 reviewing'').
+  \item Git branch (if applicable).
+  \item Time in current stage.
+\end{itemize}
+
+\noindent Additional board features:
+\begin{itemize}
+  \item \textbf{Progress bar}: Overall project completion (\% of tasks done).
+  \item \textbf{Active task highlight}: Tasks currently being worked on are visually distinct.
+  \item \textbf{Agent activity feed}: Small live feed showing what each agent is doing right now.
+  \item \textbf{Filtering}: By agent, by status, by module/feature.
+\end{itemize}
+
+\subsection{View 3: Specification File Manager}
+
+An online file management interface for the GM's master specification folder. The client can browse, organise, and edit specification files directly in the browser.
+
+\subsubsection{Folder Browser}
+
+\begin{itemize}
+  \item \textbf{Tree / explorer view}: Hierarchical folder structure with expandable/collapsible directories, similar to a desktop file explorer or cloud drive.
+  \item \textbf{Navigation}: Breadcrumb path bar at the top (e.g.\ \texttt{specs / backend / auth /}); click any segment to jump back.
+  \item \textbf{File and folder icons}: Visual distinction between folders, \texttt{.tex} files, \texttt{.pdf} files, images, and other assets.
+\end{itemize}
+
+\subsubsection{File Operations}
+
+\begin{itemize}
+  \item \textbf{Create}: New folder, new \texttt{.tex} file (from template or blank), upload existing files.
+  \item \textbf{Rename / Move}: Rename files or folders in place; drag-and-drop to move between folders.
+  \item \textbf{Delete}: Delete files or folders (with confirmation).
+  \item \textbf{Download}: Download any file or folder (as zip).
+\end{itemize}
+
+\subsubsection{In-browser Editor}
+
+\begin{itemize}
+  \item Click a \texttt{.tex} file to open it in an in-browser text editor with syntax highlighting.
+  \item Auto-save or explicit save; changes are persisted to the server immediately.
+  \item For \texttt{.tex} files: one-click \textbf{Compile} button triggers server-side \texttt{pdflatex}; the resulting PDF is shown in a side-by-side preview or opened in a new tab.
+  \item For \texttt{.pdf} files: inline PDF viewer.
+  \item For other text files: plain text editor.
+\end{itemize}
+
+\subsubsection{Client Authority and Versioning}
+
+\begin{itemize}
+  \item The client is the ultimate authority over the spec folder. Any edits the client makes override previous content.
+  \item The GM is notified of client edits and adjusts the workflow accordingly.
+  \item Each save is tracked with version history so the client and GM can review what changed and when.
+\end{itemize}
+
+%% ============================================================
+\section{Guardrails}
+%% ============================================================
+
+\subsection{Git Safety}
+
+\begin{itemize}
+  \item \textbf{Blocked commands} (server-side): \texttt{git rebase}, \texttt{git reset --hard}, \texttt{git push --force}, \texttt{git commit --amend} (on pushed commits), \texttt{git filter-branch}, \texttt{git reflog expire}.
+  \item \textbf{Implementation}: Backend wraps all git operations through a \texttt{GitService} that validates commands against a whitelist before execution.
+  \item \textbf{Escalation}: If an agent requests a blocked command, the orchestrator pauses the task and sends an approval request to the client via the GM chat. Client approves or denies.
+\end{itemize}
+
+\subsection{Scope Isolation}
+
+\begin{itemize}
+  \item Engineers can only write to files within their assigned module/feature path.
+  \item Operation Masters can only modify spec-related files and task definitions.
+  \item GM can modify the spec folder and high-level project config.
+\end{itemize}
+
+\end{document}

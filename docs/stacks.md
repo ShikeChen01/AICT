@@ -1,0 +1,8 @@
+- E2B for agent runtime env
+- python backend
+- React Frontend
+- GM: Gemini 3 Pro (for long context; spec folder + chat history)
+- Operation Master: Claude 4.5 Opus (strong tool use) where applicable
+- Engineer L1: well-balanced model (e.g. Claude 4.5)—cost/performance tradeoff for routine tasks
+- Engineer L2: ultra-performance model (e.g. Claude 4.6)—high capability, token-heavy; use for hard or critical tasks
+- 
