@@ -54,41 +54,178 @@ The client never needs to talk to individual engineers. The client talks to the 
 \end{itemize}
 
 %% ============================================================
+\section{Agent Architecture}
+%% ============================================================
+
+\subsection{Design Philosophy}
+
+All agents and subagents have read access to all documents and equal access to tooling. They differ by context, pipeline, and roles. All agents are \textbf{rule-based}, not state-based; do not overdesign execution workflow. Agent prompts should encourage agents to think and act creatively, outside the box.
+
+\subsubsection{Rule-based Design}
+
+Agents are given: \textbf{goal}, \textbf{priority}, \textbf{rules}, and \textbf{tools}. They achieve the goal by priority, following the rules, using the tools. Within this framework, agents may act as they see fit.
+
+\subsection{Priority System}
+
+Task priority has two dimensions:
+\begin{itemize}
+  \item \textbf{Level of critical-ness}: How important is the task?
+  \item \textbf{Level of urgent-ness}: How time-sensitive is the task?
+\end{itemize}
+
+Each level is a number from 0 to 10; \textbf{0 = most critical / most urgent}.
+
+\noindent Example: \textbf{0 critical and 0 urgent} --- product failed in production, production DB deleted.
+
+A task can be Critical but not Urgent, or Urgent but not Critical.
+
+\subsection{Ticket System}
+
+Agent-to-agent communication uses a ticket queue.
+
+\subsubsection{Use of Tickets}
+\begin{enumerate}
+  \item Task assignment
+  \item Questions, clarification
+  \item Need help
+  \item Report issues
+\end{enumerate}
+
+\subsubsection{Ticket Behaviour}
+\begin{itemize}
+  \item Agents may sleep once they believe their task is finished.
+  \item A ticket invokes the agent automatically.
+  \item Tickets have only \textbf{header}, \textbf{priority}, and \textbf{FROM}; they open a conversation channel.
+  \item Higher priority agent decides to close the conversation.
+  \item Lower priority agent should prioritize high priority agent tickets ($-3$ of its original priority).
+\end{itemize}
+
+\subsubsection{Agent Priority}
+\begin{itemize}
+  \item \textbf{0}: GM
+  \item \textbf{1}: Operation Master
+  \item \textbf{2}: Engineers
+\end{itemize}
+
+\subsection{Kanban Board Access}
+
+GM, subagents, and user have access to the Kanban board. Only GM and user have write access. The Kanban board is connected to the UI and triggers tasks.
+
+\subsection{Source of Truth Documents}
+
+\begin{itemize}
+  \item \texttt{GrandSpecification.tex} --- master product specification
+  \item \texttt{GrandArchitecture.tex} --- master architecture document
+  \item \texttt{API\&Schema.tex} --- API and schema definitions (owned by Operation Master)
+\end{itemize}
+
+%% ============================================================
 \section{Agent Roles}
 %% ============================================================
 
-\subsection{GM (exactly 1)}
+\subsection{GM (exactly 1, rule-based)}
 
+\subsubsection{Goal}
 \begin{itemize}
-  \item \textbf{Owns}: Top-level specification, workflow definition, master spec folder (LaTeX sources and compiled PDFs).
-  \item \textbf{Talks to}: Client (always), Operation Masters, Engineers.
-  \item \textbf{Busy queue}: When GM is processing a client request or talking to another agent, incoming agent requests (from Operation Masters/Engineers) go into a FIFO queue. Client messages always take priority.
-  \item \textbf{Responsibilities}: Understand client needs, translate to high-level specs, assign Operation Masters, approve major decisions, maintain the spec folder.
+  \item Own architecture; translate user requests into specification.
+  \item Bridge between user and project; assist with requests (add/remove feature, concern, explanation).
+  \item Gate-keep specification and architecture documents.
+  \item Final gate-keeper for quality control.
 \end{itemize}
 
-\subsection{Operation Master (0 or more, scaled by load)}
+\subsubsection{Rules}
+\begin{enumerate}
+  \item Ensure user input is logical and clear.
+  \item Be willing to question user's questionable design decisions.
+  \item Be in charge and responsible for the project to the user's specification.
+  \item Maximum freedom, with exception of certain critical commands.
+  \item Should confirm \texttt{API\&Schema.tex} if GM finds it has a problem (send a ticket).
+\end{enumerate}
 
+\subsubsection{Tools}
+Same tooling as other agents; write access to Kanban; access to shared spec folder and user chat; write access to source of truth documents.
+
+\subsubsection{Design Notes}
 \begin{itemize}
-  \item \textbf{Owns}: Requirement breakdown, spec-level acceptance tests, task assignment.
-  \item \textbf{Talks to}: GM (queued if GM busy), Engineers under them, other Operation Masters.
-  \item \textbf{Responsibilities}: Break GM specs into tasks, ensure tasks are non-conflicting (by module/feature/git branch), define ``done'' criteria (spec-level tests that must pass), review Engineer output against spec.
-  \item \textbf{Git-aware}: Assigns work so Engineers operate on separate modules/branches to avoid merge conflicts.
+  \item Runs on Gemini 3 Pro (long context: spec folder + chat history + project knowledge).
+  \item Context: user chat history + vectorized project knowledge.
+  \item Shared specification folder with user; that folder should be vectorized into memory.
+  \item Prompts: (1) check user input and ask to clarify potential misunderstanding; (2) bravely point out user mistakes.
+  \item Implement as rule-based, not pipeline/state-based.
 \end{itemize}
 
-\subsection{Engineer (multiple: Level 1 and Level 2)}
+\subsection{Operation Master (0 or more, scaled by load, rule-based)}
 
-Two tiers by model and use:
-
+\subsubsection{Goal}
 \begin{itemize}
-  \item \textbf{Engineer L1}: Well-balanced model (e.g.\ Claude 4.5). Used for routine implementation; good cost/performance. Owns implementation + unit/integration tests for assigned tasks.
-  \item \textbf{Engineer L2}: Ultra-performance model (e.g.\ Claude 4.6). Used for hard or critical tasks; highest capability but token-heavy (``token nightmare''). Same responsibilities as L1, reserved for when L1 is insufficient or quality is paramount.
+  \item Decide who works on what (engineers).
+  \item Break down specification into submodules and features.
+  \item Define APIs and schemas between submodules and features.
+  \item Define tests for submodules and features.
+  \item Prefer assigning an entire submodule to an agent rather than a single feature.
+  \item Provide agents with the context needed to do their work.
+  \item Orchestrator of different modules.
 \end{itemize}
 
-\noindent Both levels:
+\subsubsection{Priority}
+\begin{enumerate}
+  \item Feature and submodule finalization.
+  \item Ensure engineers are not working on overlapping feature, deprecated feature; receive updated context.
+  \item Integration testing.
+\end{enumerate}
+
+\subsubsection{Goal --- on Task Breakdown}
+\begin{enumerate}
+  \item Breakdown tasks each into minimal actionable features and modules.
+  \item Write \texttt{API\&Schema.tex}.
+\end{enumerate}
+
+\subsubsection{Goal --- on Update Features}
+\begin{enumerate}
+  \item Learn the two sources of truth (\texttt{GrandSpecification.tex} and \texttt{GrandArchitecture.tex}).
+  \item Update module and feature lists.
+  \item Update validation test, APIs and Schemas.
+  \item Manage workflow of agents; sleep if all agents are properly managed.
+\end{enumerate}
+
+\subsubsection{Rules --- Update Features}
+\begin{enumerate}
+  \item Each module and task must be minimal and actionable with no conflict.
+  \item All deprecated tasks should be deleted and aborted.
+\end{enumerate}
+
+\subsubsection{Rules --- Manage Agents}
+\begin{enumerate}
+  \item No agent is working on overlapping module/feature or deprecated module/feature.
+\end{enumerate}
+
+\subsubsection{Tools}
+Same tooling as other agents; read and write access to Kanban; write access to \texttt{API\&Schema.tex}.
+
+\subsubsection{Design Notes}
 \begin{itemize}
-  \item \textbf{Talks to}: GM (queued if GM busy), their Operation Master, other Engineers.
-  \item \textbf{Responsibilities}: Implement assigned task, write tests, ensure tests pass, report completion.
+  \item Runs on Opus 4.5.
+  \item Expressed here as rule-based (triggers + rules), not as pipeline/state machine.
 \end{itemize}
+
+\subsection{Engineer (multiple, rule-based)}
+
+\subsubsection{Goal}
+Implement task based on specification from higher level agent.
+
+\subsubsection{Pipeline}
+\begin{enumerate}
+  \item Implement based on specification.
+  \item Write unit test for each feature and unit; if test not passed, back to implementation.
+  \item Check if pass Operation Master specified test; if not, back to implementation.
+\end{enumerate}
+
+\subsubsection{Rules}
+\begin{enumerate}
+  \item If encounter conflict of module not assigned to me, send ticket to Operation Master.
+  \item If encounter problem with architecture itself, send ticket to GM.
+  \item If encounter problem in general, search solution in RAG first; if not found, contact Operation Master.
+\end{enumerate}
 
 %% ============================================================
 \section{Client Surface}
