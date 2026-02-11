@@ -11,6 +11,7 @@ from backend.api.v1.router import api_router
 from backend.api_internal.router import internal_router
 from backend.core.error_handlers import aict_exception_handler
 from backend.core.exceptions import AICTException
+from backend.websocket.endpoint import router as ws_router
 
 
 @asynccontextmanager
@@ -39,3 +40,6 @@ app.include_router(api_router, prefix="/api/v1")
 
 # Internal API (agent tools)
 app.include_router(internal_router, prefix="/internal/agent")
+
+# WebSocket endpoint
+app.include_router(ws_router)

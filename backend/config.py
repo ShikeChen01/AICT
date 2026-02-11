@@ -1,4 +1,11 @@
+import os
+
+from pydantic import Field
 from pydantic_settings import BaseSettings
+
+# Load .env.development when ENV=development; otherwise .env (production/default)
+_env = os.getenv("ENV", "").lower()
+_env_file = ".env.development" if _env == "development" else ".env"
 
 
 class Settings(BaseSettings):
@@ -10,6 +17,9 @@ class Settings(BaseSettings):
 
     # E2B
     e2b_api_key: str = ""
+    e2b_base_url: str = "https://api.e2b.dev"
+    e2b_timeout_seconds: int = Field(default=60, ge=5, le=600)
+    e2b_template_id: str = ""
 
     # LLM
     anthropic_api_key: str = ""
@@ -21,14 +31,14 @@ class Settings(BaseSettings):
     code_repo_path: str = "/data/project"
 
     # Agent limits
-    max_engineers: int = 5
+    max_engineers: int = Field(default=5, ge=1, le=5)
 
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = False
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {"env_file": _env_file, "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()

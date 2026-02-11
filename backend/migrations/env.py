@@ -3,11 +3,12 @@ Alembic environment configuration.
 """
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import pool
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import async_engine_from_config, create_async_engine
 
 from backend.db.models import Base
 
@@ -15,13 +16,16 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Prefer DATABASE_URL env (avoids ConfigParser % interpolation); fallback to alembic.ini
+url = os.getenv("DATABASE_URL") or config.get_main_option("sqlalchemy.url")
+
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
+    use_url = url or config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=use_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -38,11 +42,14 @@ def do_run_migrations(connection):
 
 
 async def run_async_migrations() -> None:
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    if url:
+        connectable = create_async_engine(url, poolclass=pool.NullPool)
+    else:
+        connectable = async_engine_from_config(
+            config.get_section(config.config_ini_section, {}),
+            prefix="sqlalchemy.",
+            poolclass=pool.NullPool,
+        )
 
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

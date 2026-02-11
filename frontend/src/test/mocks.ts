@@ -1,0 +1,131 @@
+import type { Task, ChatMessage, Agent, TaskStatus } from '../types';
+
+export const mockProjectId = '00000000-0000-0000-0000-000000000001';
+
+export const mockTasks: Task[] = [
+  {
+    id: '11111111-1111-1111-1111-111111111111',
+    project_id: mockProjectId,
+    title: 'Implement user authentication',
+    description: 'Add JWT-based authentication to the API',
+    status: 'backlog' as TaskStatus,
+    critical: 3,
+    urgent: 5,
+    assigned_agent_id: null,
+    module_path: 'src/auth',
+    git_branch: null,
+    pr_url: null,
+    parent_task_id: null,
+    created_by_id: null,
+    created_at: '2026-02-01T10:00:00Z',
+    updated_at: '2026-02-01T10:00:00Z',
+  },
+  {
+    id: '22222222-2222-2222-2222-222222222222',
+    project_id: mockProjectId,
+    title: 'Create database models',
+    description: 'Define SQLAlchemy models for all entities',
+    status: 'in_progress' as TaskStatus,
+    critical: 2,
+    urgent: 3,
+    assigned_agent_id: '33333333-3333-3333-3333-333333333333',
+    module_path: 'src/db/models',
+    git_branch: 'feature/db-models',
+    pr_url: null,
+    parent_task_id: null,
+    created_by_id: null,
+    created_at: '2026-02-01T11:00:00Z',
+    updated_at: '2026-02-05T14:30:00Z',
+  },
+  {
+    id: '44444444-4444-4444-4444-444444444444',
+    project_id: mockProjectId,
+    title: 'Write unit tests',
+    description: null,
+    status: 'done' as TaskStatus,
+    critical: 5,
+    urgent: 7,
+    assigned_agent_id: null,
+    module_path: 'tests',
+    git_branch: 'feature/tests',
+    pr_url: 'https://github.com/example/repo/pull/42',
+    parent_task_id: null,
+    created_by_id: null,
+    created_at: '2026-01-28T09:00:00Z',
+    updated_at: '2026-02-03T16:45:00Z',
+  },
+];
+
+export const mockChatMessages: ChatMessage[] = [
+  {
+    id: 'msg-1',
+    project_id: mockProjectId,
+    role: 'user',
+    content: 'Hello GM, can you help me plan the authentication module?',
+    attachments: null,
+    created_at: '2026-02-10T09:00:00Z',
+  },
+  {
+    id: 'msg-2',
+    project_id: mockProjectId,
+    role: 'gm',
+    content: 'Of course! I\'d recommend starting with JWT tokens for stateless auth. Would you like me to create tasks for this?',
+    attachments: null,
+    created_at: '2026-02-10T09:01:00Z',
+  },
+];
+
+export const mockAgents: Agent[] = [
+  {
+    id: 'gm-agent-id',
+    project_id: mockProjectId,
+    role: 'gm',
+    display_name: 'GM',
+    model: 'claude-4.5-opus',
+    status: 'active',
+    current_task_id: null,
+    sandbox_id: 'sandbox-gm',
+    sandbox_persist: true,
+    priority: 0,
+    created_at: '2026-02-01T00:00:00Z',
+    updated_at: '2026-02-10T09:00:00Z',
+  },
+  {
+    id: 'om-agent-id',
+    project_id: mockProjectId,
+    role: 'om',
+    display_name: 'OM',
+    model: 'gemini-3-pro',
+    status: 'sleeping',
+    current_task_id: null,
+    sandbox_id: 'sandbox-om',
+    sandbox_persist: true,
+    priority: 1,
+    created_at: '2026-02-01T00:00:00Z',
+    updated_at: '2026-02-08T15:00:00Z',
+  },
+  {
+    id: '33333333-3333-3333-3333-333333333333',
+    project_id: mockProjectId,
+    role: 'engineer',
+    display_name: 'Engineer-1',
+    model: 'claude-4.5-opus',
+    status: 'busy',
+    current_task_id: '22222222-2222-2222-2222-222222222222',
+    sandbox_id: null,
+    sandbox_persist: false,
+    priority: 2,
+    created_at: '2026-02-02T10:00:00Z',
+    updated_at: '2026-02-10T08:00:00Z',
+  },
+];
+
+// Mock fetch response helper
+export function mockFetchResponse<T>(data: T, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => data,
+    headers: new Headers(),
+  } as Response;
+}

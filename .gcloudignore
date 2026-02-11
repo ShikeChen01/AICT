@@ -1,0 +1,16 @@
+# Ignore when uploading for Cloud Build
+.git
+.gitignore
+.env
+.env.development
+.env.production
+*.pdf
+docs/
+.cursor
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+node_modules
+tmp/
