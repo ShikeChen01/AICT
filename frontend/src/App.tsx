@@ -13,6 +13,10 @@ import { setAuthToken, healthCheck } from './api/client';
 // In production, this would come from a project selector or URL
 const DEFAULT_PROJECT_ID = '00000000-0000-0000-0000-000000000001';
 
+// Set auth token SYNCHRONOUSLY before any component renders/fetches.
+// Must run at module level so child useEffect hooks already have the token.
+setAuthToken(import.meta.env.VITE_API_TOKEN || 'change-me-in-production');
+
 function Sidebar() {
   return (
     <aside className="w-64 bg-gray-900 text-white flex flex-col">
@@ -116,11 +120,7 @@ function App() {
   const [isBackendConnected, setIsBackendConnected] = useState(false);
   const [projectId] = useState(DEFAULT_PROJECT_ID);
 
-  // Initialize auth token (for MVP-0, use hardcoded token)
-  useEffect(() => {
-    // Set default token for development
-    setAuthToken('change-me-in-production');
-  }, []);
+  // Token is set synchronously at module level above (before any component renders).
 
   // Check backend connection
   useEffect(() => {

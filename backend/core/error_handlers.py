@@ -14,13 +14,14 @@ from backend.core.exceptions import (
     InvalidTaskStatus,
     MaxEngineersReached,
     ProjectNotFoundError,
+    SandboxNotFoundError,
     ScopeViolationError,
     TaskNotFoundError,
     TicketCloseNotAllowed,
     TicketNotFoundError,
 )
 
-_NOT_FOUND = (TaskNotFoundError, AgentNotFoundError, TicketNotFoundError, ProjectNotFoundError)
+_NOT_FOUND = (TaskNotFoundError, AgentNotFoundError, TicketNotFoundError, ProjectNotFoundError, SandboxNotFoundError)
 _FORBIDDEN = (GitOperationBlocked, ScopeViolationError, TicketCloseNotAllowed)
 _BAD_REQUEST = (InvalidAgentRole, InvalidTaskStatus, MaxEngineersReached)
 
@@ -41,5 +42,11 @@ async def aict_exception_handler(request: Request, exc: AICTException) -> JSONRe
 
     return JSONResponse(
         status_code=code,
-        content={"error": str(exc), "type": error_type},
+        content={
+            "error": str(exc),
+            "type": error_type,
+            # Frontend-compatible aliases
+            "error_type": error_type,
+            "message": str(exc),
+        },
     )

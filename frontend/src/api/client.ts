@@ -237,7 +237,9 @@ export class WebSocketClient {
     this.isConnecting = true;
     this.shouldReconnect = true;
 
-    const url = new URL(`${WS_BASE}/${this.projectId}`);
+    const url = new URL(WS_BASE, window.location.href);
+    url.searchParams.set('project_id', this.projectId);
+    url.searchParams.set('channels', 'all');
     if (authToken) {
       url.searchParams.set('token', authToken);
     }

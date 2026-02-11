@@ -57,10 +57,10 @@ class TestEventTypes:
     def test_websocket_event_structure(self):
         event = WebSocketEvent(
             type=EventType.CHAT_MESSAGE,
-            payload={"test": "data"},
+            data={"test": "value"},
         )
         assert event.type == EventType.CHAT_MESSAGE
-        assert event.payload == {"test": "data"}
+        assert event.data == {"test": "value"}
         assert event.timestamp is not None
 
     def test_chat_message_payload(self):
@@ -131,15 +131,15 @@ class TestEventFactories:
 
         event = create_chat_message_event(msg)
         assert event.type == EventType.CHAT_MESSAGE
-        assert event.payload["role"] == "gm"
-        assert event.payload["content"] == "Hello user"
+        assert event.data["role"] == "gm"
+        assert event.data["content"] == "Hello user"
 
     def test_create_gm_status_event(self):
         project_id = uuid.uuid4()
         event = create_gm_status_event(project_id, "busy")
 
         assert event.type == EventType.GM_STATUS
-        assert event.payload["status"] == "busy"
+        assert event.data["status"] == "busy"
 
     def test_create_task_created_event(self):
         task = type("Task", (), {
@@ -162,7 +162,7 @@ class TestEventFactories:
 
         event = create_task_created_event(task)
         assert event.type == EventType.TASK_CREATED
-        assert event.payload["title"] == "New Task"
+        assert event.data["title"] == "New Task"
 
     def test_create_task_update_event(self):
         task = type("Task", (), {
@@ -185,7 +185,7 @@ class TestEventFactories:
 
         event = create_task_update_event(task)
         assert event.type == EventType.TASK_UPDATE
-        assert event.payload["status"] == "in_progress"
+        assert event.data["status"] == "in_progress"
 
     def test_create_agent_status_event(self):
         agent = type("Agent", (), {
@@ -199,8 +199,8 @@ class TestEventFactories:
 
         event = create_agent_status_event(agent)
         assert event.type == EventType.AGENT_STATUS
-        assert event.payload["role"] == "om"
-        assert event.payload["status"] == "busy"
+        assert event.data["role"] == "om"
+        assert event.data["status"] == "busy"
 
 
 class TestConnectionInfo:

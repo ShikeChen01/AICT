@@ -33,13 +33,13 @@ class EventType(str, Enum):
 class WebSocketEvent(BaseModel):
     """Base WebSocket event structure."""
     type: EventType
-    payload: dict[str, Any]
+    data: dict[str, Any]
     timestamp: datetime = None
 
-    def __init__(self, **data):
-        if data.get("timestamp") is None:
-            data["timestamp"] = datetime.now()
-        super().__init__(**data)
+    def __init__(self, **kwargs):
+        if kwargs.get("timestamp") is None:
+            kwargs["timestamp"] = datetime.now()
+        super().__init__(**kwargs)
 
 
 # ── Chat Events ────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ def create_chat_message_event(message) -> WebSocketEvent:
     """Create a chat message WebSocket event."""
     return WebSocketEvent(
         type=EventType.CHAT_MESSAGE,
-        payload=ChatMessagePayload(
+        data=ChatMessagePayload(
             id=message.id,
             project_id=message.project_id,
             role=message.role,
@@ -114,7 +114,7 @@ def create_gm_status_event(project_id: UUID, status: str) -> WebSocketEvent:
     """Create a GM status WebSocket event."""
     return WebSocketEvent(
         type=EventType.GM_STATUS,
-        payload=GMStatusPayload(
+        data=GMStatusPayload(
             project_id=project_id,
             status=status,
         ).model_dump(mode="json"),
@@ -125,7 +125,7 @@ def create_task_created_event(task) -> WebSocketEvent:
     """Create a task created WebSocket event."""
     return WebSocketEvent(
         type=EventType.TASK_CREATED,
-        payload=TaskPayload(
+        data=TaskPayload(
             id=task.id,
             project_id=task.project_id,
             title=task.title,
@@ -149,7 +149,7 @@ def create_task_update_event(task) -> WebSocketEvent:
     """Create a task update WebSocket event."""
     return WebSocketEvent(
         type=EventType.TASK_UPDATE,
-        payload=TaskPayload(
+        data=TaskPayload(
             id=task.id,
             project_id=task.project_id,
             title=task.title,
@@ -173,7 +173,7 @@ def create_agent_status_event(agent) -> WebSocketEvent:
     """Create an agent status WebSocket event."""
     return WebSocketEvent(
         type=EventType.AGENT_STATUS,
-        payload=AgentStatusPayload(
+        data=AgentStatusPayload(
             id=agent.id,
             project_id=agent.project_id,
             role=agent.role,

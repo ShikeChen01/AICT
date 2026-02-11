@@ -9,8 +9,12 @@ _env_file = ".env.development" if _env == "development" else ".env"
 
 
 class Settings(BaseSettings):
-    # Database
+    # Database — use DATABASE_URL directly, or build from components
     database_url: str = "postgresql+asyncpg://aict:aict@localhost:5432/aict"
+    db_user: str = ""
+    db_password: str = ""
+    db_name: str = ""
+    db_socket_path: str = ""  # e.g. /cloudsql/project:region:instance
 
     # Auth
     api_token: str = "change-me-in-production"

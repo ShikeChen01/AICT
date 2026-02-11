@@ -1,9 +1,42 @@
-tmp/
+# Dependencies & build
 node_modules/
+dist/
+out/
+package-lock.json
+
+# Environment
 .env
 .env.development
 .env.production
-dist/
+.env.local
+.env.*.local
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.eggs/
+*.egg
+
+# IDE / editor
+.vscode/
+.vscode-test/
+*.code-workspace
+.idea/
+.cursor/
+
+# Project-specific
+tmp/
+agentok_example/
+.vibecanvas.json
+ideas.md
+
+# LaTeX
 *.aux
 *.log
 *.out
@@ -12,12 +45,3 @@ dist/
 *.synctex.gz
 *.fdb_latexmk
 *.fls
-package-lock.json
-node_modules/
-out/
-agentok_example/
-.vibecanvas.json
-.cursor
-.vscode
-.vscode-test
-ideas.md
