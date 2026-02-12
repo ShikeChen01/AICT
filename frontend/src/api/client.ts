@@ -1,0 +1,314 @@
+/**
+ * AICT API Client
+ * REST + WebSocket client with token auth
+ */
+
+import type {
+  Task,
+  TaskCreate,
+  TaskUpdate,
+  ChatMessage,
+  ChatMessageCreate,
+  Agent,
+  Ticket,
+  TicketCreate,
+  Project,
+  WSEvent,
+  APIError,
+} from '../types';
+
+// ─── Configuration ───────────────────────────────────────────────────
+
+const API_BASE = '/api/v1';
+const WS_BASE = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+
+// Token stored in memory (in production, use secure storage)
+let authToken: string | null = null;
+
+export function setAuthToken(token: string): void {
+  authToken = token;
+}
+
+export function getAuthToken(): string | null {
+  return authToken;
+}
+
+// ─── HTTP Client ─────────────────────────────────────────────────────
+
+class APIClientError extends Error {
+  status: number;
+  errorType: string;
+  detail?: unknown;
+
+  constructor(
+    status: number,
+    errorType: string,
+    message: string,
+    detail?: unknown
+  ) {
+    super(message);
+    this.name = 'APIClientError';
+    this.status = status;
+    this.errorType = errorType;
+    this.detail = detail;
+  }
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    let errorData: APIError | null = null;
+    try {
+      errorData = await response.json();
+    } catch {
+      // ignore parse error
+    }
+
+    throw new APIClientError(
+      response.status,
+      errorData?.error_type ?? 'unknown_error',
+      errorData?.message ?? `HTTP ${response.status}`,
+      errorData?.detail
+    );
+  }
+
+  // Handle 204 No Content
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json();
+}
+
+// ─── REST API Methods ────────────────────────────────────────────────
+
+// Health check
+export async function healthCheck(): Promise<{ status: string }> {
+  return request<{ status: string }>('GET', '/health');
+}
+
+// ─── Chat ────────────────────────────────────────────────────────────
+
+export async function getChatHistory(projectId: string, limit = 100, offset = 0): Promise<ChatMessage[]> {
+  return request<ChatMessage[]>('GET', `/chat/history?project_id=${projectId}&limit=${limit}&offset=${offset}`);
+}
+
+export async function sendChatMessage(
+  projectId: string,
+  message: ChatMessageCreate
+): Promise<ChatMessage> {
+  return request<ChatMessage>('POST', `/chat/send?project_id=${projectId}`, message);
+}
+
+export async function getChatMessage(messageId: string): Promise<ChatMessage> {
+  return request<ChatMessage>('GET', `/chat/message/${messageId}`);
+}
+
+// ─── Tasks ───────────────────────────────────────────────────────────
+
+export async function getTasks(projectId: string, status?: string): Promise<Task[]> {
+  let url = `/tasks?project_id=${projectId}`;
+  if (status) url += `&status=${status}`;
+  return request<Task[]>('GET', url);
+}
+
+export async function getTask(taskId: string): Promise<Task> {
+  return request<Task>('GET', `/tasks/${taskId}`);
+}
+
+export async function createTask(
+  projectId: string,
+  task: TaskCreate
+): Promise<Task> {
+  return request<Task>('POST', `/tasks?project_id=${projectId}`, task);
+}
+
+export async function updateTask(
+  taskId: string,
+  update: TaskUpdate
+): Promise<Task> {
+  return request<Task>('PATCH', `/tasks/${taskId}`, update);
+}
+
+export async function updateTaskStatus(taskId: string, status: string): Promise<Task> {
+  return request<Task>('PATCH', `/tasks/${taskId}/status?status=${status}`);
+}
+
+export async function assignTask(taskId: string, agentId: string): Promise<Task> {
+  return request<Task>('POST', `/tasks/${taskId}/assign?agent_id=${agentId}`);
+}
+
+export async function deleteTask(taskId: string): Promise<void> {
+  return request<void>('DELETE', `/tasks/${taskId}`);
+}
+
+// ─── Agents ──────────────────────────────────────────────────────────
+
+export async function getAgents(projectId: string): Promise<Agent[]> {
+  return request<Agent[]>('GET', `/agents?project_id=${projectId}`);
+}
+
+export async function getAgent(agentId: string): Promise<Agent> {
+  return request<Agent>('GET', `/agents/${agentId}`);
+}
+
+// ─── Tickets ─────────────────────────────────────────────────────────
+
+export async function getTickets(projectId: string, status?: string): Promise<Ticket[]> {
+  let url = `/tickets?project_id=${projectId}`;
+  if (status) url += `&status=${status}`;
+  return request<Ticket[]>('GET', url);
+}
+
+export async function getTicket(ticketId: string): Promise<Ticket> {
+  return request<Ticket>('GET', `/tickets/${ticketId}`);
+}
+
+export async function createTicket(
+  projectId: string,
+  fromAgentId: string,
+  ticket: TicketCreate
+): Promise<Ticket> {
+  return request<Ticket>('POST', `/tickets?project_id=${projectId}&from_agent_id=${fromAgentId}`, ticket);
+}
+
+export async function replyToTicket(
+  ticketId: string,
+  fromAgentId: string,
+  content: string
+): Promise<unknown> {
+  return request('POST', `/tickets/${ticketId}/reply?from_agent_id=${fromAgentId}`, { content });
+}
+
+export async function closeTicket(ticketId: string, closingAgentId: string): Promise<Ticket> {
+  return request<Ticket>('POST', `/tickets/${ticketId}/close?closing_agent_id=${closingAgentId}`);
+}
+
+// ─── Projects ────────────────────────────────────────────────────────
+
+export async function getProjects(): Promise<Project[]> {
+  return request<Project[]>('GET', '/projects');
+}
+
+export async function getProject(projectId: string): Promise<Project> {
+  return request<Project>('GET', `/projects/${projectId}`);
+}
+
+// ─── WebSocket Client ────────────────────────────────────────────────
+
+type WSEventHandler = (event: WSEvent) => void;
+
+export class WebSocketClient {
+  private ws: WebSocket | null = null;
+  private handlers: Set<WSEventHandler> = new Set();
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+  private reconnectDelay = 1000;
+  private projectId: string;
+  private isConnecting = false;
+  private shouldReconnect = true;
+
+  constructor(projectId: string) {
+    this.projectId = projectId;
+  }
+
+  connect(): void {
+    if (this.ws?.readyState === WebSocket.OPEN || this.isConnecting) {
+      return;
+    }
+
+    this.isConnecting = true;
+    this.shouldReconnect = true;
+
+    const url = new URL(WS_BASE, window.location.href);
+    url.searchParams.set('project_id', this.projectId);
+    url.searchParams.set('channels', 'all');
+    if (authToken) {
+      url.searchParams.set('token', authToken);
+    }
+
+    this.ws = new WebSocket(url.toString());
+
+    this.ws.onopen = () => {
+      console.log('[WS] Connected');
+      this.isConnecting = false;
+      this.reconnectAttempts = 0;
+    };
+
+    this.ws.onmessage = (event) => {
+      try {
+        const wsEvent = JSON.parse(event.data) as WSEvent;
+        this.handlers.forEach((handler) => handler(wsEvent));
+      } catch (err) {
+        console.error('[WS] Failed to parse message:', err);
+      }
+    };
+
+    this.ws.onclose = (event) => {
+      console.log('[WS] Disconnected:', event.code, event.reason);
+      this.isConnecting = false;
+      this.ws = null;
+
+      if (this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
+        this.reconnectAttempts++;
+        const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+        console.log(`[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+        setTimeout(() => this.connect(), delay);
+      }
+    };
+
+    this.ws.onerror = (error) => {
+      console.error('[WS] Error:', error);
+    };
+  }
+
+  disconnect(): void {
+    this.shouldReconnect = false;
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+  }
+
+  subscribe(handler: WSEventHandler): () => void {
+    this.handlers.add(handler);
+    return () => this.handlers.delete(handler);
+  }
+
+  send(message: unknown): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    } else {
+      console.warn('[WS] Cannot send: not connected');
+    }
+  }
+
+  get isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+}
+
+// Factory function for creating WebSocket client
+export function createWebSocketClient(projectId: string): WebSocketClient {
+  return new WebSocketClient(projectId);
+}
+
+// Export error class
+export { APIClientError };
