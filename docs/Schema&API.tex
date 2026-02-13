@@ -109,15 +109,15 @@ Tracks all agent instances.
 CREATE TABLE agents (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id      UUID REFERENCES projects(id) ON DELETE CASCADE,
-  role            VARCHAR(50) NOT NULL,  -- 'gm', 'om', 'engineer'
-  level           VARCHAR(10),           -- NULL for GM/OM; 'L1' or 'L2' for engineers
-  display_name    VARCHAR(100) NOT NULL, -- e.g. 'GM', 'OM-1', 'Engineer-3'
+  role            VARCHAR(50) NOT NULL,  -- 'manager', 'engineer'
+  level           VARCHAR(10),           -- NULL for Manager; 'L1' or 'L2' for engineers
+  display_name    VARCHAR(100) NOT NULL, -- e.g. 'Manager', 'Engineer-3'
   model           VARCHAR(100) NOT NULL, -- e.g. 'gemini-3-pro', 'claude-4.5-opus'
   status          VARCHAR(20) DEFAULT 'sleeping', -- 'sleeping', 'active', 'busy'
   current_task_id UUID,                  -- FK to tasks, nullable
   sandbox_id      VARCHAR(255),          -- E2B sandbox ID, NULL if not running
-  sandbox_persist BOOLEAN DEFAULT FALSE, -- TRUE for GM/OM, FALSE for engineers
-  priority        INT DEFAULT 2,         -- 0=GM, 1=OM, 2=Engineer
+  sandbox_persist BOOLEAN DEFAULT FALSE, -- TRUE for Manager, FALSE for engineers
+  priority        INT DEFAULT 2,         -- 0=Manager, 1=Engineer
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
@@ -186,13 +186,13 @@ CREATE TABLE ticket_messages (
 
 \subsection{Table: chat\_messages}
 
-Client $\leftrightarrow$ GM conversation.
+Client $\leftrightarrow$ Manager conversation.
 
 \begin{lstlisting}
 CREATE TABLE chat_messages (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id      UUID REFERENCES projects(id) ON DELETE CASCADE,
-  role            VARCHAR(20) NOT NULL,  -- 'user', 'gm'
+  role            VARCHAR(20) NOT NULL,  -- 'user', 'manager'
   content         TEXT NOT NULL,
   attachments     JSONB,                 -- array of file references
   created_at      TIMESTAMPTZ DEFAULT NOW()
@@ -271,7 +271,7 @@ POST   & /project/init         & Initialize new project (spec repo + clone code 
 \bottomrule
 \end{longtable}
 
-\subsection{Chat (Client $\leftrightarrow$ GM)}
+\subsection{Chat (Client $\leftrightarrow$ Manager)}
 
 \begin{longtable}{p{2.5cm} p{4cm} p{7cm}}
 \toprule
@@ -279,8 +279,8 @@ POST   & /project/init         & Initialize new project (spec repo + clone code 
 \midrule
 \endhead
 GET    & /chat/messages        & Get chat history (paginated) \\
-POST   & /chat/messages        & Send message to GM (triggers GM agent) \\
-GET    & /chat/status          & Get GM status (available/busy) \\
+POST   & /chat/messages        & Send message to Manager (triggers Manager agent) \\
+GET    & /chat/status          & Get Manager status (available/busy) \\
 \bottomrule
 \end{longtable}
 
@@ -357,7 +357,7 @@ All messages are JSON with a \texttt{type} field.
 \subsection{Client $\to$ Server}
 
 \begin{lstlisting}
-// Send chat message to GM
+// Send chat message to Manager
 {
   "type": "chat_message",
   "content": "I want to add a login feature",
@@ -374,20 +374,20 @@ All messages are JSON with a \texttt{type} field.
 \subsection{Server $\to$ Client}
 
 \begin{lstlisting}
-// GM chat response (streamed)
+// Manager chat response (streamed)
 {
   "type": "chat_message",
-  "role": "gm",
+  "role": "manager",
   "content": "Sure, let me clarify...",
   "message_id": "uuid",
   "is_complete": false  // true when stream ends
 }
 
-// GM status change
+// Manager status change
 {
-  "type": "gm_status",
+  "type": "manager_status",
   "status": "busy",
-  "busy_with": "talking to OM-1"
+  "busy_with": "talking to Engineer-1"
 }
 
 // Kanban task update
@@ -459,7 +459,7 @@ POST   & /tickets/:id/close         & Close a ticket (higher priority only) \\
 \textbf{Create ticket request body:}
 \begin{lstlisting}
 {
-  "to_agent_role": "om",       // or specific agent_id
+  "to_agent_role": "manager",       // or specific agent_id
   "header": "Need clarification on auth module",
   "ticket_type": "question",   // 'task_assignment', 'question', 'help', 'issue'
   "critical": 5,
@@ -477,9 +477,9 @@ POST   & /tickets/:id/close         & Close a ticket (higher priority only) \\
 \endhead
 GET    & /tasks                     & List tasks (filtered by assignment, status) \\
 GET    & /tasks/:id                 & Get task details \\
-POST   & /tasks                     & Create task (OM/GM only) \\
+POST   & /tasks                     & Create task (Manager only) \\
 PUT    & /tasks/:id                 & Update task (status, description, etc.) \\
-PUT    & /tasks/:id/assign          & Assign task to agent (OM only) \\
+PUT    & /tasks/:id/assign          & Assign task to agent (Manager only) \\
 POST   & /tasks/:id/subtasks        & Create subtask \\
 \bottomrule
 \end{longtable}
@@ -534,11 +534,10 @@ POST   & /files/search              & Search files by pattern \\
 \textbf{Scope enforcement:}
 \begin{itemize}
   \item Engineers: can only write to their assigned \texttt{module\_path}
-  \item OM: can write to spec files and task definitions
-  \item GM: can write to spec folder and project config
+  \item Manager: has access to sandbox and codebase; can write to spec files, task definitions, and project code (e.g.\ for review, fixes, merging)
 \end{itemize}
 
-\subsection{Spec Folder Operations (GM/OM)}
+\subsection{Spec Folder Operations (Manager)}
 
 \begin{longtable}{p{2.5cm} p{5cm} p{6cm}}
 \toprule
@@ -590,10 +589,10 @@ POST   & /agent/sleep               & Declare intent to sleep (close sandbox if 
 \section{E2B Sandbox Lifecycle}
 %% ============================================================
 
-\subsection{GM and Operation Master}
+\subsection{Manager}
 
 \begin{enumerate}
-  \item Sandbox created on project initialization (GM) or when first needed (OM).
+  \item Sandbox created on project initialization (Manager) or when first needed.
   \item Sandbox persists across invocations.
   \item Agent is invoked via ticket or client message.
   \item Agent processes, calls tools, updates status.
@@ -608,10 +607,10 @@ POST   & /agent/sleep               & Declare intent to sleep (close sandbox if 
   \item Engineer clones project repo, checks out assigned branch.
   \item Engineer implements, commits, pushes, creates PR.
   \item Engineer updates task status to \texttt{in\_review}.
-  \item OM reviews PR:
+  \item Manager reviews PR:
     \begin{itemize}
-      \item If approved: OM merges PR, task status $\to$ \texttt{done}.
-      \item If rejected: OM sends ticket with feedback, engineer continues.
+      \item If approved: Manager merges PR, task status $\to$ \texttt{done}.
+      \item If rejected: Manager sends ticket with feedback, engineer continues.
     \end{itemize}
   \item When PR merged AND engineer has no more assigned tasks:
     \begin{itemize}

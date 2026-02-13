@@ -187,6 +187,21 @@ class TestTaskService:
         with pytest.raises(TaskNotFoundError):
             await service.get(sample_task.id)
 
+    async def test_delete_assigned_task_clears_agent_current_task(
+        self,
+        service: TaskService,
+        sample_project: Project,
+        sample_engineer: Agent,
+        session: AsyncSession,
+    ):
+        task = await service.create(sample_project.id, TaskCreate(title="Delete assigned"))
+        await service.assign(task.id, sample_engineer.id)
+
+        await service.delete(task.id)
+        await session.refresh(sample_engineer)
+
+        assert sample_engineer.current_task_id is None
+
     async def test_list_by_agent(
         self, service: TaskService, sample_project: Project, sample_engineer: Agent
     ):

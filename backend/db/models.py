@@ -3,11 +3,11 @@ SQLAlchemy models for AICT MVP-0.
 
 6 tables:
 - projects: single project config
-- agents: GM, OM, Engineers (max 5 engineers enforced in code)
+- agents: Manager, Engineers (max 5 engineers enforced in code)
 - tasks: Kanban cards with 2D priority (critical + urgent)
 - tickets: agent-to-agent communication queue
 - ticket_messages: conversation within a ticket
-- chat_messages: user <-> GM conversation
+- chat_messages: user <-> Manager conversation
 """
 
 import uuid
@@ -60,7 +60,7 @@ class Project(Base):
 
 # ── Agents ──────────────────────────────────────────────────────────
 
-VALID_ROLES = ("gm", "om", "engineer")
+VALID_ROLES = ("gm", "om", "manager", "engineer")
 VALID_STATUSES = ("sleeping", "active", "busy")
 
 
@@ -71,14 +71,14 @@ class Agent(Base):
     project_id = Column(
         Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
-    role = Column(String(50), nullable=False)  # 'gm', 'om', 'engineer'
-    display_name = Column(String(100), nullable=False)  # e.g. 'GM', 'OM-1', 'Engineer-3'
+    role = Column(String(50), nullable=False)  # 'manager', 'engineer' (gm/om deprecated)
+    display_name = Column(String(100), nullable=False)  # e.g. 'Manager', 'Engineer-3'
     model = Column(String(100), nullable=False)  # e.g. 'gemini-3-pro', 'claude-4.5-opus'
     status = Column(String(20), default="sleeping", nullable=False)
     current_task_id = Column(Uuid, ForeignKey("tasks.id"), nullable=True)
     sandbox_id = Column(String(255), nullable=True)
     sandbox_persist = Column(Boolean, default=False, nullable=False)
-    priority = Column(Integer, default=2, nullable=False)  # 0=GM, 1=OM, 2=Engineer
+    priority = Column(Integer, default=2, nullable=False)  # 0=Manager, 1=Engineer
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
@@ -196,7 +196,7 @@ class TicketMessage(Base):
 
 # ── Chat Messages ──────────────────────────────────────────────────
 
-VALID_CHAT_ROLES = ("user", "gm")
+VALID_CHAT_ROLES = ("user", "gm", "manager")
 
 
 class ChatMessage(Base):
@@ -206,7 +206,7 @@ class ChatMessage(Base):
     project_id = Column(
         Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
-    role = Column(String(20), nullable=False)  # 'user' or 'gm'
+    role = Column(String(20), nullable=False)  # 'user', 'manager' ('gm' deprecated)
     content = Column(Text, nullable=False)
     attachments = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)

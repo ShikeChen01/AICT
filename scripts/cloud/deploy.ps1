@@ -67,6 +67,9 @@ $yamlLines = @(
     "ANTHROPIC_API_KEY: '$($env:ANTHROPIC_API_KEY)'"
     "E2B_API_KEY: '$($env:E2B_API_KEY)'"
     "GOOGLE_API_KEY: '$($env:GOOGLE_API_KEY)'"
+    "GITHUB_TOKEN: '$($env:GITHUB_TOKEN)'"
+    "PROVISION_REPOS_ON_STARTUP: 'true'"
+    "CLONE_CODE_REPO_ON_STARTUP: 'true'"
     "MAX_ENGINEERS: '5'"
 )
 [System.IO.File]::WriteAllLines($EnvFile, $yamlLines)

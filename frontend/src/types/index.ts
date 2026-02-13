@@ -59,7 +59,7 @@ export interface TaskUpdate {
 
 // ─── Agent ───────────────────────────────────────────────────────────
 
-export type AgentRole = 'gm' | 'om' | 'engineer';
+export type AgentRole = 'gm' | 'om' | 'manager' | 'engineer';
 export type AgentStatus = 'sleeping' | 'active' | 'busy';
 
 export interface Agent {
@@ -72,14 +72,30 @@ export interface Agent {
   current_task_id: UUID | null;
   sandbox_id: string | null;
   sandbox_persist: boolean;
-  priority: number; // 0=GM, 1=OM, 2=Engineer
+  priority: number; // 0=GM/Manager, 1=Engineer
   created_at: string;
   updated_at: string;
 }
 
+export interface AgentTaskQueueItem {
+  id: UUID;
+  title: string;
+  status: TaskStatus;
+  critical: number;
+  urgent: number;
+  module_path: string | null;
+  updated_at: string;
+}
+
+export interface AgentStatusWithQueue extends Agent {
+  queue_size: number;
+  open_ticket_count: number;
+  task_queue: AgentTaskQueueItem[];
+}
+
 // ─── Chat ────────────────────────────────────────────────────────────
 
-export type ChatRole = 'user' | 'gm';
+export type ChatRole = 'user' | 'gm' | 'manager';
 
 export interface ChatMessage {
   id: UUID;
@@ -93,6 +109,10 @@ export interface ChatMessage {
 export interface ChatMessageCreate {
   content: string;
   attachments?: unknown[] | null;
+}
+
+export interface SendChatMessageResponse extends ChatMessage {
+  user_message?: ChatMessage | null;
 }
 
 // ─── Ticket ──────────────────────────────────────────────────────────
@@ -185,8 +205,12 @@ export interface WSTaskUpdateEvent {
 export interface WSAgentStatusEvent {
   type: 'agent_status';
   data: {
-    agent_id: UUID;
+    id: UUID;
+    project_id: UUID;
+    role: AgentRole;
+    display_name: string;
     status: AgentStatus;
+    current_task_id: UUID | null;
   };
 }
 

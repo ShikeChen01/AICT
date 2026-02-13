@@ -32,18 +32,17 @@
 
 \subsection{One-line Pitch}
 
-A web application where the \textbf{client} (user) talks to a \textbf{GM (General Manager)} agent who orchestrates \textbf{Operation Masters} and \textbf{Engineers} to build software---with a real-time kanban pipeline showing what every agent is doing, and a master specification folder (LaTeX to PDF) as the source of truth.
+A web application where the \textbf{client} (user) talks to a \textbf{Manager} agent who orchestrates \textbf{Engineers} to build software---with a real-time kanban pipeline showing what every agent is doing, and a master specification folder (LaTeX to PDF) as the source of truth.
 
 \subsection{Metaphor}
 
 \begin{itemize}
   \item \textbf{Client} = the customer who hired a software firm.
-  \item \textbf{GM} = the firm's general manager; single point of contact, reports to the client.
-  \item \textbf{Operation Master} = project manager + QA; breaks down work, writes specs and acceptance tests, ensures engineers don't conflict.
+  \item \textbf{Manager} = the firm's lead; single point of contact, reports to client, manages engineers, reviews code.
   \item \textbf{Engineer} = developer; writes code, writes tests, ships.
 \end{itemize}
 
-The client never needs to talk to individual engineers. The client talks to the GM, sees the board, and reads the specs.
+The client never needs to talk to individual engineers. The client talks to the Manager, sees the board, and reads the specs.
 
 \subsection{Non-goals (Initial Release)}
 
@@ -102,44 +101,43 @@ Agent-to-agent communication uses a ticket queue.
 
 \subsubsection{Agent Priority}
 \begin{itemize}
-  \item \textbf{0}: GM
-  \item \textbf{1}: Operation Master
-  \item \textbf{2}: Engineers
+  \item \textbf{0}: Manager (highest)
+  \item \textbf{1}: Engineers
 \end{itemize}
 
 \subsection{Kanban Board Access}
 
-GM, subagents, and user have access to the Kanban board. Only GM and user have write access. The Kanban board is connected to the UI and triggers tasks.
+Manager, subagents, and user have access to the Kanban board. Only Manager and user have write access. The Kanban board is connected to the UI and triggers tasks.
 
 \subsection{Source of Truth Documents}
 
 \begin{itemize}
   \item \texttt{GrandSpecification.tex} --- master product specification
   \item \texttt{GrandArchitecture.tex} --- master architecture document
-  \item \texttt{API\&Schema.tex} --- API and schema definitions (owned by Operation Master)
+  \item \texttt{API\&Schema.tex} --- API and schema definitions (owned by Manager)
 \end{itemize}
 
 %% ============================================================
 \section{Agent Roles}
 %% ============================================================
 
-\subsection{GM (exactly 1, rule-based)}
+\subsection{Manager (exactly 1, rule-based)}
 
 \subsubsection{Goal}
 \begin{itemize}
   \item Own architecture; translate user requests into specification.
-  \item Bridge between user and project; assist with requests (add/remove feature, concern, explanation).
-  \item Gate-keep specification and architecture documents.
-  \item Final gate-keeper for quality control.
+  \item Bridge between user and project.
+  \item Break down specification into submodules and tasks.
+  \item Assign tasks to Engineers.
+  \item Code Review and Quality Control.
 \end{itemize}
 
 \subsubsection{Rules}
 \begin{enumerate}
   \item Ensure user input is logical and clear.
-  \item Be willing to question user's questionable design decisions.
-  \item Be in charge and responsible for the project to the user's specification.
-  \item Maximum freedom, with exception of certain critical commands.
-  \item Should confirm \texttt{API\&Schema.tex} if GM finds it has a problem (send a ticket).
+  \item Break down tasks into minimal actionable items.
+  \item No agent works on overlapping modules.
+  \item Review all PRs before merging.
 \end{enumerate}
 
 \subsubsection{Tools}
@@ -147,84 +145,28 @@ Same tooling as other agents; write access to Kanban; access to shared spec fold
 
 \subsubsection{Design Notes}
 \begin{itemize}
-  \item Runs on Gemini 3 Pro (long context: spec folder + chat history + project knowledge).
+  \item Runs on Gemini 3 Pro / Opus.
   \item Context: user chat history + vectorized project knowledge.
-  \item Shared specification folder with user; that folder should be vectorized into memory.
-  \item Prompts: (1) check user input and ask to clarify potential misunderstanding; (2) bravely point out user mistakes.
-  \item Implement as rule-based, not pipeline/state-based.
-\end{itemize}
-
-\subsection{Operation Master (0 or more, scaled by load, rule-based)}
-
-\subsubsection{Goal}
-\begin{itemize}
-  \item Decide who works on what (engineers).
-  \item Break down specification into submodules and features.
-  \item Define APIs and schemas between submodules and features.
-  \item Define tests for submodules and features.
-  \item Prefer assigning an entire submodule to an agent rather than a single feature.
-  \item Provide agents with the context needed to do their work.
-  \item Orchestrator of different modules.
-\end{itemize}
-
-\subsubsection{Priority}
-\begin{enumerate}
-  \item Feature and submodule finalization.
-  \item Ensure engineers are not working on overlapping feature, deprecated feature; receive updated context.
-  \item Integration testing.
-\end{enumerate}
-
-\subsubsection{Goal --- on Task Breakdown}
-\begin{enumerate}
-  \item Breakdown tasks each into minimal actionable features and modules.
-  \item Write \texttt{API\&Schema.tex}.
-\end{enumerate}
-
-\subsubsection{Goal --- on Update Features}
-\begin{enumerate}
-  \item Learn the two sources of truth (\texttt{GrandSpecification.tex} and \texttt{GrandArchitecture.tex}).
-  \item Update module and feature lists.
-  \item Update validation test, APIs and Schemas.
-  \item Manage workflow of agents; sleep if all agents are properly managed.
-\end{enumerate}
-
-\subsubsection{Rules --- Update Features}
-\begin{enumerate}
-  \item Each module and task must be minimal and actionable with no conflict.
-  \item All deprecated tasks should be deleted and aborted.
-\end{enumerate}
-
-\subsubsection{Rules --- Manage Agents}
-\begin{enumerate}
-  \item No agent is working on overlapping module/feature or deprecated module/feature.
-\end{enumerate}
-
-\subsubsection{Tools}
-Same tooling as other agents; read and write access to Kanban; write access to \texttt{API\&Schema.tex}.
-
-\subsubsection{Design Notes}
-\begin{itemize}
-  \item Runs on Opus 4.5.
-  \item Expressed here as rule-based (triggers + rules), not as pipeline/state machine.
+  \item Combines previous GM and OM roles.
 \end{itemize}
 
 \subsection{Engineer (multiple, rule-based)}
 
 \subsubsection{Goal}
-Implement task based on specification from higher level agent.
+Implement task based on specification from Manager.
 
 \subsubsection{Pipeline}
 \begin{enumerate}
   \item Implement based on specification.
-  \item Write unit test for each feature and unit; if test not passed, back to implementation.
-  \item Check if pass Operation Master specified test; if not, back to implementation.
+  \item Write unit test for each feature and unit.
+  \item Create PR for Manager to review.
 \end{enumerate}
 
 \subsubsection{Rules}
 \begin{enumerate}
-  \item If encounter conflict of module not assigned to me, send ticket to Operation Master.
-  \item If encounter problem with architecture itself, send ticket to GM.
-  \item If encounter problem in general, search solution in RAG first; if not found, contact Operation Master.
+  \item If encounter conflict, send ticket to Manager.
+  \item If encounter problem with architecture, send ticket to Manager.
+  \item If encounter problem in general, search solution in RAG first.
 \end{enumerate}
 
 %% ============================================================
@@ -233,13 +175,13 @@ Implement task based on specification from higher level agent.
 
 The client interacts with the platform through three main views.
 
-\subsection{View 1: Chat with GM}
+\subsection{View 1: Chat with Manager}
 
 \begin{itemize}
-  \item Single persistent conversation thread between client and GM.
-  \item Client describes what they want; GM responds with clarifications, plans, status updates.
-  \item GM can attach or reference spec documents from the master spec folder.
-  \item Shows GM status: \texttt{available} / \texttt{busy} (and what GM is busy with, e.g.\ ``talking to Operation Master-1'').
+  \item Single persistent conversation thread between client and Manager.
+  \item Client describes what they want; Manager responds with clarifications, plans, status updates.
+  \item Manager can attach or reference spec documents from the master spec folder.
+  \item Shows Manager status: \texttt{available} / \texttt{busy}.
 \end{itemize}
 
 \subsection{View 2: Pipeline / Kanban Board (real-time)}
@@ -253,9 +195,9 @@ One unified board showing all work. Columns represent task status:
 \noindent Each card shows:
 \begin{itemize}
   \item Task title and brief description.
-  \item Assigned agent (Operation Master or Engineer) with role badge.
-  \item Progress indicator (e.g.\ subtask completion, test pass rate).
-  \item Current activity (e.g.\ ``Engineer-2 writing tests'', ``Operation Master-1 reviewing'').
+  \item Assigned agent (Manager or Engineer) with role badge.
+  \item Progress indicator.
+  \item Current activity (e.g.\ ``Engineer-2 writing tests'', ``Manager reviewing'').
   \item Git branch (if applicable).
   \item Time in current stage.
 \end{itemize}
@@ -323,7 +265,7 @@ An online file management interface for the GM's master specification folder. Th
 
 \begin{itemize}
   \item Engineers can only write to files within their assigned module/feature path.
-  \item Operation Masters can only modify spec-related files and task definitions.
+  \item Operation Masters have access to sandbox and codebase: they can modify spec-related files, task definitions, and project code (e.g.\ for review, fixes, merging PRs).
   \item GM can modify the spec folder and high-level project config.
 \end{itemize}
 

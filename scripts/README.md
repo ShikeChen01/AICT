@@ -77,6 +77,7 @@ $env:DATABASE_URL = "postgresql+asyncpg://aict:aict@localhost:5432/aict"
 This checks:
 - `GET /api/v1/health`
 - `GET /internal/agent/health`
+- Authenticated API smoke flow (`projects` -> `agents` -> create/update/delete task)
 
 ---
 

@@ -8,6 +8,9 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
+
+from backend.config import settings
 from backend.core.access_control import (
     enforce_git_merge_permission,
     enforce_git_pr_permission,
@@ -40,6 +43,73 @@ class GitService:
 
     def __init__(self, repo_path: str):
         self.repo_path = str(Path(repo_path))
+        self.github_token = settings.github_token
+        self.github_api_base_url = settings.github_api_base_url.rstrip("/")
+
+    def _origin_remote_url(self) -> str | None:
+        try:
+            remote_url = _run_git(self.repo_path, "remote", "get-url", "origin")
+            return remote_url.strip() or None
+        except GitOperationFailed:
+            return None
+
+    @staticmethod
+    def _github_repo_slug(remote_url: str | None) -> str | None:
+        if not remote_url:
+            return None
+
+        cleaned = remote_url.strip()
+        slug = ""
+        if cleaned.startswith("git@github.com:"):
+            slug = cleaned.split("git@github.com:", 1)[1]
+        elif "github.com/" in cleaned:
+            slug = cleaned.split("github.com/", 1)[1]
+        else:
+            return None
+
+        if slug.endswith(".git"):
+            slug = slug[:-4]
+        slug = slug.strip("/")
+        if slug.count("/") != 1:
+            return None
+        return slug
+
+    def _github_ready(self) -> tuple[bool, str | None]:
+        remote_url = self._origin_remote_url()
+        slug = self._github_repo_slug(remote_url)
+        return bool(self.github_token and slug), slug
+
+    def _github_headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+    def _find_open_pr_number(
+        self,
+        repo_slug: str,
+        source_branch: str,
+        target_branch: str,
+    ) -> int | None:
+        owner = repo_slug.split("/", 1)[0]
+        params = {
+            "state": "open",
+            "head": f"{owner}:{source_branch}",
+            "base": target_branch,
+            "per_page": 1,
+        }
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.get(
+                f"{self.github_api_base_url}/repos/{repo_slug}/pulls",
+                headers=self._github_headers(),
+                params=params,
+            )
+            resp.raise_for_status()
+            pulls = resp.json()
+        if not pulls:
+            return None
+        return int(pulls[0]["number"])
 
     def create_branch(self, agent_role: str, branch_name: str, base_branch: str = "main") -> str:
         enforce_git_ref_write(agent_role, branch_name)
@@ -75,7 +145,51 @@ class GitService:
         enforce_git_ref_write(agent_role, source_branch)
         if source_branch == target_branch:
             raise GitOperationFailed("source and target branches must differ")
-        pr_url = f"local://pr/{source_branch}-to-{target_branch}"
+
+        github_ready, repo_slug = self._github_ready()
+        if github_ready and repo_slug:
+            payload = {
+                "title": f"{source_branch} -> {target_branch}",
+                "head": source_branch,
+                "base": target_branch,
+                "body": "Automated PR created by AICT.",
+                "maintainer_can_modify": True,
+            }
+            with httpx.Client(timeout=30.0) as client:
+                resp = client.post(
+                    f"{self.github_api_base_url}/repos/{repo_slug}/pulls",
+                    headers=self._github_headers(),
+                    json=payload,
+                )
+
+                if resp.status_code == 201:
+                    pr_url = resp.json().get("html_url", "")
+                elif resp.status_code == 422:
+                    pr_number = self._find_open_pr_number(
+                        repo_slug=repo_slug,
+                        source_branch=source_branch,
+                        target_branch=target_branch,
+                    )
+                    if not pr_number:
+                        raise GitOperationFailed(
+                            f"GitHub rejected PR creation: {resp.text}"
+                        )
+                    details_resp = client.get(
+                        f"{self.github_api_base_url}/repos/{repo_slug}/pulls/{pr_number}",
+                        headers=self._github_headers(),
+                    )
+                    details_resp.raise_for_status()
+                    pr_url = details_resp.json().get("html_url", "")
+                else:
+                    raise GitOperationFailed(
+                        f"GitHub PR creation failed: {resp.status_code} {resp.text}"
+                    )
+
+            if not pr_url:
+                raise GitOperationFailed("GitHub PR creation succeeded without URL")
+        else:
+            pr_url = f"local://pr/{source_branch}-to-{target_branch}"
+
         return PROperationResult(
             source_branch=source_branch,
             target_branch=target_branch,
@@ -89,6 +203,39 @@ class GitService:
         target_branch: str = "main",
     ) -> str:
         enforce_git_merge_permission(agent_role)
+
+        github_ready, repo_slug = self._github_ready()
+        if github_ready and repo_slug:
+            pr_number = self._find_open_pr_number(
+                repo_slug=repo_slug,
+                source_branch=source_branch,
+                target_branch=target_branch,
+            )
+            if not pr_number:
+                raise GitOperationFailed(
+                    f"No open PR found for {source_branch} -> {target_branch}"
+                )
+
+            payload = {
+                "commit_title": f"Merge {source_branch}",
+                "merge_method": "squash",
+            }
+            with httpx.Client(timeout=30.0) as client:
+                resp = client.put(
+                    f"{self.github_api_base_url}/repos/{repo_slug}/pulls/{pr_number}/merge",
+                    headers=self._github_headers(),
+                    json=payload,
+                )
+                if resp.status_code not in (200, 201):
+                    raise GitOperationFailed(
+                        f"GitHub merge failed: {resp.status_code} {resp.text}"
+                    )
+                data = resp.json()
+            merge_sha = data.get("sha", "")
+            if not merge_sha:
+                raise GitOperationFailed("GitHub merge succeeded without SHA")
+            return merge_sha
+
         _run_git(self.repo_path, "checkout", target_branch)
         _run_git(self.repo_path, "merge", "--no-ff", source_branch, "-m", f"Merge {source_branch}")
         return _run_git(self.repo_path, "rev-parse", "HEAD")

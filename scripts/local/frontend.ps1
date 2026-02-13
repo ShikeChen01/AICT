@@ -16,6 +16,21 @@ if (-not (Test-Path $FrontendDir)) {
 
 Set-Location $FrontendDir
 
+# Load .env.development and map API token for Vite client auth
+$EnvFile = Join-Path $Root ".env.development"
+if (Test-Path $EnvFile) {
+    Get-Content $EnvFile | ForEach-Object {
+        if ($_ -match '^\s*([^#][^=]+)=(.*)$') {
+            $key = $matches[1].Trim()
+            $val = $matches[2].Trim().Trim('"').Trim("'")
+            [Environment]::SetEnvironmentVariable($key, $val, "Process")
+        }
+    }
+}
+if (-not $env:VITE_API_TOKEN -and $env:API_TOKEN) {
+    $env:VITE_API_TOKEN = $env:API_TOKEN
+}
+
 Write-Host "Starting frontend at http://localhost:${Port}"
 Write-Host "Backend proxy: http://localhost:8000"
 npm run dev -- --port $Port

@@ -28,21 +28,37 @@ class Settings(BaseSettings):
     # LLM
     anthropic_api_key: str = ""
     google_api_key: str = ""
+    llm_request_timeout_seconds: int = Field(default=60, ge=5, le=300)
+    llm_max_tokens: int = Field(default=1024, ge=128, le=8192)
+    llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+    llm_fallback_enabled: bool = True
 
     # Git
+    github_token: str = ""
+    github_api_base_url: str = "https://api.github.com"
     code_repo_url: str = ""
     spec_repo_path: str = "/data/specs"
     code_repo_path: str = "/data/project"
+    provision_repos_on_startup: bool = True
+    clone_code_repo_on_startup: bool = True
 
     # Agent limits
     max_engineers: int = Field(default=5, ge=1, le=5)
+
+    # LangGraph persistence (PostgresSaver for production; MemorySaver when False)
+    graph_persist_postgres: bool = Field(default=False, description="Use PostgresSaver for graph checkpoints")
 
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = False
 
-    model_config = {"env_file": _env_file, "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {
+        "env_file": _env_file,
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+        "env_ignore_empty": True,
+    }
 
 
 settings = Settings()

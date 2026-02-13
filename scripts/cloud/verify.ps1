@@ -87,6 +87,52 @@ try {
     exit 1
 }
 
+if (-not $env:API_TOKEN) {
+    Write-Error "API_TOKEN is required for authenticated verification checks."
+    exit 1
+}
+
+$headers = @{
+    "Authorization" = "Bearer $($env:API_TOKEN)"
+    "Content-Type" = "application/json"
+}
+
+Write-Host "Running authenticated API smoke checks..."
+$projectsUrl = "$url/api/v1/projects"
+$projects = Invoke-RestMethod -Uri $projectsUrl -Method GET -Headers $headers -TimeoutSec 8
+if (-not $projects -or $projects.Count -eq 0) {
+    Write-Error "No projects returned from $projectsUrl"
+    exit 1
+}
+
+$projectId = $projects[0].id
+$agentsUrl = "$url/api/v1/agents?project_id=$projectId"
+$null = Invoke-RestMethod -Uri $agentsUrl -Method GET -Headers $headers -TimeoutSec 8
+
+$taskId = ""
+try {
+    $createTaskUrl = "$url/api/v1/tasks?project_id=$projectId"
+    $taskPayload = @{
+        title = "smoke-verify-task"
+        description = "Created by scripts/cloud/verify.ps1"
+    } | ConvertTo-Json
+    $createdTask = Invoke-RestMethod -Uri $createTaskUrl -Method POST -Headers $headers -Body $taskPayload -TimeoutSec 8
+    $taskId = $createdTask.id
+
+    $statusUrl = "$url/api/v1/tasks/$taskId/status?status=specifying"
+    $null = Invoke-RestMethod -Uri $statusUrl -Method PATCH -Headers $headers -TimeoutSec 8
+}
+finally {
+    if ($taskId) {
+        $deleteUrl = "$url/api/v1/tasks/$taskId"
+        try {
+            $null = Invoke-RestMethod -Uri $deleteUrl -Method DELETE -Headers $headers -TimeoutSec 8
+        } catch {
+            Write-Warning "Task cleanup failed for $taskId"
+        }
+    }
+}
+
 Write-Host "Cloud verification passed."
 Write-Host "Service URL: $url"
 exit 0

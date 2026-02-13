@@ -9,7 +9,9 @@ import type {
   TaskUpdate,
   ChatMessage,
   ChatMessageCreate,
+  SendChatMessageResponse,
   Agent,
+  AgentStatusWithQueue,
   Ticket,
   TicketCreate,
   Project,
@@ -113,8 +115,8 @@ export async function getChatHistory(projectId: string, limit = 100, offset = 0)
 export async function sendChatMessage(
   projectId: string,
   message: ChatMessageCreate
-): Promise<ChatMessage> {
-  return request<ChatMessage>('POST', `/chat/send?project_id=${projectId}`, message);
+): Promise<SendChatMessageResponse> {
+  return request<SendChatMessageResponse>('POST', `/chat/send?project_id=${projectId}`, message);
 }
 
 export async function getChatMessage(messageId: string): Promise<ChatMessage> {
@@ -167,6 +169,10 @@ export async function getAgents(projectId: string): Promise<Agent[]> {
 
 export async function getAgent(agentId: string): Promise<Agent> {
   return request<Agent>('GET', `/agents/${agentId}`);
+}
+
+export async function getAgentStatuses(projectId: string): Promise<AgentStatusWithQueue[]> {
+  return request<AgentStatusWithQueue[]>('GET', `/agents/status?project_id=${projectId}`);
 }
 
 // ─── Tickets ─────────────────────────────────────────────────────────

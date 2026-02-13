@@ -41,7 +41,7 @@ async def get_chat_history(
     return messages
 
 
-@router.post("/send", response_model=ChatMessageResponse, status_code=201)
+@router.post("/send", response_model=SendMessageResponse, status_code=201)
 async def send_message(
     data: ChatMessageCreate,
     project_id: UUID = Query(..., description="Project ID"),
@@ -56,7 +56,12 @@ async def send_message(
     """
     service = get_chat_service(db)
     user_msg, gm_msg = await service.send_message(project_id, data)
-    return gm_msg
+    gm_payload = ChatMessageResponse.model_validate(gm_msg)
+    user_payload = ChatMessageResponse.model_validate(user_msg)
+    return SendMessageResponse(
+        **gm_payload.model_dump(),
+        user_message=user_payload,
+    )
 
 
 @router.get("/message/{message_id}", response_model=ChatMessageResponse)

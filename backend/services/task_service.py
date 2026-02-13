@@ -4,7 +4,7 @@ Task service — handles task CRUD, status transitions, and WebSocket broadcasts
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.exceptions import InvalidTaskStatus, TaskNotFoundError, AgentNotFoundError
@@ -42,6 +42,7 @@ class TaskService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self._ws_manager = None  # Lazy import to avoid circular deps
+        self._orchestrator = None
 
     @property
     def ws_manager(self):
@@ -50,6 +51,14 @@ class TaskService:
             from backend.websocket.manager import ws_manager
             self._ws_manager = ws_manager
         return self._ws_manager
+
+    @property
+    def orchestrator(self):
+        """Lazy load orchestrator to avoid circular imports."""
+        if self._orchestrator is None:
+            from backend.services.orchestrator import OrchestratorService
+            self._orchestrator = OrchestratorService()
+        return self._orchestrator
 
     async def get(self, task_id: UUID) -> Task:
         """Get a task by ID."""
@@ -171,6 +180,7 @@ class TaskService:
     async def assign(self, task_id: UUID, agent_id: UUID) -> Task:
         """Assign a task to an agent."""
         task = await self.get(task_id)
+        previous_agent_id = task.assigned_agent_id
 
         # Validate agent exists
         result = await self.session.execute(
@@ -181,11 +191,23 @@ class TaskService:
             raise AgentNotFoundError(agent_id)
 
         task.assigned_agent_id = agent_id
+        agent.current_task_id = task.id
+
+        if previous_agent_id and previous_agent_id != agent_id:
+            await self.session.execute(
+                update(Agent)
+                .where(
+                    Agent.id == previous_agent_id,
+                    Agent.current_task_id == task.id,
+                )
+                .values(current_task_id=None)
+            )
 
         # Auto-transition to assigned if in backlog or specifying
         if task.status in ("backlog", "specifying"):
             task.status = "assigned"
 
+        await self._wake_agent_for_assignment(agent)
         await self.session.flush()
         await self.session.refresh(task)
 
@@ -194,9 +216,22 @@ class TaskService:
 
         return task
 
+    async def _wake_agent_for_assignment(self, agent: Agent) -> None:
+        """Ensure assigned agent is awake and has a sandbox ready."""
+        prev_status = agent.status
+        prev_sandbox_id = agent.sandbox_id
+        await self.orchestrator.wake_agent(self.session, agent)
+        if agent.status != prev_status or agent.sandbox_id != prev_sandbox_id:
+            await self.ws_manager.broadcast_agent_status(agent)
+
     async def delete(self, task_id: UUID) -> bool:
         """Delete a task."""
         task = await self.get(task_id)
+        await self.session.execute(
+            update(Agent)
+            .where(Agent.current_task_id == task.id)
+            .values(current_task_id=None)
+        )
         await self.session.delete(task)
         await self.session.flush()
         return True

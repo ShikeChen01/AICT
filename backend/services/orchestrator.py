@@ -4,16 +4,131 @@ Role-based orchestration rules for sandbox lifecycle.
 
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import AsyncSession
+import asyncio
+import inspect
+import logging
+from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.checkpoint.memory import MemorySaver
+
+from backend.config import settings
 from backend.core.exceptions import InvalidAgentRole
 from backend.db.models import Agent
+from backend.graph.workflow import create_graph
 from backend.services.e2b_service import E2BService, SandboxMetadata
 
+logger = logging.getLogger(__name__)
+
+_graph_init_lock = asyncio.Lock()
+_graph_app: Any | None = None
+_graph_checkpointer_cm: Any | None = None
+
+
+def _to_postgres_conn_string(database_url: str) -> str:
+    """
+    Convert SQLAlchemy async URLs to a psycopg-compatible postgres URL.
+    """
+    if database_url.startswith("postgresql+asyncpg://"):
+        return database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    if database_url.startswith("postgres+asyncpg://"):
+        return database_url.replace("postgres+asyncpg://", "postgresql://", 1)
+    return database_url
+
+
+async def _run_checkpointer_setup(checkpointer: Any) -> None:
+    """
+    Run checkpointer setup if the backend supports it.
+    """
+    setup_fn = getattr(checkpointer, "setup", None) or getattr(checkpointer, "asetup", None)
+    if setup_fn is None:
+        return
+    result = setup_fn()
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _build_graph_app():
+    """
+    Build and compile the LangGraph app with configured persistence backend.
+    """
+    global _graph_checkpointer_cm
+
+    if settings.graph_persist_postgres:
+        try:
+            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        except Exception as exc:  # pragma: no cover - optional dependency path
+            logger.warning(
+                "Postgres graph persistence requested but unavailable (%s); using MemorySaver.",
+                exc,
+            )
+        else:
+            conn_string = _to_postgres_conn_string(settings.database_url)
+            cm = None
+            try:
+                cm = AsyncPostgresSaver.from_conn_string(conn_string)
+                checkpointer = await cm.__aenter__()
+                await _run_checkpointer_setup(checkpointer)
+                _graph_checkpointer_cm = cm
+                logger.info("LangGraph checkpointer initialized with PostgresSaver.")
+                return create_graph().compile(checkpointer=checkpointer)
+            except Exception as exc:  # pragma: no cover - external dependency path
+                logger.warning(
+                    "Failed to initialize PostgresSaver (%s); using MemorySaver.",
+                    exc,
+                )
+                if cm is not None:
+                    try:
+                        await cm.__aexit__(None, None, None)
+                    except Exception:
+                        pass
+
+    return create_graph().compile(checkpointer=MemorySaver())
+
+
+async def initialize_graph_runtime(force: bool = False):
+    """
+    Initialize global graph runtime once at startup.
+    """
+    global _graph_app
+
+    if _graph_app is not None and not force:
+        return _graph_app
+
+    async with _graph_init_lock:
+        if _graph_app is not None and not force:
+            return _graph_app
+        _graph_app = await _build_graph_app()
+        return _graph_app
+
+
+async def get_graph_app():
+    """
+    Return initialized graph runtime, creating it lazily if needed.
+    """
+    if _graph_app is None:
+        await initialize_graph_runtime()
+    return _graph_app
+
+
+async def shutdown_graph_runtime() -> None:
+    """
+    Close graph persistence resources on app shutdown.
+    """
+    global _graph_app, _graph_checkpointer_cm
+
+    async with _graph_init_lock:
+        _graph_app = None
+        if _graph_checkpointer_cm is not None:
+            try:
+                await _graph_checkpointer_cm.__aexit__(None, None, None)
+            finally:
+                _graph_checkpointer_cm = None
 
 def sandbox_should_persist(agent_role: str) -> bool:
-    """GM/OM keep persistent sandboxes; engineers are task-ephemeral."""
-    if agent_role in ("gm", "om"):
+    """Manager keeps persistent sandboxes; engineers are task-ephemeral."""
+    if agent_role in ("gm", "om", "manager"):
         return True
     if agent_role == "engineer":
         return False
@@ -21,7 +136,7 @@ def sandbox_should_persist(agent_role: str) -> bool:
 
 
 class OrchestratorService:
-    """Coordinates sandbox behavior by role and task lifecycle."""
+    """Coordinates sandbox behavior and runs the Agent Graph."""
 
     def __init__(self, e2b_service: E2BService | None = None):
         self.e2b_service = e2b_service or E2BService()
@@ -43,3 +158,77 @@ class OrchestratorService:
         if not sandbox_should_persist(agent.role) and agent.sandbox_id:
             await self.e2b_service.close_sandbox(session, agent)
 
+    async def wake_agent(self, session: AsyncSession, agent: Agent) -> SandboxMetadata:
+        """
+        Wake an agent and ensure sandbox readiness.
+        """
+        if agent.status == "sleeping":
+            agent.status = "active"
+        return await self.ensure_sandbox_for_agent(session, agent)
+
+    async def run_manager_graph(
+        self,
+        session: AsyncSession,
+        manager: Agent,
+        user_message: str,
+        history_from_db: list | None = None,
+    ) -> str:
+        """
+        Execute the Manager Graph for a turn.
+        
+        Args:
+            session: DB session.
+            manager: The Manager agent model.
+            user_message: The new message from the user.
+            history_from_db: Optional list of previous chat messages to seed the graph state.
+        """
+        await self.wake_agent(session, manager)
+        graph_app = await get_graph_app()
+        
+        # Build initial state configuration
+        config = {"configurable": {"thread_id": str(manager.project_id)}}
+        
+        # Check if state exists
+        current_state = await graph_app.aget_state(config)
+        inputs = {}
+        
+        if not current_state.values and history_from_db:
+            # Initialize with history if state is empty
+            converted_history = []
+            for msg in history_from_db:
+                role = getattr(msg, "role", "user")
+                content = getattr(msg, "content", "")
+                if role == "user":
+                    converted_history.append(HumanMessage(content=content))
+                elif role in ("gm", "manager"):
+                    converted_history.append(AIMessage(content=content))
+            
+            # Append the new user message
+            inputs["messages"] = converted_history + [HumanMessage(content=user_message)]
+        else:
+            # Just add the new message
+            inputs["messages"] = [HumanMessage(content=user_message)]
+            
+        inputs["project_id"] = str(manager.project_id)
+        inputs["next"] = "manager"
+        
+        # Invoke the graph
+        final_state = await graph_app.ainvoke(inputs, config=config)
+        
+        # Extract the final response from the Manager
+        messages = final_state.get("messages", [])
+        if messages:
+            last_msg = messages[-1]
+            return last_msg.content
+            
+        return "Manager processed the request but returned no output."
+
+    async def invoke_gm(
+        self,
+        session: AsyncSession,
+        gm: Agent,
+        history: list,
+        user_message: str,
+    ) -> str:
+        """Legacy wrapper for run_manager_graph."""
+        return await self.run_manager_graph(session, gm, user_message, history_from_db=history)
