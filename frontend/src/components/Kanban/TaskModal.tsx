@@ -4,10 +4,11 @@
  */
 
 import { useState, useCallback } from 'react';
-import type { Task, TaskStatus, TaskUpdate } from '../../types';
+import type { AgentStatusWithQueue, Task, TaskStatus, TaskUpdate } from '../../types';
 
 interface TaskModalProps {
   task: Task;
+  agents?: AgentStatusWithQueue[];
   onClose: () => void;
   onUpdate: (taskId: string, update: TaskUpdate) => Promise<void>;
   onDelete?: (taskId: string) => Promise<void>;
@@ -22,13 +23,14 @@ const STATUSES: { value: TaskStatus; label: string }[] = [
   { value: 'done', label: 'Done' },
 ];
 
-export function TaskModal({ task, onClose, onUpdate, onDelete }: TaskModalProps) {
+export function TaskModal({ task, agents = [], onClose, onUpdate, onDelete }: TaskModalProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editedTask, setEditedTask] = useState({
     title: task.title,
     description: task.description || '',
     status: task.status,
+    assigned_agent_id: task.assigned_agent_id,
     critical: task.critical,
     urgent: task.urgent,
   });
@@ -40,6 +42,7 @@ export function TaskModal({ task, onClose, onUpdate, onDelete }: TaskModalProps)
         title: editedTask.title,
         description: editedTask.description || null,
         status: editedTask.status,
+        assigned_agent_id: editedTask.assigned_agent_id,
         critical: editedTask.critical,
         urgent: editedTask.urgent,
       });
@@ -136,6 +139,34 @@ export function TaskModal({ task, onClose, onUpdate, onDelete }: TaskModalProps)
               <span className="inline-block px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-sm font-medium">
                 {STATUSES.find((s) => s.value === task.status)?.label}
               </span>
+            )}
+          </div>
+
+          {/* Assignment */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Assigned Agent</label>
+            {isEditing ? (
+              <select
+                value={editedTask.assigned_agent_id ?? ''}
+                onChange={(e) =>
+                  setEditedTask((prev) => ({
+                    ...prev,
+                    assigned_agent_id: e.target.value || null,
+                  }))
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">Unassigned</option>
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.display_name} ({agent.role})
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-gray-900">
+                {agents.find((agent) => agent.id === task.assigned_agent_id)?.display_name || 'Unassigned'}
+              </p>
             )}
           </div>
 

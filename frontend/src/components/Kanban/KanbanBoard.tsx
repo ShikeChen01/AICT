@@ -3,12 +3,13 @@
  * Main Kanban board with all columns and task management
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import type { Task, TaskStatus, TaskCreate, TaskUpdate } from '../../types';
-import { useTasks } from '../../hooks';
+import { useAgents, useTasks } from '../../hooks';
 import { Column } from './Column';
 import { TaskModal } from './TaskModal';
 import { CreateTaskModal } from './CreateTaskModal';
+import { TaskCard } from './TaskCard';
 
 interface KanbanBoardProps {
   projectId: string;
@@ -23,10 +24,51 @@ const STATUSES: TaskStatus[] = [
   'done',
 ];
 
+type BoardViewMode = 'status' | 'swimlane';
+
 export function KanbanBoard({ projectId }: KanbanBoardProps) {
-  const { tasksByStatus, isLoading, error, createTask, updateTask, deleteTask } = useTasks(projectId);
+  const { tasks, tasksByStatus, isLoading, error, createTask, updateTask, deleteTask } = useTasks(projectId);
+  const { agents } = useAgents(projectId);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [viewMode, setViewMode] = useState<BoardViewMode>('status');
+
+  const agentNameById = useMemo(() => {
+    return agents.reduce<Record<string, string>>((acc, agent) => {
+      acc[agent.id] = agent.display_name;
+      return acc;
+    }, {});
+  }, [agents]);
+
+  const swimlaneColumns = useMemo(() => {
+    const lanes = [
+      { id: 'unassigned', display_name: 'Unassigned', role: 'none' },
+      ...agents.map((agent) => ({
+        id: agent.id,
+        display_name: agent.display_name,
+        role: agent.role,
+      })),
+    ];
+
+    return lanes.map((lane) => {
+      const laneTasks = tasks
+        .filter((task) =>
+          lane.id === 'unassigned'
+            ? !task.assigned_agent_id
+            : task.assigned_agent_id === lane.id
+        )
+        .sort((a, b) => {
+          const statusIndex = STATUSES.indexOf(a.status) - STATUSES.indexOf(b.status);
+          if (statusIndex !== 0) return statusIndex;
+          return (a.critical + a.urgent) - (b.critical + b.urgent);
+        });
+
+      return {
+        ...lane,
+        tasks: laneTasks,
+      };
+    });
+  }, [agents, tasks]);
 
   const handleTaskClick = useCallback((task: Task) => {
     setSelectedTask(task);
@@ -93,15 +135,38 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
           <h1 className="text-xl font-semibold text-gray-900">Kanban Board</h1>
           <p className="text-sm text-gray-500">Manage project tasks</p>
         </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          New Task
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
+            <button
+              type="button"
+              onClick={() => setViewMode('status')}
+              className={`px-3 py-1 text-sm rounded ${
+                viewMode === 'status' ? 'bg-white shadow text-gray-900' : 'text-gray-600'
+              }`}
+            >
+              Status View
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('swimlane')}
+              className={`px-3 py-1 text-sm rounded ${
+                viewMode === 'swimlane' ? 'bg-white shadow text-gray-900' : 'text-gray-600'
+              }`}
+            >
+              Swimlane View
+            </button>
+          </div>
+
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            New Task
+          </button>
+        </div>
       </header>
 
       {/* Error banner */}
@@ -113,22 +178,60 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
 
       {/* Board */}
       <div className="flex-1 overflow-x-auto p-6">
-        <div className="flex gap-4 h-full">
-          {STATUSES.map((status) => (
-            <Column
-              key={status}
-              status={status}
-              tasks={tasksByStatus[status]}
-              onTaskClick={handleTaskClick}
-            />
-          ))}
-        </div>
+        {viewMode === 'status' ? (
+          <div className="flex gap-4 h-full">
+            {STATUSES.map((status) => (
+              <Column
+                key={status}
+                status={status}
+                tasks={tasksByStatus[status]}
+                agentNameById={agentNameById}
+                onTaskClick={handleTaskClick}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="flex gap-4 h-full">
+            {swimlaneColumns.map((lane) => (
+              <section
+                key={lane.id}
+                className="flex flex-col bg-gray-50 rounded-xl min-w-[320px] max-w-[320px]"
+              >
+                <div className="p-4 border-b border-gray-200">
+                  <p className="text-sm font-semibold text-gray-900">{lane.display_name}</p>
+                  <p className="text-xs text-gray-500 uppercase">
+                    {lane.role === 'none' ? 'unassigned' : lane.role} · {lane.tasks.length} task(s)
+                  </p>
+                </div>
+                <div className="flex-1 p-2 space-y-3 overflow-y-auto min-h-[200px] max-h-[calc(100vh-260px)]">
+                  {lane.tasks.length === 0 ? (
+                    <div className="flex items-center justify-center h-24 text-gray-400 text-sm">
+                      No tasks
+                    </div>
+                  ) : (
+                    lane.tasks.map((task) => (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        assignedAgentName={
+                          task.assigned_agent_id ? agentNameById[task.assigned_agent_id] : null
+                        }
+                        onClick={handleTaskClick}
+                      />
+                    ))
+                  )}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Task detail modal */}
       {selectedTask && (
         <TaskModal
           task={selectedTask}
+          agents={agents}
           onClose={() => setSelectedTask(null)}
           onUpdate={handleTaskUpdate}
           onDelete={handleTaskDelete}

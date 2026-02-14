@@ -3,7 +3,7 @@
  * Main app with project-scoped routing, chat, kanban, and agent status.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   BrowserRouter,
   Routes,
@@ -15,18 +15,26 @@ import {
 } from 'react-router-dom';
 import { ChatView } from './components/Chat';
 import { KanbanBoard } from './components/Kanban';
-import { AgentsPanel } from './components/Agents';
+import { AgentInspector, AgentsPanel } from './components/Agents';
 import { WorkflowGraph } from './components/Workflow';
 import { ActivityFeed } from './components/ActivityFeed';
+import { ArtifactBrowser } from './components/Artifacts';
 import { ProjectsPage, SettingsPage } from './pages';
 import { getProjects, healthCheck, setAuthToken } from './api/client';
-import type { Project, AgentLogData } from './types';
+import { useAgents, useWebSocket } from './hooks';
+import type {
+  AgentLogData,
+  AgentRole,
+  Project,
+  SandboxLogData,
+  WorkflowUpdateData,
+} from './types';
 
 // Set auth token SYNCHRONOUSLY before any component renders/fetches.
 // Must run at module level so child useEffect hooks already have the token.
 setAuthToken(import.meta.env.VITE_API_TOKEN || 'change-me-in-production');
 
-type AppView = 'chat' | 'kanban' | 'workflow';
+type AppView = 'chat' | 'kanban' | 'workflow' | 'artifacts';
 
 interface SidebarProps {
   projects: Project[];
@@ -39,13 +47,18 @@ function Sidebar({ projects, activeProjectId, activeView, onProjectChange }: Sid
   const chatPath = activeProjectId ? `/project/${activeProjectId}/chat` : '/';
   const kanbanPath = activeProjectId ? `/project/${activeProjectId}/kanban` : '/';
   const workflowPath = activeProjectId ? `/project/${activeProjectId}/workflow` : '/';
+  const artifactsPath = activeProjectId ? `/project/${activeProjectId}/artifacts` : '/';
 
   return (
     <aside className="w-64 bg-gray-900 text-white flex flex-col">
       {/* Logo */}
       <div className="p-6 border-b border-gray-800">
-        <h1 className="text-2xl font-bold">AICT</h1>
-        <p className="text-sm text-gray-400">Multi-Agent Platform</p>
+        <NavLink to="/projects" className="group block">
+          <h1 className="text-2xl font-bold group-hover:text-blue-300 transition-colors">AICT</h1>
+          <p className="text-sm text-gray-400 group-hover:text-gray-300 transition-colors">
+            Multi-Agent Platform
+          </p>
+        </NavLink>
       </div>
 
       {/* Project selector */}
@@ -136,6 +149,28 @@ function Sidebar({ projects, activeProjectId, activeView, onProjectChange }: Sid
               Workflow
             </NavLink>
           </li>
+          <li>
+            <NavLink
+              to={artifactsPath}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                  isActive || activeView === 'artifacts'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                }`
+              }
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 7h5l2 2h11v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
+                />
+              </svg>
+              Artifacts
+            </NavLink>
+          </li>
         </ul>
       </nav>
 
@@ -208,9 +243,11 @@ function LegacyRouteRedirect({
 function ProjectPage({
   projects,
   view,
+  isProjectsLoading,
 }: {
   projects: Project[];
   view: AppView;
+  isProjectsLoading: boolean;
 }) {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
@@ -219,11 +256,15 @@ function ProjectPage({
     (projectId && projects.find((project) => project.id === projectId)) || null;
 
   useEffect(() => {
-    if (projects.length === 0) return;
+    if (isProjectsLoading) return;
+    if (projects.length === 0) {
+      navigate('/projects', { replace: true });
+      return;
+    }
     if (!projectId || !activeProject) {
       navigate(`/project/${projects[0].id}/${view}`, { replace: true });
     }
-  }, [activeProject, navigate, projectId, projects, view]);
+  }, [activeProject, isProjectsLoading, navigate, projectId, projects, view]);
 
   if (projects.length === 0) {
     return (
@@ -234,9 +275,86 @@ function ProjectPage({
   }
 
   const resolvedProject = activeProject ?? projects[0];
+  const { agents } = useAgents(view === 'workflow' ? resolvedProject.id : null);
+  const { subscribe } = useWebSocket(view === 'workflow' ? resolvedProject.id : null);
+  const [activityLogs, setActivityLogs] = useState<
+    (AgentLogData & { timestamp: string; id: string })[]
+  >([]);
+  const [workflowUpdate, setWorkflowUpdate] = useState<WorkflowUpdateData | null>(null);
+  const [selectedInspectorAgentId, setSelectedInspectorAgentId] = useState<string | null>(null);
 
-  // Mock activity logs (will be replaced with WebSocket subscription)
-  const [activityLogs] = useState<(AgentLogData & { timestamp: string; id: string })[]>([]);
+  useEffect(() => {
+    setActivityLogs([]);
+    setWorkflowUpdate(null);
+    setSelectedInspectorAgentId(null);
+  }, [resolvedProject.id, view]);
+
+  useEffect(() => {
+    if (view !== 'workflow') return;
+
+    const unsubscribeWorkflow = subscribe<WorkflowUpdateData>('workflow_update', (data) => {
+      setWorkflowUpdate(data);
+    });
+
+    const unsubscribeAgentLog = subscribe<AgentLogData>('agent_log', (data) => {
+      const next = {
+        ...data,
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        timestamp: new Date().toISOString(),
+      };
+      setActivityLogs((prev) => [...prev.slice(-199), next]);
+    });
+
+    const unsubscribeSandboxLog = subscribe<SandboxLogData>('sandbox_log', (data) => {
+      const role = (agents.find((agent) => agent.id === data.agent_id)?.role ??
+        'engineer') as AgentRole;
+      const next: AgentLogData & { timestamp: string; id: string } = {
+        project_id: data.project_id,
+        agent_id: data.agent_id,
+        agent_role: role,
+        log_type: 'message',
+        content: `[${data.stream}] ${data.content}`,
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        timestamp: new Date().toISOString(),
+      };
+      setActivityLogs((prev) => [...prev.slice(-199), next]);
+    });
+
+    return () => {
+      unsubscribeWorkflow();
+      unsubscribeAgentLog();
+      unsubscribeSandboxLog();
+    };
+  }, [agents, subscribe, view]);
+
+  useEffect(() => {
+    if (view !== 'workflow' || selectedInspectorAgentId || agents.length === 0) return;
+    const defaultAgent =
+      agents.find((agent) => agent.role === 'manager') ||
+      agents.find((agent) => agent.role === 'om') ||
+      agents[0];
+    if (defaultAgent) {
+      setSelectedInspectorAgentId(defaultAgent.id);
+    }
+  }, [agents, selectedInspectorAgentId, view]);
+
+  const handleWorkflowNodeClick = (nodeId: string) => {
+    const roleMap: Record<string, AgentRole | null> = {
+      manager: 'manager',
+      om: 'om',
+      engineer: 'engineer',
+      manager_tools: null,
+      om_tools: null,
+      engineer_tools: null,
+      end: null,
+    };
+    const role = roleMap[nodeId];
+    if (!role) return;
+    const matchedAgent = agents.find((agent) => agent.role === role);
+    if (matchedAgent) {
+      setSelectedInspectorAgentId(matchedAgent.id);
+    }
+  };
 
   const renderView = () => {
     switch (view) {
@@ -254,13 +372,28 @@ function ProjectPage({
                   <p className="text-sm text-gray-500">Manager → OM → Engineer pipeline</p>
                 </div>
                 <div className="h-[calc(100%-60px)]">
-                  <WorkflowGraph projectId={resolvedProject.id} />
+                  <WorkflowGraph
+                    projectId={resolvedProject.id}
+                    workflowUpdate={workflowUpdate}
+                    onNodeClick={handleWorkflowNodeClick}
+                  />
                 </div>
               </div>
             </div>
-            <div className="w-96 p-4 pl-0">
-              <ActivityFeed logs={activityLogs} />
+            <div className="w-[420px] p-4 pl-0 flex flex-col gap-4">
+              <div className="h-1/2 min-h-0">
+                <ActivityFeed logs={activityLogs} />
+              </div>
+              <div className="h-1/2 min-h-0">
+                <AgentInspector agentId={selectedInspectorAgentId} />
+              </div>
             </div>
+          </div>
+        );
+      case 'artifacts':
+        return (
+          <div className="h-full p-4">
+            <ArtifactBrowser projectId={resolvedProject.id} project={resolvedProject} />
           </div>
         );
       default:
@@ -279,7 +412,7 @@ function ProjectPage({
       <main className="flex-1 overflow-hidden">
         {renderView()}
       </main>
-      {view !== 'workflow' && <AgentsPanel projectId={resolvedProject.id} />}
+      {view !== 'workflow' && view !== 'artifacts' && <AgentsPanel projectId={resolvedProject.id} />}
     </div>
   );
 }
@@ -292,23 +425,24 @@ function App() {
 
   // Token is set synchronously at module level above (before any component renders).
 
-  useEffect(() => {
-    const loadProjects = async () => {
-      setIsProjectsLoading(true);
-      setProjectsError(null);
-      try {
-        const nextProjects = await getProjects();
-        setProjects(nextProjects);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'Failed to load projects';
-        setProjectsError(message);
-      } finally {
-        setIsProjectsLoading(false);
-      }
-    };
-    void loadProjects();
+  const loadProjects = useCallback(async () => {
+    setIsProjectsLoading(true);
+    setProjectsError(null);
+    try {
+      const nextProjects = await getProjects();
+      setProjects(nextProjects);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to load projects';
+      setProjectsError(message);
+    } finally {
+      setIsProjectsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
 
   // Check backend connection
   useEffect(() => {
@@ -337,7 +471,7 @@ function App() {
 
       <Routes>
         {/* Projects Dashboard */}
-        <Route path="/projects" element={<ProjectsPage />} />
+        <Route path="/projects" element={<ProjectsPage onProjectsUpdated={loadProjects} />} />
         
         {/* Project Settings */}
         <Route path="/project/:projectId/settings" element={<SettingsPage />} />
@@ -379,9 +513,22 @@ function App() {
         />
         
         {/* Project views */}
-        <Route path="/project/:projectId/chat" element={<ProjectPage projects={projects} view="chat" />} />
-        <Route path="/project/:projectId/kanban" element={<ProjectPage projects={projects} view="kanban" />} />
-        <Route path="/project/:projectId/workflow" element={<ProjectPage projects={projects} view="workflow" />} />
+        <Route
+          path="/project/:projectId/chat"
+          element={<ProjectPage projects={projects} view="chat" isProjectsLoading={isProjectsLoading} />}
+        />
+        <Route
+          path="/project/:projectId/kanban"
+          element={<ProjectPage projects={projects} view="kanban" isProjectsLoading={isProjectsLoading} />}
+        />
+        <Route
+          path="/project/:projectId/workflow"
+          element={<ProjectPage projects={projects} view="workflow" isProjectsLoading={isProjectsLoading} />}
+        />
+        <Route
+          path="/project/:projectId/artifacts"
+          element={<ProjectPage projects={projects} view="artifacts" isProjectsLoading={isProjectsLoading} />}
+        />
         
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />

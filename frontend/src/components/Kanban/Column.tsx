@@ -9,6 +9,7 @@ import { TaskCard } from './TaskCard';
 interface ColumnProps {
   status: TaskStatus;
   tasks: Task[];
+  agentNameById?: Record<string, string>;
   onTaskClick?: (task: Task) => void;
   onTaskStatusChange?: (taskId: string, newStatus: TaskStatus) => void;
 }
@@ -22,7 +23,13 @@ const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; bgColor:
   done: { label: 'Done', color: 'text-green-700', bgColor: 'bg-green-100' },
 };
 
-export function Column({ status, tasks, onTaskClick, onTaskStatusChange }: ColumnProps) {
+export function Column({
+  status,
+  tasks,
+  agentNameById,
+  onTaskClick,
+  onTaskStatusChange,
+}: ColumnProps) {
   const config = STATUS_CONFIG[status];
 
   return (
@@ -48,6 +55,7 @@ export function Column({ status, tasks, onTaskClick, onTaskStatusChange }: Colum
             <TaskCard
               key={task.id}
               task={task}
+              assignedAgentName={task.assigned_agent_id ? agentNameById?.[task.assigned_agent_id] : null}
               onClick={onTaskClick}
               onStatusChange={onTaskStatusChange}
             />

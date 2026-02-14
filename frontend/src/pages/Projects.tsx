@@ -26,7 +26,11 @@ import type { Project } from '../types';
 
 type ModalType = 'create' | 'import' | null;
 
-export function ProjectsPage() {
+interface ProjectsPageProps {
+  onProjectsUpdated?: () => Promise<void> | void;
+}
+
+export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -69,8 +73,9 @@ export function ProjectsPage() {
         code_repo_url: formRepoUrl.trim() || undefined,
       });
       setProjects((prev) => [project, ...prev]);
+      await onProjectsUpdated?.();
       closeModal();
-      navigate(`/project/${project.id}`);
+      navigate(`/project/${project.id}/chat`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create project');
     } finally {
@@ -91,8 +96,9 @@ export function ProjectsPage() {
         git_token: formGitToken.trim() || null,
       });
       setProjects((prev) => [project, ...prev]);
+      await onProjectsUpdated?.();
       closeModal();
-      navigate(`/project/${project.id}`);
+      navigate(`/project/${project.id}/chat`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to import project');
     } finally {
@@ -108,6 +114,7 @@ export function ProjectsPage() {
     try {
       await deleteProject(projectId);
       setProjects((prev) => prev.filter((p) => p.id !== projectId));
+      await onProjectsUpdated?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete project');
     }
@@ -206,7 +213,7 @@ export function ProjectsPage() {
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
                       <h3
-                        onClick={() => navigate(`/project/${project.id}`)}
+                        onClick={() => navigate(`/project/${project.id}/chat`)}
                         className="text-lg font-semibold text-gray-900 truncate cursor-pointer hover:text-blue-600"
                       >
                         {project.name}
@@ -252,7 +259,7 @@ export function ProjectsPage() {
                       Created {format(new Date(project.created_at), 'MMM d, yyyy')}
                     </span>
                     <button
-                      onClick={() => navigate(`/project/${project.id}`)}
+                      onClick={() => navigate(`/project/${project.id}/chat`)}
                       className="text-xs font-medium text-blue-600 hover:text-blue-800"
                     >
                       Open Project &rarr;

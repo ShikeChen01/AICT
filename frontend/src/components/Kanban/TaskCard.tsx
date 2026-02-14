@@ -7,6 +7,7 @@ import type { Task, TaskStatus } from '../../types';
 
 interface TaskCardProps {
   task: Task;
+  assignedAgentName?: string | null;
   onStatusChange?: (taskId: string, newStatus: TaskStatus) => void;
   onClick?: (task: Task) => void;
 }
@@ -32,7 +33,7 @@ function formatDate(dateString: string): string {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-export function TaskCard({ task, onClick }: TaskCardProps) {
+export function TaskCard({ task, assignedAgentName, onClick }: TaskCardProps) {
   const priorityColor = getPriorityColor(task.critical, task.urgent);
   const priorityLabel = getPriorityLabel(task.critical, task.urgent);
 
@@ -73,6 +74,11 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
           </span>
         )}
 
+        {/* Status badge */}
+        <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-700">
+          {task.status.replace('_', ' ')}
+        </span>
+
         {/* PR URL */}
         {task.pr_url && (
           <a
@@ -93,7 +99,7 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
         {task.assigned_agent_id && (
           <span className="flex items-center gap-1">
             <div className="w-4 h-4 rounded-full bg-green-500" />
-            Assigned
+            {assignedAgentName || 'Assigned'}
           </span>
         )}
       </div>
