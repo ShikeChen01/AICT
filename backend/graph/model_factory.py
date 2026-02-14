@@ -19,21 +19,24 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     ChatGoogleGenerativeAI = None
 
-def get_model(model_name: str = "claude-3-5-sonnet-latest") -> Any:
+def get_model(model_name: str | None = None) -> Any:
     """
     Get a configured ChatModel instance.
     """
+    if not model_name:
+        model_name = settings.claude_model
+        
     normalized = model_name.lower()
     
     if "claude" in normalized or "anthropic" in normalized:
         if ChatAnthropic is None:
             logger.warning("langchain_anthropic is not installed, trying Google...")
-        elif not settings.anthropic_api_key:
-            logger.warning("Anthropic API key not found, trying Google...")
+        elif not settings.claude_api_key:
+            logger.warning("Claude API key not found, trying Google...")
         else:
             return ChatAnthropic(
                 model=model_name,
-                api_key=settings.anthropic_api_key,
+                api_key=settings.claude_api_key,
                 temperature=settings.llm_temperature,
                 max_tokens=settings.llm_max_tokens
             )
@@ -41,27 +44,27 @@ def get_model(model_name: str = "claude-3-5-sonnet-latest") -> Any:
     if "gemini" in normalized or "google" in normalized:
         if ChatGoogleGenerativeAI is None:
             logger.warning("langchain_google_genai is not installed.")
-        elif not settings.google_api_key:
-            logger.warning("Google API key not found.")
+        elif not settings.gemini_api_key:
+            logger.warning("Gemini API key not found.")
         else:
             return ChatGoogleGenerativeAI(
                 model=model_name,
-                google_api_key=settings.google_api_key,
+                google_api_key=settings.gemini_api_key,
                 temperature=settings.llm_temperature,
                 max_output_tokens=settings.llm_max_tokens
             )
 
     # Fallback logic
-    if settings.anthropic_api_key and ChatAnthropic is not None:
+    if settings.claude_api_key and ChatAnthropic is not None:
         return ChatAnthropic(
-            model="claude-3-5-sonnet-latest",
-            api_key=settings.anthropic_api_key,
+            model=settings.claude_model,
+            api_key=settings.claude_api_key,
             temperature=settings.llm_temperature
         )
-    elif settings.google_api_key and ChatGoogleGenerativeAI is not None:
+    elif settings.gemini_api_key and ChatGoogleGenerativeAI is not None:
         return ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
-            google_api_key=settings.google_api_key,
+            model=settings.gemini_model,
+            google_api_key=settings.gemini_api_key,
             temperature=settings.llm_temperature
         )
 

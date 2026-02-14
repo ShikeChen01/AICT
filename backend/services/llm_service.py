@@ -40,22 +40,22 @@ class LLMService:
         if provider == "google":
             return await self._call_google(model, system_prompt, messages)
         raise RuntimeError(
-            "No LLM provider configured. Set ANTHROPIC_API_KEY or GOOGLE_API_KEY."
+            "No LLM provider configured. Set CLAUDE_API_KEY or GEMINI_API_KEY."
         )
 
     @staticmethod
     def _select_provider(model: str) -> str:
         normalized = (model or "").lower()
         if "claude" in normalized or "anthropic" in normalized:
-            if settings.anthropic_api_key:
+            if settings.claude_api_key:
                 return "anthropic"
         if "gemini" in normalized or "google" in normalized:
-            if settings.google_api_key:
+            if settings.gemini_api_key:
                 return "google"
 
-        if settings.anthropic_api_key:
+        if settings.claude_api_key:
             return "anthropic"
-        if settings.google_api_key:
+        if settings.gemini_api_key:
             return "google"
         return "none"
 
@@ -94,7 +94,7 @@ class LLMService:
         messages: list[dict[str, str]],
     ) -> str:
         payload = {
-            "model": model if model else "claude-3-5-sonnet-latest",
+            "model": model if model else settings.claude_model,
             "max_tokens": settings.llm_max_tokens,
             "temperature": settings.llm_temperature,
             "system": system_prompt,
@@ -107,7 +107,7 @@ class LLMService:
             ],
         }
         headers = {
-            "x-api-key": settings.anthropic_api_key,
+            "x-api-key": settings.claude_api_key,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
@@ -138,7 +138,7 @@ class LLMService:
         system_prompt: str,
         messages: list[dict[str, str]],
     ) -> str:
-        model_name = model if model else "gemini-2.0-flash"
+        model_name = model if model else settings.gemini_model
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": [
@@ -155,7 +155,7 @@ class LLMService:
         }
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:"
-            f"generateContent?key={settings.google_api_key}"
+            f"generateContent?key={settings.gemini_api_key}"
         )
 
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:

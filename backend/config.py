@@ -26,8 +26,10 @@ class Settings(BaseSettings):
     e2b_template_id: str = ""
 
     # LLM
-    anthropic_api_key: str = ""
-    google_api_key: str = ""
+    claude_api_key: str = ""
+    gemini_api_key: str = ""
+    claude_model: str = "claude-3-5-sonnet-latest"
+    gemini_model: str = "gemini-2.0-flash"
     llm_request_timeout_seconds: int = Field(default=60, ge=5, le=300)
     llm_max_tokens: int = Field(default=1024, ge=128, le=8192)
     llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0)

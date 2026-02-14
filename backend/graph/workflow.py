@@ -7,6 +7,7 @@ Returns an uncompiled StateGraph so callers can add a checkpointer.
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from backend.graph.state import AgentState
+from backend.graph.utils import extract_text_content
 from backend.graph.nodes.manager import manager_node
 from backend.graph.nodes.om import om_node
 from backend.graph.nodes.engineer import engineer_node
@@ -46,13 +47,15 @@ def create_graph() -> StateGraph:
         # If Manager wants to use tools
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
             return "manager_tools"
-            
+        
+        content = extract_text_content(last_message.content).lower()
+        
         # If Manager explicitly hands off to OM.
-        if "om" in last_message.content.lower() or "operations manager" in last_message.content.lower():
+        if "om" in content or "operations manager" in content:
             return "om"
 
         # If Manager explicitly hands off directly to Engineer.
-        if "assign" in last_message.content.lower() and "engineer" in last_message.content.lower():
+        if "assign" in content and "engineer" in content:
             return "engineer"
             
         return END
@@ -80,7 +83,7 @@ def create_graph() -> StateGraph:
             return "om_tools"
 
         # Handoff to engineer when implementation work is requested.
-        content = last_message.content.lower()
+        content = extract_text_content(last_message.content).lower()
         if "engineer" in content and (
             "implement" in content
             or "code" in content
