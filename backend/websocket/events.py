@@ -29,6 +29,11 @@ class EventType(str, Enum):
     # Agent events
     AGENT_STATUS = "agent_status"
 
+    # Workflow events (Frontend V2)
+    WORKFLOW_UPDATE = "workflow_update"
+    AGENT_LOG = "agent_log"
+    SANDBOX_LOG = "sandbox_log"
+
 
 class WebSocketEvent(BaseModel):
     """Base WebSocket event structure."""
@@ -90,6 +95,40 @@ class AgentStatusPayload(BaseModel):
     display_name: str
     status: str  # 'sleeping', 'active', 'busy'
     current_task_id: UUID | None
+
+
+# ── Workflow Events (Frontend V2) ─────────────────────────────────
+
+
+class WorkflowUpdatePayload(BaseModel):
+    """Payload for workflow node transitions."""
+    project_id: UUID
+    thread_id: str  # LangGraph thread_id
+    previous_node: str | None
+    current_node: str
+    node_status: str  # 'started', 'completed', 'error'
+    metadata: dict[str, Any] | None = None
+
+
+class AgentLogPayload(BaseModel):
+    """Payload for agent activity logs (internal thought, tool use)."""
+    project_id: UUID
+    agent_id: UUID
+    agent_role: str
+    log_type: str  # 'thought', 'tool_call', 'tool_result', 'message'
+    content: str
+    tool_name: str | None = None
+    tool_input: dict[str, Any] | None = None
+    tool_output: str | None = None
+
+
+class SandboxLogPayload(BaseModel):
+    """Payload for E2B sandbox output (terminal logs)."""
+    project_id: UUID
+    agent_id: UUID
+    sandbox_id: str
+    stream: str  # 'stdout', 'stderr'
+    content: str
 
 
 # ── Event Factory Functions ────────────────────────────────────────
@@ -180,5 +219,76 @@ def create_agent_status_event(agent) -> WebSocketEvent:
             display_name=agent.display_name,
             status=agent.status,
             current_task_id=agent.current_task_id,
+        ).model_dump(mode="json"),
+    )
+
+
+# ── Workflow Event Factories (Frontend V2) ─────────────────────────
+
+
+def create_workflow_update_event(
+    project_id: UUID,
+    thread_id: str,
+    current_node: str,
+    node_status: str,
+    previous_node: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> WebSocketEvent:
+    """Create a workflow update event for graph transitions."""
+    return WebSocketEvent(
+        type=EventType.WORKFLOW_UPDATE,
+        data=WorkflowUpdatePayload(
+            project_id=project_id,
+            thread_id=thread_id,
+            previous_node=previous_node,
+            current_node=current_node,
+            node_status=node_status,
+            metadata=metadata,
+        ).model_dump(mode="json"),
+    )
+
+
+def create_agent_log_event(
+    project_id: UUID,
+    agent_id: UUID,
+    agent_role: str,
+    log_type: str,
+    content: str,
+    tool_name: str | None = None,
+    tool_input: dict[str, Any] | None = None,
+    tool_output: str | None = None,
+) -> WebSocketEvent:
+    """Create an agent log event for activity feed."""
+    return WebSocketEvent(
+        type=EventType.AGENT_LOG,
+        data=AgentLogPayload(
+            project_id=project_id,
+            agent_id=agent_id,
+            agent_role=agent_role,
+            log_type=log_type,
+            content=content,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            tool_output=tool_output,
+        ).model_dump(mode="json"),
+    )
+
+
+def create_sandbox_log_event(
+    project_id: UUID,
+    agent_id: UUID,
+    sandbox_id: str,
+    stream: str,
+    content: str,
+) -> WebSocketEvent:
+    """Create a sandbox log event for terminal output."""
+    return WebSocketEvent(
+        type=EventType.SANDBOX_LOG,
+        data=SandboxLogPayload(
+            project_id=project_id,
+            agent_id=agent_id,
+            sandbox_id=sandbox_id,
+            stream=stream,
+            content=content,
         ).model_dump(mode="json"),
     )

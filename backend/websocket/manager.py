@@ -18,11 +18,14 @@ from starlette.websockets import WebSocketState
 from backend.websocket.events import (
     EventType,
     WebSocketEvent,
+    create_agent_log_event,
     create_agent_status_event,
     create_chat_message_event,
     create_gm_status_event,
+    create_sandbox_log_event,
     create_task_created_event,
     create_task_update_event,
+    create_workflow_update_event,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,6 +35,8 @@ class Channel(str, Enum):
     """WebSocket subscription channels."""
     CHAT = "chat"
     KANBAN = "kanban"
+    WORKFLOW = "workflow"  # Frontend V2: workflow graph updates
+    ACTIVITY = "activity"  # Frontend V2: agent activity feed
     ALL = "all"  # Subscribe to everything
 
 
@@ -46,7 +51,7 @@ class ConnectionInfo:
     def subscribe(self, channel: Channel) -> None:
         self.channels.add(channel)
         if channel == Channel.ALL:
-            self.channels.update([Channel.CHAT, Channel.KANBAN])
+            self.channels.update([Channel.CHAT, Channel.KANBAN, Channel.WORKFLOW, Channel.ACTIVITY])
 
     def unsubscribe(self, channel: Channel) -> None:
         self.channels.discard(channel)
@@ -204,6 +209,70 @@ class WebSocketManager:
         """Broadcast agent status change."""
         event = create_agent_status_event(agent)
         return await self.broadcast(event, Channel.KANBAN, agent.project_id)
+
+    # ── Workflow & Activity broadcast methods (Frontend V2) ────────
+
+    async def broadcast_workflow_update(
+        self,
+        project_id: UUID,
+        thread_id: str,
+        current_node: str,
+        node_status: str,
+        previous_node: str | None = None,
+        metadata: dict | None = None,
+    ) -> int:
+        """Broadcast workflow graph transition."""
+        event = create_workflow_update_event(
+            project_id=project_id,
+            thread_id=thread_id,
+            current_node=current_node,
+            node_status=node_status,
+            previous_node=previous_node,
+            metadata=metadata,
+        )
+        return await self.broadcast(event, Channel.WORKFLOW, project_id)
+
+    async def broadcast_agent_log(
+        self,
+        project_id: UUID,
+        agent_id: UUID,
+        agent_role: str,
+        log_type: str,
+        content: str,
+        tool_name: str | None = None,
+        tool_input: dict | None = None,
+        tool_output: str | None = None,
+    ) -> int:
+        """Broadcast agent activity log (thought, tool use)."""
+        event = create_agent_log_event(
+            project_id=project_id,
+            agent_id=agent_id,
+            agent_role=agent_role,
+            log_type=log_type,
+            content=content,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            tool_output=tool_output,
+        )
+        return await self.broadcast(event, Channel.ACTIVITY, project_id)
+
+    async def broadcast_sandbox_log(
+        self,
+        project_id: UUID,
+        agent_id: UUID,
+        sandbox_id: str,
+        stream: str,
+        content: str,
+    ) -> int:
+        """Broadcast sandbox terminal output."""
+        event = create_sandbox_log_event(
+            project_id=project_id,
+            agent_id=agent_id,
+            sandbox_id=sandbox_id,
+            stream=stream,
+            content=content,
+        )
+        return await self.broadcast(event, Channel.ACTIVITY, project_id)
 
     @property
     def active_connections(self) -> int:

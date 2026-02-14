@@ -44,3 +44,27 @@ class SpawnEngineerCreate(BaseModel):
     display_name: str | None = None
     model: str = "claude-4.5"
     module_path: str | None = None
+
+
+class AgentTool(BaseModel):
+    """Tool available to an agent."""
+    name: str
+    description: str | None = None
+
+
+class AgentContextResponse(BaseModel):
+    """
+    Agent context for the Inspector panel (Frontend V2).
+    
+    Includes system prompt, available tools, and recent message history.
+    """
+    id: UUID
+    role: str
+    display_name: str
+    model: str
+    status: str
+    system_prompt: str | None = None
+    available_tools: list[AgentTool] = Field(default_factory=list)
+    recent_messages: list[dict] = Field(default_factory=list, description="Last N messages in agent context")
+    sandbox_id: str | None = None
+    sandbox_active: bool = False

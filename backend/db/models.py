@@ -48,6 +48,8 @@ class Project(Base):
     spec_repo_path = Column(String(512), nullable=False)
     code_repo_url = Column(String(512), nullable=False)
     code_repo_path = Column(String(512), nullable=False)
+    # Per-project Git credentials (PAT) - encrypted in production
+    git_token = Column(String(512), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 

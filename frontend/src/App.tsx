@@ -16,14 +16,17 @@ import {
 import { ChatView } from './components/Chat';
 import { KanbanBoard } from './components/Kanban';
 import { AgentsPanel } from './components/Agents';
+import { WorkflowGraph } from './components/Workflow';
+import { ActivityFeed } from './components/ActivityFeed';
+import { ProjectsPage, SettingsPage } from './pages';
 import { getProjects, healthCheck, setAuthToken } from './api/client';
-import type { Project } from './types';
+import type { Project, AgentLogData } from './types';
 
 // Set auth token SYNCHRONOUSLY before any component renders/fetches.
 // Must run at module level so child useEffect hooks already have the token.
 setAuthToken(import.meta.env.VITE_API_TOKEN || 'change-me-in-production');
 
-type AppView = 'chat' | 'kanban';
+type AppView = 'chat' | 'kanban' | 'workflow';
 
 interface SidebarProps {
   projects: Project[];
@@ -35,6 +38,7 @@ interface SidebarProps {
 function Sidebar({ projects, activeProjectId, activeView, onProjectChange }: SidebarProps) {
   const chatPath = activeProjectId ? `/project/${activeProjectId}/chat` : '/';
   const kanbanPath = activeProjectId ? `/project/${activeProjectId}/kanban` : '/';
+  const workflowPath = activeProjectId ? `/project/${activeProjectId}/workflow` : '/';
 
   return (
     <aside className="w-64 bg-gray-900 text-white flex flex-col">
@@ -108,6 +112,28 @@ function Sidebar({ projects, activeProjectId, activeView, onProjectChange }: Sid
                 />
               </svg>
               Kanban Board
+            </NavLink>
+          </li>
+          <li>
+            <NavLink
+              to={workflowPath}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                  isActive || activeView === 'workflow'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                }`
+              }
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
+              </svg>
+              Workflow
             </NavLink>
           </li>
         </ul>
@@ -209,6 +235,39 @@ function ProjectPage({
 
   const resolvedProject = activeProject ?? projects[0];
 
+  // Mock activity logs (will be replaced with WebSocket subscription)
+  const [activityLogs] = useState<(AgentLogData & { timestamp: string; id: string })[]>([]);
+
+  const renderView = () => {
+    switch (view) {
+      case 'chat':
+        return <ChatView projectId={resolvedProject.id} />;
+      case 'kanban':
+        return <KanbanBoard projectId={resolvedProject.id} />;
+      case 'workflow':
+        return (
+          <div className="flex h-full">
+            <div className="flex-1 p-4">
+              <div className="bg-white rounded-lg border border-gray-200 h-full">
+                <div className="px-4 py-3 border-b border-gray-200">
+                  <h2 className="text-lg font-semibold text-gray-900">Workflow Graph</h2>
+                  <p className="text-sm text-gray-500">Manager → OM → Engineer pipeline</p>
+                </div>
+                <div className="h-[calc(100%-60px)]">
+                  <WorkflowGraph projectId={resolvedProject.id} />
+                </div>
+              </div>
+            </div>
+            <div className="w-96 p-4 pl-0">
+              <ActivityFeed logs={activityLogs} />
+            </div>
+          </div>
+        );
+      default:
+        return <ChatView projectId={resolvedProject.id} />;
+    }
+  };
+
   return (
     <div className="flex h-screen bg-gray-100">
       <Sidebar
@@ -218,13 +277,9 @@ function ProjectPage({
         onProjectChange={(nextProjectId) => navigate(`/project/${nextProjectId}/${view}`)}
       />
       <main className="flex-1 overflow-hidden">
-        {view === 'chat' ? (
-          <ChatView projectId={resolvedProject.id} />
-        ) : (
-          <KanbanBoard projectId={resolvedProject.id} />
-        )}
+        {renderView()}
       </main>
-      <AgentsPanel projectId={resolvedProject.id} />
+      {view !== 'workflow' && <AgentsPanel projectId={resolvedProject.id} />}
     </div>
   );
 }
@@ -281,14 +336,25 @@ function App() {
       )}
 
       <Routes>
+        {/* Projects Dashboard */}
+        <Route path="/projects" element={<ProjectsPage />} />
+        
+        {/* Project Settings */}
+        <Route path="/project/:projectId/settings" element={<SettingsPage />} />
+        
+        {/* Legacy routes redirect to first project */}
         <Route
           path="/"
           element={
-            <LegacyRouteRedirect
-              projects={projects}
-              view="chat"
-              isLoading={isProjectsLoading}
-            />
+            isProjectsLoading ? (
+              <div className="h-screen flex items-center justify-center text-gray-600">
+                Loading...
+              </div>
+            ) : projects.length === 0 ? (
+              <Navigate to="/projects" replace />
+            ) : (
+              <Navigate to={`/project/${projects[0].id}/chat`} replace />
+            )
           }
         />
         <Route
@@ -311,8 +377,13 @@ function App() {
             />
           }
         />
+        
+        {/* Project views */}
         <Route path="/project/:projectId/chat" element={<ProjectPage projects={projects} view="chat" />} />
         <Route path="/project/:projectId/kanban" element={<ProjectPage projects={projects} view="kanban" />} />
+        <Route path="/project/:projectId/workflow" element={<ProjectPage projects={projects} view="workflow" />} />
+        
+        {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 

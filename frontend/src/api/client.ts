@@ -217,6 +217,56 @@ export async function getProject(projectId: string): Promise<Project> {
   return request<Project>('GET', `/projects/${projectId}`);
 }
 
+export async function createProject(data: {
+  name: string;
+  description?: string | null;
+  code_repo_url?: string;
+}): Promise<Project> {
+  return request<Project>('POST', '/projects', data);
+}
+
+export async function importProject(data: {
+  name: string;
+  description?: string | null;
+  code_repo_url: string;
+  git_token?: string | null;
+}): Promise<Project> {
+  return request<Project>('POST', '/projects/import', data);
+}
+
+export async function updateProject(
+  projectId: string,
+  data: {
+    name?: string | null;
+    description?: string | null;
+    code_repo_url?: string | null;
+    git_token?: string | null;
+  }
+): Promise<Project> {
+  return request<Project>('PATCH', `/projects/${projectId}`, data);
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  return request<void>('DELETE', `/projects/${projectId}`);
+}
+
+// ─── Agent Context ────────────────────────────────────────────────────
+
+export async function getAgentContext(agentId: string): Promise<{
+  id: string;
+  role: string;
+  display_name: string;
+  model: string;
+  status: string;
+  system_prompt: string | null;
+  available_tools: { name: string; description: string | null }[];
+  recent_messages: Record<string, unknown>[];
+  sandbox_id: string | null;
+  sandbox_active: boolean;
+}> {
+  return request('GET', `/agents/${agentId}/context`);
+}
+
 // ─── WebSocket Client ────────────────────────────────────────────────
 
 type WSEventHandler = (event: WSEvent) => void;

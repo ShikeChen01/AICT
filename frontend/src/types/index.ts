@@ -162,8 +162,49 @@ export interface Project {
   spec_repo_path: string;
   code_repo_url: string;
   code_repo_path: string;
+  git_token_set: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface ProjectCreate {
+  name: string;
+  description?: string | null;
+  code_repo_url?: string;
+}
+
+export interface ProjectImport {
+  name: string;
+  description?: string | null;
+  code_repo_url: string;
+  git_token?: string | null;
+}
+
+export interface ProjectUpdate {
+  name?: string | null;
+  description?: string | null;
+  code_repo_url?: string | null;
+  git_token?: string | null;
+}
+
+// ─── Agent Context (Inspector) ────────────────────────────────────────
+
+export interface AgentTool {
+  name: string;
+  description: string | null;
+}
+
+export interface AgentContext {
+  id: UUID;
+  role: AgentRole;
+  display_name: string;
+  model: string;
+  status: AgentStatus;
+  system_prompt: string | null;
+  available_tools: AgentTool[];
+  recent_messages: Record<string, unknown>[];
+  sandbox_id: string | null;
+  sandbox_active: boolean;
 }
 
 // ─── WebSocket Events ────────────────────────────────────────────────
@@ -173,7 +214,10 @@ export type WSEventType =
   | 'gm_status'
   | 'task_created'
   | 'task_update'
-  | 'agent_status';
+  | 'agent_status'
+  | 'workflow_update'
+  | 'agent_log'
+  | 'sandbox_log';
 
 export interface WSEvent<T = unknown> {
   type: WSEventType;
@@ -212,6 +256,51 @@ export interface WSAgentStatusEvent {
     status: AgentStatus;
     current_task_id: UUID | null;
   };
+}
+
+// ─── Workflow Events (Frontend V2) ────────────────────────────────────
+
+export interface WorkflowUpdateData {
+  project_id: UUID;
+  thread_id: string;
+  previous_node: string | null;
+  current_node: string;
+  node_status: 'started' | 'completed' | 'error';
+  metadata?: Record<string, unknown>;
+}
+
+export interface WSWorkflowUpdateEvent {
+  type: 'workflow_update';
+  data: WorkflowUpdateData;
+}
+
+export interface AgentLogData {
+  project_id: UUID;
+  agent_id: UUID;
+  agent_role: AgentRole;
+  log_type: 'thought' | 'tool_call' | 'tool_result' | 'message';
+  content: string;
+  tool_name?: string | null;
+  tool_input?: Record<string, unknown> | null;
+  tool_output?: string | null;
+}
+
+export interface WSAgentLogEvent {
+  type: 'agent_log';
+  data: AgentLogData;
+}
+
+export interface SandboxLogData {
+  project_id: UUID;
+  agent_id: UUID;
+  sandbox_id: string;
+  stream: 'stdout' | 'stderr';
+  content: string;
+}
+
+export interface WSSandboxLogEvent {
+  type: 'sandbox_log';
+  data: SandboxLogData;
 }
 
 // ─── API Response ────────────────────────────────────────────────────
