@@ -66,7 +66,7 @@
 |           |                        |                       |         |
 |  +--------v---------+    +---------v--------+    +---------v------+  |
 |  |   PostgreSQL     |    |   E2B Sandboxes  |    |   Git Repos    |  |
-|  | data + queue +   |    |   (GM, OM, Eng)  |    | spec + project |  |
+|  | data + queue +   |    | (Manager + Eng)  |    | spec + project |  |
 |  |    pgvector      |    +------------------+    +----------------+  |
 |  +------------------+                                                |
 +======================================================================+
@@ -76,11 +76,11 @@
 \section{Request Flow}
 %% ============================================================
 
-\subsection{Client Message to GM}
+\subsection{Client Message to Manager}
 
 \begin{verbatim}
 +--------+         +----------+         +---------+         +--------+
-| Client |         | Backend  |         |   GM    |         |   DB   |
+| Client |         | Backend  |         | Manager |         |   DB   |
 +---+----+         +----+-----+         +----+----+         +---+----+
     |                   |                    |                   |
     | POST /chat/msg    |                    |                   |
@@ -88,10 +88,10 @@
     |                   | save user msg      |                   |
     |                   |----------------------------------->|
     |                   |                    |                   |
-    |                   | invoke GM sandbox  |                   |
+    |                   | invoke Mgr sandbox |                   |
     |                   |------------------->|                   |
     |                   |                    |                   |
-    |   WS: gm_status   |                    |                   |
+    |   WS: mgr_status  |                    |                   |
     |<-- "busy" --------|                    |                   |
     |                   |                    |                   |
     |                   |    tool calls      |                   |
@@ -103,10 +103,10 @@
     |   WS: chat_msg    |<-------------------|                   |
     |<-- (streaming) ---|                    |                   |
     |                   |                    |                   |
-    |                   | save GM response   |                   |
+    |                   | save Mgr response  |                   |
     |                   |----------------------------------->|
     |                   |                    |                   |
-    |   WS: gm_status   |                    |                   |
+    |   WS: mgr_status  |                    |                   |
     |<-- "available" ---|                    |                   |
     |                   |                    |                   |
 \end{verbatim}
@@ -249,11 +249,11 @@
 
 \begin{verbatim}
 +----------+                                           +----------+
-| Agent A  |                                           | Agent B  |
+| Engineer |                                           | Manager  |
 | (sender) |                                           |(receiver)|
 +----+-----+                                           +----+-----+
      |                                                      |
-     | Create ticket (header, priority, type)               |
+     | Create ticket (help, issue, PR ready)                |
      |----------------------------------------------------->|
      |                      +--------+                      |
      |                      |  OPEN  |                      |
@@ -269,26 +269,9 @@
      |<------------------- reply ---------------------------|
      |                                                      |
      |                      +--------+                      |
-     |                      | CLOSE  |<-- higher priority   |
-     |                      +--------+     agent decides    |
+     |                      | CLOSE  |                      |
+     |                      +--------+                      |
      |                                                      |
-\end{verbatim}
-
-\subsection{Priority Adjustment}
-
-\begin{verbatim}
-When Agent B (lower priority) receives ticket from Agent A (higher priority):
-
-  Original task priority:  critical=5, urgent=5
-  Adjustment:              -3 to both dimensions
-  Effective priority:      critical=2, urgent=2  (more urgent!)
-
-This ensures higher-priority agents get faster responses.
-
-Agent Priority Levels:
-  0 = GM           (highest)
-  1 = Operation Master
-  2 = Engineer     (lowest)
 \end{verbatim}
 
 \subsection{Ticket Queue Processing}
@@ -298,11 +281,11 @@ Agent Priority Levels:
 |                    TICKET QUEUE (PostgreSQL)                      |
 +------------------------------------------------------------------+
 |                                                                   |
-|  +----------+  +----------+  +----------+  +----------+           |
-|  | Ticket 1 |  | Ticket 2 |  | Ticket 3 |  | Ticket 4 |           |
-|  | to: OM-1 |  | to: Eng2 |  | to: GM   |  | to: OM-1 |           |
-|  | c:2 u:1  |  | c:5 u:3  |  | c:0 u:0  |  | c:8 u:8  |           |
-|  +----------+  +----------+  +----------+  +----------+           |
+|  +----------+  +----------+  +----------+                         |
+|  | Ticket 1 |  | Ticket 2 |  | Ticket 3 |                         |
+|  | to: Mgr  |  | to: Eng2 |  | to: Mgr  |                         |
+|  | c:2 u:1  |  | c:5 u:3  |  | c:0 u:0  |                         |
+|  +----------+  +----------+  +----------+                         |
 |                                                                   |
 +------------------------------------------------------------------+
                                |
@@ -313,12 +296,11 @@ Agent Priority Levels:
               +----------------+----------------+
                                |
          +---------------------+---------------------+
-         |                     |                     |
-         v                     v                     v
-   +-----+-----+         +-----+-----+         +-----+-----+
-   |  Wake GM  |         | Wake OM-1 |         | Wake Eng2 |
-   | (c:0 u:0) |         | (c:2 u:1) |         | (c:5 u:3) |
-   +-----------+         +-----------+         +-----------+
+         |                                           |
+         v                                           v
+   +-----+-----+                               +-----+-----+
+   | Wake Mgr  |                               | Wake Eng2 |
+   +-----------+                               +-----------+
 \end{verbatim}
 
 %% ============================================================
@@ -578,9 +560,9 @@ For Engineers only:
 |        +---+---+  +---+---+        +----+----+                    |
 |            |          |                 |                         |
 |            v          v                 v                         |
-|     Load spec    Load spec      Clone project repo                |
-|     folder       folder         git clone <repo_url>              |
-|     context      context        Checkout branch                   |
+|     Load spec    Load spec +    Clone project repo                |
+|     folder       project repo   git clone <repo_url>              |
+|     context      (codebase)     Checkout branch                   |
 |            |          |                 |                         |
 |            +----------+-----------------+                         |
 |                       |                                           |
@@ -855,51 +837,39 @@ Event Broadcast Matrix:
 |                    MAIN DATA FLOWS                                |
 +------------------------------------------------------------------+
 
-1. USER -> GM -> OM -> ENGINEER (task delegation)
+1. USER -> MANAGER -> ENGINEER (task delegation)
 
    User message
         |
         v
-   GM interprets, creates spec
-        |
-        v
-   OM breaks down, assigns tasks
+   Manager interprets, creates spec, assigns tasks
         |
         v
    Engineer implements
 
-2. ENGINEER -> OM -> GM -> USER (escalation)
+2. ENGINEER -> MANAGER -> USER (escalation)
 
    Engineer hits problem
         |
         v
-   Ticket to OM
+   Ticket to Manager
         |
         v
-   OM can't resolve -> Ticket to GM
-        |
-        v
-   GM asks user for clarification
+   Manager asks user for clarification (if needed)
 
 3. CODE -> GIT -> PR -> MERGE (delivery)
 
-   Engineer commits
+   Engineer commits -> Push -> Create PR
         |
         v
-   Push to branch
-        |
-        v
-   Create PR
-        |
-        v
-   OM reviews
+   Manager reviews
         |
         v
    Merge to main
 
 4. SPEC CHANGE -> REINDEX -> AGENTS (knowledge sync)
 
-   Client/GM edits spec file
+   Client/Manager edits spec file
         |
         v
    Auto-commit to spec repo
@@ -908,10 +878,7 @@ Event Broadcast Matrix:
    Trigger RAG reindex
         |
         v
-   Notify OM (spec_file_changed)
-        |
-        v
-   OM updates task breakdown if needed
+   Notify Manager (spec_file_changed)
 
 +------------------------------------------------------------------+
 \end{verbatim}

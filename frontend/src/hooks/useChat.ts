@@ -54,7 +54,12 @@ export function useChat(projectId: string | null): UseChatReturn {
     if (!projectId) return;
 
     const unsubscribeMessage = subscribe<ChatMessage>('chat_message', (message) => {
-      setMessages((prev) => [...prev, message]);
+      setMessages((prev) => {
+        if (prev.some((msg) => msg.id === message.id)) {
+          return prev;
+        }
+        return [...prev, message];
+      });
     });
 
     const unsubscribeStatus = subscribe<{ status: 'available' | 'busy' }>(
@@ -78,33 +83,33 @@ export function useChat(projectId: string | null): UseChatReturn {
       setIsSending(true);
       setError(null);
 
-      // Optimistic update for user message
-      const optimisticMessage: ChatMessage = {
-        id: `temp-${Date.now()}`,
-        project_id: projectId,
-        role: 'user',
-        content,
-        attachments: null,
-        created_at: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, optimisticMessage]);
-
       try {
         const messageData: ChatMessageCreate = { content };
         const response = await api.sendChatMessage(projectId, messageData);
-        
-        // Replace optimistic message and add GM response
+        const gmMessage: ChatMessage = {
+          id: response.id,
+          project_id: response.project_id,
+          role: response.role,
+          content: response.content,
+          attachments: response.attachments,
+          created_at: response.created_at,
+        };
+
         setMessages((prev) => {
-          const filtered = prev.filter((m) => m.id !== optimisticMessage.id);
-          // The response might include both user message and GM response
-          // or just the GM response - handle both cases
-          return [...filtered, response];
+          let next = prev;
+
+          if (response.user_message && !next.some((m) => m.id === response.user_message!.id)) {
+            next = [...next, response.user_message];
+          }
+          if (!next.some((m) => m.id === gmMessage.id)) {
+            next = [...next, gmMessage];
+          }
+
+          return next;
         });
 
-        return response;
+        return gmMessage;
       } catch (err) {
-        // Remove optimistic message on error
-        setMessages((prev) => prev.filter((m) => m.id !== optimisticMessage.id));
         const error = err instanceof Error ? err : new Error('Failed to send message');
         setError(error);
         throw error;

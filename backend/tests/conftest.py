@@ -64,6 +64,24 @@ async def sample_gm(session: AsyncSession, sample_project: Project) -> Agent:
 
 
 @pytest_asyncio.fixture
+async def sample_manager(session: AsyncSession, sample_project: Project) -> Agent:
+    """Manager agent (unified GM+OM role)."""
+    agent = Agent(
+        id=uuid.uuid4(),
+        project_id=sample_project.id,
+        role="manager",
+        display_name="Manager",
+        model="claude-4.5-opus",
+        status="sleeping",
+        sandbox_persist=True,
+        priority=0,
+    )
+    session.add(agent)
+    await session.flush()
+    return agent
+
+
+@pytest_asyncio.fixture
 async def sample_om(session: AsyncSession, sample_project: Project) -> Agent:
     agent = Agent(
         id=uuid.uuid4(),

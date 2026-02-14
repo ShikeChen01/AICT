@@ -1,23 +1,41 @@
 /**
  * AICT Frontend Application
- * Main app with routing for Chat and Kanban views
+ * Main app with project-scoped routing, chat, kanban, and agent status.
  */
 
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  NavLink,
+  Navigate,
+  useNavigate,
+  useParams,
+} from 'react-router-dom';
 import { ChatView } from './components/Chat';
 import { KanbanBoard } from './components/Kanban';
-import { setAuthToken, healthCheck } from './api/client';
-
-// Default project ID for MVP-0 (single project)
-// In production, this would come from a project selector or URL
-const DEFAULT_PROJECT_ID = '00000000-0000-0000-0000-000000000001';
+import { AgentsPanel } from './components/Agents';
+import { getProjects, healthCheck, setAuthToken } from './api/client';
+import type { Project } from './types';
 
 // Set auth token SYNCHRONOUSLY before any component renders/fetches.
 // Must run at module level so child useEffect hooks already have the token.
 setAuthToken(import.meta.env.VITE_API_TOKEN || 'change-me-in-production');
 
-function Sidebar() {
+type AppView = 'chat' | 'kanban';
+
+interface SidebarProps {
+  projects: Project[];
+  activeProjectId: string;
+  activeView: AppView;
+  onProjectChange: (projectId: string) => void;
+}
+
+function Sidebar({ projects, activeProjectId, activeView, onProjectChange }: SidebarProps) {
+  const chatPath = activeProjectId ? `/project/${activeProjectId}/chat` : '/';
+  const kanbanPath = activeProjectId ? `/project/${activeProjectId}/kanban` : '/';
+
   return (
     <aside className="w-64 bg-gray-900 text-white flex flex-col">
       {/* Logo */}
@@ -26,15 +44,34 @@ function Sidebar() {
         <p className="text-sm text-gray-400">Multi-Agent Platform</p>
       </div>
 
+      {/* Project selector */}
+      <div className="p-4 border-b border-gray-800">
+        <label htmlFor="project-selector" className="block text-xs uppercase tracking-wide text-gray-400 mb-2">
+          Project
+        </label>
+        <select
+          id="project-selector"
+          value={activeProjectId}
+          onChange={(e) => onProjectChange(e.target.value)}
+          className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          {projects.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {/* Navigation */}
       <nav className="flex-1 p-4">
         <ul className="space-y-2">
           <li>
             <NavLink
-              to="/chat"
+              to={chatPath}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                  isActive
+                  isActive || activeView === 'chat'
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                 }`
@@ -53,10 +90,10 @@ function Sidebar() {
           </li>
           <li>
             <NavLink
-              to="/kanban"
+              to={kanbanPath}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                  isActive
+                  isActive || activeView === 'kanban'
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                 }`
@@ -116,11 +153,107 @@ function ConnectionStatus({ isConnected }: { isConnected: boolean }) {
   );
 }
 
+function LegacyRouteRedirect({
+  projects,
+  view,
+  isLoading,
+}: {
+  projects: Project[];
+  view: AppView;
+  isLoading: boolean;
+}) {
+  if (isLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center text-gray-600">
+        Loading projects...
+      </div>
+    );
+  }
+  if (projects.length === 0) {
+    return (
+      <div className="h-screen flex items-center justify-center text-gray-600">
+        No projects available.
+      </div>
+    );
+  }
+  return <Navigate to={`/project/${projects[0].id}/${view}`} replace />;
+}
+
+function ProjectPage({
+  projects,
+  view,
+}: {
+  projects: Project[];
+  view: AppView;
+}) {
+  const navigate = useNavigate();
+  const { projectId } = useParams<{ projectId: string }>();
+
+  const activeProject =
+    (projectId && projects.find((project) => project.id === projectId)) || null;
+
+  useEffect(() => {
+    if (projects.length === 0) return;
+    if (!projectId || !activeProject) {
+      navigate(`/project/${projects[0].id}/${view}`, { replace: true });
+    }
+  }, [activeProject, navigate, projectId, projects, view]);
+
+  if (projects.length === 0) {
+    return (
+      <div className="h-screen flex items-center justify-center text-gray-600">
+        No projects available.
+      </div>
+    );
+  }
+
+  const resolvedProject = activeProject ?? projects[0];
+
+  return (
+    <div className="flex h-screen bg-gray-100">
+      <Sidebar
+        projects={projects}
+        activeProjectId={resolvedProject.id}
+        activeView={view}
+        onProjectChange={(nextProjectId) => navigate(`/project/${nextProjectId}/${view}`)}
+      />
+      <main className="flex-1 overflow-hidden">
+        {view === 'chat' ? (
+          <ChatView projectId={resolvedProject.id} />
+        ) : (
+          <KanbanBoard projectId={resolvedProject.id} />
+        )}
+      </main>
+      <AgentsPanel projectId={resolvedProject.id} />
+    </div>
+  );
+}
+
 function App() {
   const [isBackendConnected, setIsBackendConnected] = useState(false);
-  const [projectId] = useState(DEFAULT_PROJECT_ID);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [isProjectsLoading, setIsProjectsLoading] = useState(false);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
 
   // Token is set synchronously at module level above (before any component renders).
+
+  useEffect(() => {
+    const loadProjects = async () => {
+      setIsProjectsLoading(true);
+      setProjectsError(null);
+      try {
+        const nextProjects = await getProjects();
+        setProjects(nextProjects);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Failed to load projects';
+        setProjectsError(message);
+      } finally {
+        setIsProjectsLoading(false);
+      }
+    };
+    void loadProjects();
+  }, []);
 
   // Check backend connection
   useEffect(() => {
@@ -141,19 +274,49 @@ function App() {
 
   return (
     <BrowserRouter>
-      <div className="flex h-screen bg-gray-100">
-        <Sidebar />
+      {projectsError && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-red-50 border-b border-red-200 px-4 py-2 text-sm text-red-700 text-center">
+          {projectsError}
+        </div>
+      )}
 
-        <main className="flex-1 overflow-hidden">
-          <Routes>
-            <Route path="/" element={<Navigate to="/chat" replace />} />
-            <Route path="/chat" element={<ChatView projectId={projectId} />} />
-            <Route path="/kanban" element={<KanbanBoard projectId={projectId} />} />
-          </Routes>
-        </main>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <LegacyRouteRedirect
+              projects={projects}
+              view="chat"
+              isLoading={isProjectsLoading}
+            />
+          }
+        />
+        <Route
+          path="/chat"
+          element={
+            <LegacyRouteRedirect
+              projects={projects}
+              view="chat"
+              isLoading={isProjectsLoading}
+            />
+          }
+        />
+        <Route
+          path="/kanban"
+          element={
+            <LegacyRouteRedirect
+              projects={projects}
+              view="kanban"
+              isLoading={isProjectsLoading}
+            />
+          }
+        />
+        <Route path="/project/:projectId/chat" element={<ProjectPage projects={projects} view="chat" />} />
+        <Route path="/project/:projectId/kanban" element={<ProjectPage projects={projects} view="kanban" />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
 
-        <ConnectionStatus isConnected={isBackendConnected} />
-      </div>
+      <ConnectionStatus isConnected={isBackendConnected} />
     </BrowserRouter>
   );
 }

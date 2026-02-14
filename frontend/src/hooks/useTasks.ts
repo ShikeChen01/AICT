@@ -62,13 +62,22 @@ export function useTasks(projectId: string | null): UseTasksReturn {
     if (!projectId) return;
 
     const unsubscribeCreated = subscribe<Task>('task_created', (task) => {
-      setTasks((prev) => [...prev, task]);
+      setTasks((prev) => {
+        if (prev.some((existing) => existing.id === task.id)) {
+          return prev;
+        }
+        return [...prev, task];
+      });
     });
 
     const unsubscribeUpdated = subscribe<Task>('task_update', (updatedTask) => {
-      setTasks((prev) =>
-        prev.map((task) => (task.id === updatedTask.id ? updatedTask : task))
-      );
+      setTasks((prev) => {
+        const hasExisting = prev.some((task) => task.id === updatedTask.id);
+        if (!hasExisting) {
+          return [...prev, updatedTask];
+        }
+        return prev.map((task) => (task.id === updatedTask.id ? updatedTask : task));
+      });
     });
 
     return () => {
@@ -112,8 +121,12 @@ export function useTasks(projectId: string | null): UseTasksReturn {
       if (!projectId) throw new Error('No project selected');
 
       const newTask = await api.createTask(projectId, taskData);
-      // Optimistic update (will be overwritten by WebSocket event if connected)
-      setTasks((prev) => [...prev, newTask]);
+      setTasks((prev) => {
+        if (prev.some((task) => task.id === newTask.id)) {
+          return prev;
+        }
+        return [...prev, newTask];
+      });
       return newTask;
     },
     [projectId]
@@ -125,10 +138,13 @@ export function useTasks(projectId: string | null): UseTasksReturn {
       if (!projectId) throw new Error('No project selected');
 
       const updatedTask = await api.updateTask(taskId, update);
-      // Optimistic update
-      setTasks((prev) =>
-        prev.map((task) => (task.id === taskId ? updatedTask : task))
-      );
+      setTasks((prev) => {
+        const hasExisting = prev.some((task) => task.id === taskId);
+        if (!hasExisting) {
+          return [...prev, updatedTask];
+        }
+        return prev.map((task) => (task.id === taskId ? updatedTask : task));
+      });
       return updatedTask;
     },
     [projectId]

@@ -6,6 +6,8 @@ Creates:
 - 1 GM agent
 - 1 OM agent
 
+Uses AgentService.ensure_project_agents for agent creation.
+
 Usage: python -m backend.scripts.seed
 """
 
@@ -19,13 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # Reuse the session URL resolver so it works in Cloud Run too
 os.environ.setdefault("PYTHONPATH", "/app")
 
-from backend.db.models import Agent, Base, Project
+from backend.db.models import Base, Project
 from backend.db.session import _resolve_database_url
+from backend.services.agent_service import get_agent_service
 
-# Fixed UUIDs so they match the frontend default
+# Fixed UUID so it matches the frontend default
 PROJECT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
-GM_ID = uuid.UUID("00000000-0000-0000-0000-000000000010")
-OM_ID = uuid.UUID("00000000-0000-0000-0000-000000000020")
 
 
 async def seed():
@@ -57,32 +58,14 @@ async def seed():
         await session.flush()
         print(f"Created project: {project.name} ({project.id})")
 
-        # Create GM agent
-        gm = Agent(
-            id=GM_ID,
-            project_id=PROJECT_ID,
-            role="gm",
-            display_name="GM",
-            model="gemini-2.5-pro",
-            status="sleeping",
-            sandbox_persist=True,
-            priority=0,
+        # Create GM and OM via AgentService
+        agent_service = get_agent_service(session)
+        gm, om = await agent_service.ensure_project_agents(
+            project,
+            gm_model="gemini-2.5-pro",
+            om_model="claude-4-sonnet",
         )
-        session.add(gm)
         print(f"Created agent: {gm.display_name} (role={gm.role})")
-
-        # Create OM agent
-        om = Agent(
-            id=OM_ID,
-            project_id=PROJECT_ID,
-            role="om",
-            display_name="OM-1",
-            model="claude-4-sonnet",
-            status="sleeping",
-            sandbox_persist=True,
-            priority=1,
-        )
-        session.add(om)
         print(f"Created agent: {om.display_name} (role={om.role})")
 
         await session.commit()

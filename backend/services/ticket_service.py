@@ -30,6 +30,7 @@ class TicketService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self._ws_manager = None
+        self._orchestrator = None
 
     @property
     def ws_manager(self):
@@ -38,6 +39,14 @@ class TicketService:
             from backend.websocket.manager import ws_manager
             self._ws_manager = ws_manager
         return self._ws_manager
+
+    @property
+    def orchestrator(self):
+        """Lazy load orchestrator to avoid circular imports."""
+        if self._orchestrator is None:
+            from backend.services.orchestrator import OrchestratorService
+            self._orchestrator = OrchestratorService()
+        return self._orchestrator
 
     async def get(self, ticket_id: UUID) -> Ticket:
         """Get a ticket by ID with messages loaded."""
@@ -215,11 +224,11 @@ class TicketService:
         return ticket
 
     async def _wake_agent(self, agent: Agent) -> None:
-        """Wake an agent if sleeping."""
-        if agent.status == "sleeping":
-            agent.status = "active"
-            await self.session.flush()
-            # Broadcast agent status change
+        """Wake an agent and ensure sandbox availability."""
+        prev_status = agent.status
+        prev_sandbox_id = agent.sandbox_id
+        await self.orchestrator.wake_agent(self.session, agent)
+        if agent.status != prev_status or agent.sandbox_id != prev_sandbox_id:
             await self.ws_manager.broadcast_agent_status(agent)
 
 
