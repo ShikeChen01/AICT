@@ -36,6 +36,25 @@ class AgentService:
         )
         return int(result.scalar() or 0)
 
+    async def list_by_role(self, project_id: UUID, role: str) -> list[Agent]:
+        """List all agents with the given role in a project."""
+        if role not in VALID_ROLES:
+            return []
+        result = await self.session.execute(
+            select(Agent).where(
+                Agent.project_id == project_id,
+                Agent.role == role,
+            ).order_by(Agent.display_name)
+        )
+        return list(result.scalars().all())
+
+    async def get_by_id(self, agent_id: UUID) -> Agent | None:
+        """Get an agent by ID."""
+        result = await self.session.execute(
+            select(Agent).where(Agent.id == agent_id)
+        )
+        return result.scalar_one_or_none()
+
     async def spawn_engineer(
         self,
         project_id: UUID,

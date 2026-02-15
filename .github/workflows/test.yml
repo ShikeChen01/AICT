@@ -1,0 +1,300 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION: '20'
+
+jobs:
+  # ============================================================================
+  # Backend Unit Tests (fast, SQLite)
+  # ============================================================================
+  backend-unit-tests:
+    name: Backend Unit Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run unit tests
+        run: |
+          cd backend
+          python -m pytest tests/ -v --tb=short -m "not integration" --ignore=tests/test_api_integration.py
+        env:
+          ENV: development
+          API_TOKEN: test-token
+
+  # ============================================================================
+  # Backend Integration Tests (PostgreSQL via testcontainers)
+  # ============================================================================
+  backend-integration-tests:
+    name: Backend Integration Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run migrations
+        run: |
+          cd backend
+          python -m alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+
+      - name: Run integration tests
+        run: |
+          cd backend
+          python -m pytest tests/test_api_integration.py -v --tb=short -m "integration or not integration"
+        env:
+          INTEGRATION_TEST: '1'
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+          ENV: development
+          API_TOKEN: test-token
+
+  # ============================================================================
+  # Frontend Unit Tests (Vitest)
+  # ============================================================================
+  frontend-unit-tests:
+    name: Frontend Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run unit tests
+        run: |
+          cd frontend
+          npm test
+
+      - name: Run lint
+        run: |
+          cd frontend
+          npm run lint
+
+  # ============================================================================
+  # E2E Tests (Playwright)
+  # ============================================================================
+  e2e-tests:
+    name: E2E Tests (Playwright)
+    runs-on: ubuntu-latest
+    needs: [backend-unit-tests, frontend-unit-tests]
+    
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Install Playwright browsers
+        run: |
+          cd frontend
+          npx playwright install --with-deps chromium
+
+      - name: Run migrations
+        run: |
+          cd backend
+          python -m alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+
+      - name: Seed test data
+        run: |
+          cd backend
+          python scripts/seed.py || echo "Seed script not available, continuing..."
+        env:
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+          ENV: development
+
+      - name: Run E2E tests (excluding GitHub integration)
+        run: |
+          cd frontend
+          npx playwright test --project=chromium --ignore-snapshots \
+            projects.spec.ts chat.spec.ts kanban.spec.ts
+        env:
+          CI: true
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+          ENV: development
+          API_TOKEN: test-token
+          FRONTEND_URL: http://localhost:5173
+          BACKEND_URL: http://localhost:8000
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+  # ============================================================================
+  # GitHub Integration Tests (runs only on main)
+  # ============================================================================
+  github-integration-tests:
+    name: GitHub Integration Tests
+    runs-on: ubuntu-latest
+    needs: [e2e-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          cd frontend && npm ci
+
+      - name: Install Playwright
+        run: |
+          cd frontend
+          npx playwright install --with-deps chromium
+
+      - name: Run migrations
+        run: |
+          cd backend
+          python -m alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+
+      - name: Run GitHub integration tests
+        run: |
+          cd frontend
+          npx playwright test github-integration.spec.ts --project=chromium
+        env:
+          CI: true
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+          ENV: development
+          API_TOKEN: ${{ secrets.API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN_TEST: ${{ secrets.GITHUB_TOKEN_TEST }}
+          GITHUB_TEST_OWNER: ${{ secrets.GITHUB_TEST_OWNER }}
+          TEST_PROJECT_ID: ${{ secrets.TEST_PROJECT_ID }}
+          CLEANUP_TEST_REPOS: 'true'
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: github-integration-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7

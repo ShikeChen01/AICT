@@ -22,6 +22,10 @@ from backend.websocket.events import (
     create_agent_status_event,
     create_chat_message_event,
     create_gm_status_event,
+    create_job_completed_event,
+    create_job_failed_event,
+    create_job_progress_event,
+    create_job_started_event,
     create_sandbox_log_event,
     create_task_created_event,
     create_task_update_event,
@@ -271,6 +275,125 @@ class WebSocketManager:
             sandbox_id=sandbox_id,
             stream=stream,
             content=content,
+        )
+        return await self.broadcast(event, Channel.ACTIVITY, project_id)
+
+    async def broadcast_to_project(
+        self,
+        project_id: UUID,
+        data: dict,
+    ) -> int:
+        """
+        Broadcast raw JSON data to all connections for a project.
+        
+        This is a low-level method for custom event types not covered
+        by the typed event system.
+        """
+        async with self._lock:
+            connections = list(self._connections.items())
+
+        sent = 0
+        failed_ids = []
+
+        for conn_id, conn_info in connections:
+            if conn_info.project_id != project_id:
+                continue
+            
+            try:
+                if conn_info.websocket.client_state == WebSocketState.CONNECTED:
+                    await conn_info.websocket.send_json(data)
+                    sent += 1
+                else:
+                    failed_ids.append(conn_id)
+            except Exception as e:
+                logger.warning(f"Failed to send to project {project_id}: {e}")
+                failed_ids.append(conn_id)
+
+        # Clean up failed connections
+        if failed_ids:
+            async with self._lock:
+                for conn_id in failed_ids:
+                    self._connections.pop(conn_id, None)
+
+        return sent
+
+    # ── Job broadcast methods ──────────────────────────────────────
+
+    async def broadcast_job_started(
+        self,
+        job_id: UUID,
+        project_id: UUID,
+        task_id: UUID,
+        agent_id: UUID,
+        message: str | None = None,
+    ) -> int:
+        """Broadcast job started event."""
+        event = create_job_started_event(
+            job_id=job_id,
+            project_id=project_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            message=message,
+        )
+        return await self.broadcast(event, Channel.ACTIVITY, project_id)
+
+    async def broadcast_job_progress(
+        self,
+        job_id: UUID,
+        project_id: UUID,
+        task_id: UUID,
+        agent_id: UUID,
+        message: str | None = None,
+        tool_name: str | None = None,
+        tool_args: dict | None = None,
+    ) -> int:
+        """Broadcast job progress event."""
+        event = create_job_progress_event(
+            job_id=job_id,
+            project_id=project_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            message=message,
+            tool_name=tool_name,
+            tool_args=tool_args,
+        )
+        return await self.broadcast(event, Channel.ACTIVITY, project_id)
+
+    async def broadcast_job_completed(
+        self,
+        job_id: UUID,
+        project_id: UUID,
+        task_id: UUID,
+        agent_id: UUID,
+        result: str | None = None,
+        pr_url: str | None = None,
+    ) -> int:
+        """Broadcast job completed event."""
+        event = create_job_completed_event(
+            job_id=job_id,
+            project_id=project_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            result=result,
+            pr_url=pr_url,
+        )
+        return await self.broadcast(event, Channel.ACTIVITY, project_id)
+
+    async def broadcast_job_failed(
+        self,
+        job_id: UUID,
+        project_id: UUID,
+        task_id: UUID,
+        agent_id: UUID,
+        error: str,
+    ) -> int:
+        """Broadcast job failed event."""
+        event = create_job_failed_event(
+            job_id=job_id,
+            project_id=project_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            error=error,
         )
         return await self.broadcast(event, Channel.ACTIVITY, project_id)
 

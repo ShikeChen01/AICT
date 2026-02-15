@@ -5,7 +5,7 @@ Manager Node implementation.
 from langchain_core.messages import SystemMessage
 from backend.graph.state import AgentState
 from backend.graph.model_factory import get_model
-from backend.tools.registry import get_manager_tools
+from backend.graph.events import emit_workflow_update, emit_agent_log
 
 
 async def manager_node(state: AgentState):
@@ -18,13 +18,23 @@ async def manager_node(state: AgentState):
     - assign_task: Assign tasks to engineers
     - spawn_engineer: Create new engineer agents (max 5)
     """
+    # Import inside function to avoid circular import
+    from backend.tools.registry import get_manager_tools
+    
+    project_id = state.get("project_id", "unknown")
+    
+    # Emit workflow start event
+    await emit_workflow_update(
+        project_id=project_id,
+        current_node="manager",
+        node_status="started",
+    )
+    
     model = get_model()
     
     # Bind Manager tools to the model
     tools = get_manager_tools()
     model_with_tools = model.bind_tools(tools)
-    
-    project_id = state.get("project_id", "unknown")
     
     system_prompt = (
         "You are the Manager Agent for AICT. You act as both Product Owner and Tech Lead.\n"
@@ -35,6 +45,8 @@ async def manager_node(state: AgentState):
         "4. Spawn engineers (up to 5) using spawn_engineer when needed.\n"
         "5. Assign tasks to Engineers using assign_task.\n"
         "6. Review PRs from Engineers.\n\n"
+        "When you need the OM (Operations Manager) to coordinate task execution, mention 'OM' in your response.\n"
+        "When you want to assign directly to an Engineer, mention 'assign to engineer'.\n\n"
         "Available tools:\n"
         "- create_kanban_task(title, description, project_id, critical, urgent): Create a new task\n"
         "- list_tasks(project_id, status): List tasks, optionally filtered by status\n"
@@ -48,7 +60,43 @@ async def manager_node(state: AgentState):
     # Prepend system message
     messages = [SystemMessage(content=system_prompt)] + state["messages"]
     
+    # Emit agent thinking log
+    await emit_agent_log(
+        project_id=project_id,
+        agent_role="manager",
+        log_type="thought",
+        content="Processing user request and planning next steps...",
+    )
+    
     response = await model_with_tools.ainvoke(messages)
+    
+    # Log the response
+    response_content = response.content if hasattr(response, "content") else str(response)
+    await emit_agent_log(
+        project_id=project_id,
+        agent_role="manager",
+        log_type="message",
+        content=response_content[:500] if len(response_content) > 500 else response_content,
+    )
+    
+    # Check if there are tool calls to log
+    if hasattr(response, "tool_calls") and response.tool_calls:
+        for tc in response.tool_calls:
+            await emit_agent_log(
+                project_id=project_id,
+                agent_role="manager",
+                log_type="tool_call",
+                content=f"Calling tool: {tc.get('name', 'unknown')}",
+                tool_name=tc.get("name"),
+                tool_input=tc.get("args"),
+            )
+    
+    # Emit workflow completion event
+    await emit_workflow_update(
+        project_id=project_id,
+        current_node="manager",
+        node_status="completed",
+    )
     
     return {
         "messages": [response],

@@ -1,13 +1,14 @@
 """
 SQLAlchemy models for AICT MVP-0.
 
-6 tables:
+7 tables:
 - projects: single project config
 - agents: Manager, Engineers (max 5 engineers enforced in code)
 - tasks: Kanban cards with 2D priority (critical + urgent)
 - tickets: agent-to-agent communication queue
 - ticket_messages: conversation within a ticket
 - chat_messages: user <-> Manager conversation
+- engineer_jobs: background task queue for parallel engineer execution
 """
 
 import uuid
@@ -77,7 +78,11 @@ class Agent(Base):
     display_name = Column(String(100), nullable=False)  # e.g. 'Manager', 'Engineer-3'
     model = Column(String(100), nullable=False)  # e.g. 'gemini-3-pro', 'claude-4.5-opus'
     status = Column(String(20), default="sleeping", nullable=False)
-    current_task_id = Column(Uuid, ForeignKey("tasks.id"), nullable=True)
+    current_task_id = Column(
+        Uuid,
+        ForeignKey("tasks.id", use_alter=True, name="fk_agent_current_task"),
+        nullable=True,
+    )
     sandbox_id = Column(String(255), nullable=True)
     sandbox_persist = Column(Boolean, default=False, nullable=False)
     priority = Column(Integer, default=2, nullable=False)  # 0=Manager, 1=Engineer
@@ -215,3 +220,46 @@ class ChatMessage(Base):
 
     # relationships
     project = relationship("Project", back_populates="chat_messages")
+
+
+# ── Engineer Jobs (Background Task Queue) ──────────────────────────
+
+VALID_JOB_STATUSES = ("pending", "running", "completed", "failed", "cancelled")
+
+
+class EngineerJob(Base):
+    """
+    Background job queue for engineer task execution.
+    
+    Engineers work asynchronously on tasks dispatched by the OM.
+    Multiple engineers can work in parallel on different tasks.
+    """
+    __tablename__ = "engineer_jobs"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    task_id = Column(
+        Uuid, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    agent_id = Column(
+        Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+    )
+    status = Column(String(50), default="pending", nullable=False)
+    result = Column(Text, nullable=True)  # Final result summary
+    error = Column(Text, nullable=True)  # Error message if failed
+    pr_url = Column(String(512), nullable=True)  # PR URL if created
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # relationships
+    project = relationship("Project")
+    task = relationship("Task")
+    agent = relationship("Agent")
+
+    # Index for efficient job queue polling
+    __table_args__ = (
+        Index("ix_engineer_jobs_status_created", "status", "created_at"),
+    )

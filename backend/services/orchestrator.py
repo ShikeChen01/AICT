@@ -181,47 +181,81 @@ class OrchestratorService:
             manager: The Manager agent model.
             user_message: The new message from the user.
             history_from_db: Optional list of previous chat messages to seed the graph state.
+        
+        Returns:
+            The Manager's response text. On error, returns a user-friendly error message
+            rather than raising an exception.
         """
-        await self.wake_agent(session, manager)
-        graph_app = await get_graph_app()
-        
-        # Build initial state configuration
-        config = {"configurable": {"thread_id": str(manager.project_id)}}
-        
-        # Check if state exists
-        current_state = await graph_app.aget_state(config)
-        inputs = {}
-        
-        if not current_state.values and history_from_db:
-            # Initialize with history if state is empty
-            converted_history = []
-            for msg in history_from_db:
-                role = getattr(msg, "role", "user")
-                content = getattr(msg, "content", "")
-                if role == "user":
-                    converted_history.append(HumanMessage(content=content))
-                elif role in ("gm", "manager"):
-                    converted_history.append(AIMessage(content=content))
+        try:
+            await self.wake_agent(session, manager)
+            graph_app = await get_graph_app()
             
-            # Append the new user message
-            inputs["messages"] = converted_history + [HumanMessage(content=user_message)]
-        else:
-            # Just add the new message
-            inputs["messages"] = [HumanMessage(content=user_message)]
+            # Build initial state configuration
+            config = {"configurable": {"thread_id": str(manager.project_id)}}
             
-        inputs["project_id"] = str(manager.project_id)
-        inputs["next"] = "manager"
-        
-        # Invoke the graph
-        final_state = await graph_app.ainvoke(inputs, config=config)
-        
-        # Extract the final response from the Manager
-        messages = final_state.get("messages", [])
-        if messages:
-            last_msg = messages[-1]
-            return last_msg.content
+            # Check if state exists
+            current_state = await graph_app.aget_state(config)
+            inputs = {}
             
-        return "Manager processed the request but returned no output."
+            if not current_state.values and history_from_db:
+                # Initialize with history if state is empty
+                converted_history = []
+                for msg in history_from_db:
+                    role = getattr(msg, "role", "user")
+                    content = getattr(msg, "content", "")
+                    if role == "user":
+                        converted_history.append(HumanMessage(content=content))
+                    elif role in ("gm", "manager"):
+                        converted_history.append(AIMessage(content=content))
+                
+                # Append the new user message
+                inputs["messages"] = converted_history + [HumanMessage(content=user_message)]
+            else:
+                # Just add the new message
+                inputs["messages"] = [HumanMessage(content=user_message)]
+                
+            inputs["project_id"] = str(manager.project_id)
+            inputs["next"] = "manager"
+            
+            # Invoke the graph
+            final_state = await graph_app.ainvoke(inputs, config=config)
+            
+            # Extract the final response from the Manager
+            messages = final_state.get("messages", [])
+            if messages:
+                last_msg = messages[-1]
+                content = last_msg.content
+                # LangChain AIMessage.content can be a list (multi-part) or string
+                if isinstance(content, list):
+                    # Join text parts, skip non-text elements
+                    text_parts = []
+                    for part in content:
+                        if isinstance(part, str):
+                            text_parts.append(part)
+                        elif isinstance(part, dict) and "text" in part:
+                            text_parts.append(part["text"])
+                    content = "\n".join(text_parts) if text_parts else ""
+                return content if content else "Manager processed the request but returned no output."
+                
+            return "Manager processed the request but returned no output."
+            
+        except Exception as exc:
+            # Log the full error for debugging
+            logger.exception("Graph execution failed for project %s: %s", manager.project_id, exc)
+            
+            # Return a user-friendly error message
+            error_type = type(exc).__name__
+            error_msg = str(exc)
+            
+            # Truncate very long error messages
+            if len(error_msg) > 200:
+                error_msg = error_msg[:200] + "..."
+            
+            return (
+                f"I encountered an error while processing your request.\n\n"
+                f"**Error**: {error_type}: {error_msg}\n\n"
+                "Please try again. If the problem persists, check the backend logs for details."
+            )
 
     async def invoke_gm(
         self,

@@ -3,6 +3,7 @@ Tests for chat service.
 """
 
 import uuid
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,15 @@ class TestChatService:
     @pytest.fixture
     def service(self, session: AsyncSession):
         return ChatService(session)
+
+    @pytest.fixture
+    def mock_invoke_manager(self):
+        """Mock the _invoke_manager method to avoid real LLM calls."""
+        with patch.object(
+            ChatService, "_invoke_manager", new_callable=AsyncMock
+        ) as mock:
+            mock.return_value = "This is a mock GM response."
+            yield mock
 
     async def test_get_history_empty(
         self,
@@ -86,6 +96,7 @@ class TestChatService:
         sample_project: Project,
         sample_gm: Agent,
         session: AsyncSession,
+        mock_invoke_manager,
     ):
         data = ChatMessageCreate(content="Hello GM!")
 
@@ -94,7 +105,7 @@ class TestChatService:
         assert user_msg.role == "user"
         assert user_msg.content == "Hello GM!"
         assert gm_msg.role == "gm"
-        assert len(gm_msg.content) > 0
+        assert gm_msg.content == "This is a mock GM response."
 
     async def test_send_message_updates_gm_status(
         self,
@@ -102,6 +113,7 @@ class TestChatService:
         sample_project: Project,
         sample_gm: Agent,
         session: AsyncSession,
+        mock_invoke_manager,
     ):
         # GM should be active after message is processed
         data = ChatMessageCreate(content="Test status")
@@ -136,6 +148,7 @@ class TestChatService:
         service: ChatService,
         sample_project: Project,
         sample_gm: Agent,
+        mock_invoke_manager,
     ):
         data = ChatMessageCreate(
             content="Here are some files",

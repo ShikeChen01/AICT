@@ -1,23 +1,92 @@
 """
 Shared test fixtures.
 
-Uses SQLite in-memory via aiosqlite so tests run without PostgreSQL.
+Uses SQLite in-memory by default for fast unit tests.
+Set INTEGRATION_TEST=1 to use PostgreSQL via testcontainers for integration tests.
 """
 
+import json
+import os
 import uuid
 
+import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.db.models import Agent, Base, ChatMessage, Project, Task, Ticket, TicketMessage
 
+# Use PostgreSQL when INTEGRATION_TEST=1, else SQLite for fast unit tests
+USE_POSTGRES = os.getenv("INTEGRATION_TEST") == "1"
+
+# Store the postgres container at module level for session scope
+_postgres_container = None
+
+
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line(
+        "markers", "integration: mark test as integration test (requires PostgreSQL)"
+    )
+
+
+@pytest.fixture(scope="session")
+def postgres_container():
+    """
+    Session-scoped PostgreSQL container for integration tests.
+    Only starts when INTEGRATION_TEST=1.
+    """
+    global _postgres_container
+    
+    if not USE_POSTGRES:
+        yield None
+        return
+    
+    try:
+        from testcontainers.postgres import PostgresContainer
+    except ImportError:
+        pytest.skip("testcontainers not installed; run: pip install testcontainers[postgres]")
+        return
+    
+    # Start the container
+    container = PostgresContainer("postgres:16-alpine")
+    container.start()
+    _postgres_container = container
+    
+    yield container
+    
+    # Cleanup
+    container.stop()
+    _postgres_container = None
+
 
 @pytest_asyncio.fixture
-async def engine():
-    eng = create_async_engine("sqlite+aiosqlite://", echo=False)
+async def engine(postgres_container):
+    """
+    Create database engine.
+    - Uses PostgreSQL if INTEGRATION_TEST=1
+    - Uses SQLite in-memory otherwise (faster for unit tests)
+    """
+    if USE_POSTGRES and postgres_container:
+        # Convert psycopg2 URL to asyncpg URL
+        url = postgres_container.get_connection_url()
+        url = url.replace("psycopg2", "asyncpg")
+        eng = create_async_engine(url, echo=False)
+    else:
+        # SQLite for fast unit tests - requires explicit JSON serialization
+        eng = create_async_engine(
+            "sqlite+aiosqlite://",
+            echo=False,
+            json_serializer=lambda obj: json.dumps(obj),
+            json_deserializer=lambda s: json.loads(s) if s else None,
+        )
+    
+    # Create all tables
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    
     yield eng
+    
+    # Drop all tables and dispose
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await eng.dispose()
@@ -25,14 +94,20 @@ async def engine():
 
 @pytest_asyncio.fixture
 async def session(engine) -> AsyncSession:
+    """Create a database session for tests."""
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as sess:
         yield sess
         await sess.rollback()
 
 
+# ============================================================================
+# Sample Data Fixtures
+# ============================================================================
+
 @pytest_asyncio.fixture
 async def sample_project(session: AsyncSession) -> Project:
+    """Create a test project."""
     project = Project(
         id=uuid.uuid4(),
         name="Test Project",
@@ -48,6 +123,7 @@ async def sample_project(session: AsyncSession) -> Project:
 
 @pytest_asyncio.fixture
 async def sample_gm(session: AsyncSession, sample_project: Project) -> Agent:
+    """Create a GM agent."""
     agent = Agent(
         id=uuid.uuid4(),
         project_id=sample_project.id,
@@ -83,6 +159,7 @@ async def sample_manager(session: AsyncSession, sample_project: Project) -> Agen
 
 @pytest_asyncio.fixture
 async def sample_om(session: AsyncSession, sample_project: Project) -> Agent:
+    """Create an Operations Manager agent."""
     agent = Agent(
         id=uuid.uuid4(),
         project_id=sample_project.id,
@@ -100,6 +177,7 @@ async def sample_om(session: AsyncSession, sample_project: Project) -> Agent:
 
 @pytest_asyncio.fixture
 async def sample_engineer(session: AsyncSession, sample_project: Project) -> Agent:
+    """Create an Engineer agent."""
     agent = Agent(
         id=uuid.uuid4(),
         project_id=sample_project.id,
@@ -117,6 +195,7 @@ async def sample_engineer(session: AsyncSession, sample_project: Project) -> Age
 
 @pytest_asyncio.fixture
 async def sample_task(session: AsyncSession, sample_project: Project) -> Task:
+    """Create a test task."""
     task = Task(
         id=uuid.uuid4(),
         project_id=sample_project.id,
@@ -129,3 +208,14 @@ async def sample_task(session: AsyncSession, sample_project: Project) -> Task:
     session.add(task)
     await session.flush()
     return task
+
+
+@pytest_asyncio.fixture
+async def sample_task_assigned(
+    session: AsyncSession, sample_task: Task, sample_engineer: Agent
+) -> Task:
+    """Create a task assigned to an engineer."""
+    sample_task.assigned_agent_id = sample_engineer.id
+    sample_task.status = "in_progress"
+    await session.flush()
+    return sample_task

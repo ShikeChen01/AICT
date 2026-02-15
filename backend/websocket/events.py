@@ -34,6 +34,12 @@ class EventType(str, Enum):
     AGENT_LOG = "agent_log"
     SANDBOX_LOG = "sandbox_log"
 
+    # Engineer job events
+    JOB_STARTED = "job_started"
+    JOB_PROGRESS = "job_progress"
+    JOB_COMPLETED = "job_completed"
+    JOB_FAILED = "job_failed"
+
 
 class WebSocketEvent(BaseModel):
     """Base WebSocket event structure."""
@@ -129,6 +135,24 @@ class SandboxLogPayload(BaseModel):
     sandbox_id: str
     stream: str  # 'stdout', 'stderr'
     content: str
+
+
+# ── Engineer Job Events ───────────────────────────────────────────
+
+
+class JobEventPayload(BaseModel):
+    """Payload for engineer job status events."""
+    job_id: UUID
+    project_id: UUID
+    task_id: UUID
+    agent_id: UUID
+    status: str  # started, progress, completed, failed
+    message: str | None = None
+    result: str | None = None
+    error: str | None = None
+    pr_url: str | None = None
+    tool_name: str | None = None
+    tool_args: dict[str, Any] | None = None
 
 
 # ── Event Factory Functions ────────────────────────────────────────
@@ -290,5 +314,98 @@ def create_sandbox_log_event(
             sandbox_id=sandbox_id,
             stream=stream,
             content=content,
+        ).model_dump(mode="json"),
+    )
+
+
+# ── Job Event Factories ────────────────────────────────────────────
+
+
+def create_job_started_event(
+    job_id: UUID,
+    project_id: UUID,
+    task_id: UUID,
+    agent_id: UUID,
+    message: str | None = None,
+) -> WebSocketEvent:
+    """Create a job started event."""
+    return WebSocketEvent(
+        type=EventType.JOB_STARTED,
+        data=JobEventPayload(
+            job_id=job_id,
+            project_id=project_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            status="started",
+            message=message,
+        ).model_dump(mode="json"),
+    )
+
+
+def create_job_progress_event(
+    job_id: UUID,
+    project_id: UUID,
+    task_id: UUID,
+    agent_id: UUID,
+    message: str | None = None,
+    tool_name: str | None = None,
+    tool_args: dict[str, Any] | None = None,
+) -> WebSocketEvent:
+    """Create a job progress event."""
+    return WebSocketEvent(
+        type=EventType.JOB_PROGRESS,
+        data=JobEventPayload(
+            job_id=job_id,
+            project_id=project_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            status="progress",
+            message=message,
+            tool_name=tool_name,
+            tool_args=tool_args,
+        ).model_dump(mode="json"),
+    )
+
+
+def create_job_completed_event(
+    job_id: UUID,
+    project_id: UUID,
+    task_id: UUID,
+    agent_id: UUID,
+    result: str | None = None,
+    pr_url: str | None = None,
+) -> WebSocketEvent:
+    """Create a job completed event."""
+    return WebSocketEvent(
+        type=EventType.JOB_COMPLETED,
+        data=JobEventPayload(
+            job_id=job_id,
+            project_id=project_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            status="completed",
+            result=result,
+            pr_url=pr_url,
+        ).model_dump(mode="json"),
+    )
+
+
+def create_job_failed_event(
+    job_id: UUID,
+    project_id: UUID,
+    task_id: UUID,
+    agent_id: UUID,
+    error: str,
+) -> WebSocketEvent:
+    """Create a job failed event."""
+    return WebSocketEvent(
+        type=EventType.JOB_FAILED,
+        data=JobEventPayload(
+            job_id=job_id,
+            project_id=project_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            status="failed",
+            error=error,
         ).model_dump(mode="json"),
     )

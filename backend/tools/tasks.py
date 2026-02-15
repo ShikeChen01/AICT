@@ -92,3 +92,32 @@ async def update_task_status(task_id: str, status: str) -> str:
             return f"Task status updated: {task.id} -> {task.status}"
         except Exception as e:
             return f"Error updating task status: {str(e)}"
+
+
+@tool
+async def get_task_details(task_id: str) -> str:
+    """
+    Get full details of a task including its ID, title, description, and status.
+    Use this to get task context before assigning to an engineer.
+
+    Args:
+        task_id: UUID of the task.
+    """
+    async with AsyncSessionLocal() as session:
+        service = TaskService(session)
+        try:
+            task = await service.get(uuid.UUID(task_id))
+            if not task:
+                return f"Task {task_id} not found."
+            return (
+                f"TASK_CONTEXT:\n"
+                f"  id: {task.id}\n"
+                f"  title: {task.title}\n"
+                f"  description: {task.description or 'No description'}\n"
+                f"  status: {task.status}\n"
+                f"  assigned_agent_id: {task.assigned_agent_id or 'Unassigned'}\n"
+                f"  git_branch: {task.git_branch or 'None'}\n"
+                f"  pr_url: {task.pr_url or 'None'}"
+            )
+        except Exception as e:
+            return f"Error getting task details: {str(e)}"
