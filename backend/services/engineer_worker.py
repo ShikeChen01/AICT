@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import Agent, EngineerJob, Task
 from backend.db.session import AsyncSessionLocal
+from backend.graph.events import emit_agent_log
 from backend.graph.model_factory import get_model
 from backend.services.e2b_service import E2BService
 from backend.services.orchestrator import sandbox_should_persist
@@ -243,6 +244,14 @@ class EngineerWorker:
             SystemMessage(content=system_prompt),
             HumanMessage(content=task_prompt),
         ]
+
+        await emit_agent_log(
+            project_id=job.project_id,
+            agent_id=agent.id,
+            agent_role="engineer",
+            log_type="thought",
+            content=f"Starting task implementation: {task.title}",
+        )
         
         # Broadcast initial thought
         await self._broadcast_job_progress(job, f"Starting implementation: {task.title}")
@@ -255,9 +264,26 @@ class EngineerWorker:
         
         while iteration < max_iterations:
             iteration += 1
+            await emit_agent_log(
+                project_id=job.project_id,
+                agent_id=agent.id,
+                agent_role="engineer",
+                log_type="thought",
+                content=f"Iteration {iteration}/{max_iterations}",
+            )
             
             response = await model_with_tools.ainvoke(messages)
             messages.append(response)
+            response_preview = self._stringify_ai_content(
+                response.content if hasattr(response, "content") else str(response)
+            )
+            await emit_agent_log(
+                project_id=job.project_id,
+                agent_id=agent.id,
+                agent_role="engineer",
+                log_type="message",
+                content=response_preview[:600] if response_preview else "(empty model response)",
+            )
             
             # Check for tool calls
             if hasattr(response, "tool_calls") and response.tool_calls:
@@ -268,15 +294,7 @@ class EngineerWorker:
             else:
                 # No tool calls - we're done
                 content = response.content if hasattr(response, "content") else str(response)
-                # Handle LangChain multi-part content (list of text/dict)
-                if isinstance(content, list):
-                    text_parts = []
-                    for part in content:
-                        if isinstance(part, str):
-                            text_parts.append(part)
-                        elif isinstance(part, dict) and "text" in part:
-                            text_parts.append(part["text"])
-                    content = "\n".join(text_parts) if text_parts else ""
+                content = self._stringify_ai_content(content)
                 final_response = content
                 break
         
@@ -285,7 +303,35 @@ class EngineerWorker:
             task.status = "in_review"
             await session.commit()
         
+        await emit_agent_log(
+            project_id=job.project_id,
+            agent_id=agent.id,
+            agent_role="engineer",
+            log_type="message",
+            content=(final_response or "Task processed")[:800],
+        )
         return final_response or "Task processed"
+
+    @staticmethod
+    def _stringify_ai_content(content: Any) -> str:
+        """Normalize LLM content (str/list/dict) into text."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            text_parts: list[str] = []
+            for part in content:
+                if isinstance(part, str):
+                    text_parts.append(part)
+                elif isinstance(part, dict):
+                    text_value = part.get("text")
+                    if isinstance(text_value, str):
+                        text_parts.append(text_value)
+            return "\n".join(text_parts).strip()
+        if isinstance(content, dict):
+            text_value = content.get("text")
+            if isinstance(text_value, str):
+                return text_value
+        return str(content)
 
     def _build_engineer_system_prompt(self, agent: Agent, task: Task) -> str:
         """Build the system prompt for the engineer."""
@@ -347,6 +393,15 @@ When finished, respond with "DONE: <summary of what was completed>"."""
                 tool_name=tool_name,
                 tool_args=tool_args,
             )
+            await emit_agent_log(
+                project_id=job.project_id,
+                agent_id=agent.id,
+                agent_role="engineer",
+                log_type="tool_call",
+                content=f"Calling tool: {tool_name}",
+                tool_name=tool_name,
+                tool_input=tool_args if isinstance(tool_args, dict) else None,
+            )
             
             try:
                 tool_fn = tools_by_name.get(tool_name)
@@ -358,17 +413,43 @@ When finished, respond with "DONE: <summary of what was completed>"."""
                     
                     result = await tool_fn.ainvoke(tool_args)
                     results.append(ToolMessage(content=str(result), tool_call_id=tool_id))
+                    await emit_agent_log(
+                        project_id=job.project_id,
+                        agent_id=agent.id,
+                        agent_role="engineer",
+                        log_type="tool_result",
+                        content=f"Tool completed: {tool_name}",
+                        tool_name=tool_name,
+                        tool_input=tool_args if isinstance(tool_args, dict) else None,
+                        tool_output=str(result)[:2000],
+                    )
                 else:
                     results.append(ToolMessage(
                         content=f"Tool '{tool_name}' not found",
                         tool_call_id=tool_id,
                     ))
+                    await emit_agent_log(
+                        project_id=job.project_id,
+                        agent_id=agent.id,
+                        agent_role="engineer",
+                        log_type="error",
+                        content=f"Tool not found: {tool_name}",
+                        tool_name=tool_name,
+                    )
             except Exception as exc:
                 logger.warning("Tool %s failed: %s", tool_name, exc)
                 results.append(ToolMessage(
                     content=f"Tool error: {exc}",
                     tool_call_id=tool_id,
                 ))
+                await emit_agent_log(
+                    project_id=job.project_id,
+                    agent_id=agent.id,
+                    agent_role="engineer",
+                    log_type="error",
+                    content=f"Tool failed: {tool_name}: {exc}",
+                    tool_name=tool_name,
+                )
         
         return results
 
@@ -385,6 +466,13 @@ When finished, respond with "DONE: <summary of what was completed>"."""
         await session.commit()
         
         logger.info("Job %s completed: %s", job.id, result[:100] if result else "No result")
+        await emit_agent_log(
+            project_id=job.project_id,
+            agent_id=job.agent_id,
+            agent_role="engineer",
+            log_type="message",
+            content=f"Job completed: {result[:500] if result else 'No result'}",
+        )
         
         await self._broadcast_job_completed(
             job,
@@ -405,6 +493,13 @@ When finished, respond with "DONE: <summary of what was completed>"."""
         await session.commit()
         
         logger.error("Job %s failed: %s", job.id, error)
+        await emit_agent_log(
+            project_id=job.project_id,
+            agent_id=job.agent_id,
+            agent_role="engineer",
+            log_type="error",
+            content=f"Job failed: {error}",
+        )
         
         await self._broadcast_job_failed(job, error)
 

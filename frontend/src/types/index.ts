@@ -153,38 +153,51 @@ export interface TicketCreate {
   initial_message?: string | null;
 }
 
-// ─── Project ─────────────────────────────────────────────────────────
+// ─── Repository ──────────────────────────────────────────────────────
 
-export interface Project {
+export interface Repository {
   id: UUID;
+  owner_id?: UUID | null;
   name: string;
   description: string | null;
   spec_repo_path: string;
   code_repo_url: string;
   code_repo_path: string;
-  git_token_set: boolean;
   created_at: string;
   updated_at: string;
 }
 
-export interface ProjectCreate {
+export interface RepositoryCreate {
   name: string;
   description?: string | null;
-  code_repo_url?: string;
+  private?: boolean;
 }
 
-export interface ProjectImport {
+export interface RepositoryImport {
   name: string;
   description?: string | null;
   code_repo_url: string;
-  git_token?: string | null;
 }
 
-export interface ProjectUpdate {
+export interface RepositoryUpdate {
   name?: string | null;
   description?: string | null;
   code_repo_url?: string | null;
-  git_token?: string | null;
+}
+
+// Backward-compatible aliases for existing component code.
+export type Project = Repository;
+export type ProjectCreate = RepositoryCreate;
+export type ProjectImport = RepositoryImport;
+export type ProjectUpdate = RepositoryUpdate;
+
+export interface UserProfile {
+  id: UUID;
+  email: string;
+  display_name: string | null;
+  github_token_set: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 // ─── Agent Context (Inspector) ────────────────────────────────────────
@@ -217,7 +230,11 @@ export type WSEventType =
   | 'agent_status'
   | 'workflow_update'
   | 'agent_log'
-  | 'sandbox_log';
+  | 'sandbox_log'
+  | 'job_started'
+  | 'job_progress'
+  | 'job_completed'
+  | 'job_failed';
 
 export interface WSEvent<T = unknown> {
   type: WSEventType;
@@ -278,7 +295,7 @@ export interface AgentLogData {
   project_id: UUID;
   agent_id: UUID;
   agent_role: AgentRole;
-  log_type: 'thought' | 'tool_call' | 'tool_result' | 'message';
+  log_type: 'thought' | 'tool_call' | 'tool_result' | 'message' | 'error';
   content: string;
   tool_name?: string | null;
   tool_input?: Record<string, unknown> | null;
@@ -301,6 +318,20 @@ export interface SandboxLogData {
 export interface WSSandboxLogEvent {
   type: 'sandbox_log';
   data: SandboxLogData;
+}
+
+export interface JobEventData {
+  job_id: UUID;
+  project_id: UUID;
+  task_id: UUID;
+  agent_id: UUID;
+  status: 'started' | 'progress' | 'completed' | 'failed';
+  message?: string | null;
+  result?: string | null;
+  error?: string | null;
+  pr_url?: string | null;
+  tool_name?: string | null;
+  tool_args?: Record<string, unknown> | null;
 }
 
 // ─── API Response ────────────────────────────────────────────────────

@@ -422,3 +422,60 @@ class TestDatabaseIntegration:
         # The use_alter=True should allow this to be dropped without issues
         await session.refresh(agent)
         await session.refresh(task)
+
+    async def test_delete_project_with_agent_task_cycle(
+        self,
+        api_client: AsyncClient,
+        auth_headers: dict,
+        session: AsyncSession,
+    ):
+        """Deleting a project should succeed even with Agent<->Task cross references."""
+        project = Project(
+            id=uuid.uuid4(),
+            name="Cycle Delete Project",
+            description="Project with circular references",
+            spec_repo_path="/tmp/specs/cycle-delete",
+            code_repo_url="https://github.com/test/cycle-delete",
+            code_repo_path="/tmp/code/cycle-delete",
+        )
+        session.add(project)
+        await session.flush()
+
+        agent = Agent(
+            id=uuid.uuid4(),
+            project_id=project.id,
+            role="engineer",
+            display_name="Cycle Engineer",
+            model="test-model",
+            status="active",
+            priority=2,
+        )
+        session.add(agent)
+        await session.flush()
+
+        task = Task(
+            id=uuid.uuid4(),
+            project_id=project.id,
+            title="Cycle task",
+            status="assigned",
+            assigned_agent_id=agent.id,
+            created_by_id=agent.id,
+        )
+        session.add(task)
+        await session.flush()
+
+        agent.current_task_id = task.id
+        await session.commit()
+
+        response = await api_client.delete(
+            f"/api/v1/projects/{project.id}",
+            headers=auth_headers,
+        )
+        assert response.status_code == 204
+
+        # Project should no longer be fetchable after deletion.
+        get_response = await api_client.get(
+            f"/api/v1/projects/{project.id}",
+            headers=auth_headers,
+        )
+        assert get_response.status_code == 404

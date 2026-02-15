@@ -65,6 +65,8 @@ $yamlLines = @(
     "ENV: 'development'"
     "DATABASE_URL: '$DbUrl'"
     "API_TOKEN: '$($env:API_TOKEN)'"
+    "FIREBASE_CREDENTIALS_PATH: '$($env:FIREBASE_CREDENTIALS_PATH)'"
+    "FIREBASE_PROJECT_ID: '$($env:FIREBASE_PROJECT_ID)'"
     "CLAUDE_API_KEY: '$($env:CLAUDE_API_KEY)'"
     "GEMINI_API_KEY: '$($env:GEMINI_API_KEY)'"
     "CLAUDE_MODEL: '$($env:CLAUDE_MODEL)'"

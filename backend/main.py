@@ -15,6 +15,7 @@ from backend.api_internal.router import internal_router
 from backend.config import settings
 from backend.core.error_handlers import aict_exception_handler
 from backend.core.exceptions import AICTException
+from backend.db.migration_runner import run_startup_migrations
 from backend.db.session import AsyncSessionLocal
 from backend.services.engineer_worker import get_engineer_worker, stop_engineer_worker
 from backend.services.orchestrator import (
@@ -51,6 +52,14 @@ async def _start_engineer_worker() -> None:
     logger.info("Engineer worker background task started")
 
 
+async def _run_startup_migrations() -> None:
+    """Run database migrations before starting background workers."""
+    if not settings.auto_run_migrations_on_startup:
+        return
+    await asyncio.to_thread(run_startup_migrations)
+    logger.info("Database migrations are up to date")
+
+
 async def _stop_background_tasks() -> None:
     """Stop all background tasks gracefully."""
     await stop_engineer_worker()
@@ -70,6 +79,7 @@ async def _stop_background_tasks() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    await _run_startup_migrations()
     await initialize_graph_runtime()
     await _provision_repositories_on_startup()
     await _start_engineer_worker()

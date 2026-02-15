@@ -41,10 +41,37 @@ class PROperationResult:
 class GitService:
     """Implements guarded git operations for internal agent tooling."""
 
-    def __init__(self, repo_path: str):
+    def __init__(self, repo_path: str, github_token: str | None = None):
         self.repo_path = str(Path(repo_path))
-        self.github_token = settings.github_token
+        self.github_token = github_token if github_token is not None else settings.github_token
         self.github_api_base_url = settings.github_api_base_url.rstrip("/")
+
+    def create_repository(
+        self,
+        name: str,
+        description: str = "",
+        private: bool = True,
+    ) -> dict:
+        if not self.github_token:
+            raise GitOperationFailed("GitHub token is required to create repositories")
+
+        payload = {
+            "name": name,
+            "description": description,
+            "private": private,
+            "auto_init": True,
+        }
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                f"{self.github_api_base_url}/user/repos",
+                headers=self._github_headers(),
+                json=payload,
+            )
+            if resp.status_code not in (200, 201):
+                raise GitOperationFailed(
+                    f"GitHub repository creation failed: {resp.status_code} {resp.text}"
+                )
+            return resp.json()
 
     def _origin_remote_url(self) -> str | None:
         try:

@@ -1,20 +1,16 @@
 /**
- * Settings Page
- * Configure project settings including Git authentication
+ * Repository Settings Page
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
-  Key,
   GitBranch,
   Save,
   Loader2,
   AlertCircle,
   CheckCircle,
-  Eye,
-  EyeOff,
 } from 'lucide-react';
 import { getProject, updateProject } from '../api/client';
 import type { Project } from '../types';
@@ -33,8 +29,6 @@ export function SettingsPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [repoUrl, setRepoUrl] = useState('');
-  const [gitToken, setGitToken] = useState('');
-  const [showToken, setShowToken] = useState(false);
 
   const fetchProject = useCallback(async () => {
     if (!projectId) return;
@@ -48,7 +42,7 @@ export function SettingsPage() {
       setRepoUrl(data.code_repo_url || '');
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load project');
+      setError(err instanceof Error ? err.message : 'Failed to load repository');
     } finally {
       setIsLoading(false);
     }
@@ -72,8 +66,6 @@ export function SettingsPage() {
       if (name !== project.name) updates.name = name;
       if (description !== (project.description || '')) updates.description = description || null;
       if (repoUrl !== (project.code_repo_url || '')) updates.code_repo_url = repoUrl || null;
-      if (gitToken) updates.git_token = gitToken;
-
       if (Object.keys(updates).length === 0) {
         setSuccess('No changes to save');
         return;
@@ -81,7 +73,6 @@ export function SettingsPage() {
 
       const updatedProject = await updateProject(projectId, updates);
       setProject(updatedProject);
-      setGitToken(''); // Clear token field after save
       setSuccess('Settings saved successfully');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
@@ -103,12 +94,12 @@ export function SettingsPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <AlertCircle className="w-12 h-12 mx-auto text-red-500 mb-4" />
-          <h2 className="text-lg font-semibold text-gray-900">Project not found</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Repository not found</h2>
           <button
-            onClick={() => navigate('/projects')}
+            onClick={() => navigate('/repositories')}
             className="mt-4 text-blue-600 hover:text-blue-800"
           >
-            Back to Projects
+            Back to Repositories
           </button>
         </div>
       </div>
@@ -122,13 +113,13 @@ export function SettingsPage() {
         <div className="max-w-4xl mx-auto px-6 py-4">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => navigate(`/project/${projectId}`)}
+              onClick={() => navigate(`/repository/${projectId}/chat`)}
               className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
             <div>
-              <h1 className="text-xl font-semibold text-gray-900">Project Settings</h1>
+              <h1 className="text-xl font-semibold text-gray-900">Repository Settings</h1>
               <p className="text-sm text-gray-500">{project.name}</p>
             </div>
           </div>
@@ -164,7 +155,7 @@ export function SettingsPage() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Project Name
+                  Repository Name
                 </label>
                 <input
                   type="text"
@@ -210,42 +201,9 @@ export function SettingsPage() {
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  <div className="flex items-center gap-2">
-                    <Key className="w-4 h-4" />
-                    Personal Access Token (PAT)
-                  </div>
-                </label>
-                <div className="relative">
-                  <input
-                    type={showToken ? 'text' : 'password'}
-                    value={gitToken}
-                    onChange={(e) => setGitToken(e.target.value)}
-                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder={project.git_token_set ? '••••••••••••••••' : 'ghp_xxxxxxxxxxxx'}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowToken(!showToken)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
-                  >
-                    {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-                <p className="mt-1 text-xs text-gray-500">
-                  {project.git_token_set
-                    ? 'A token is already configured. Enter a new one to replace it.'
-                    : 'Required for private repositories and pushing changes.'}
-                </p>
-
-                {project.git_token_set && (
-                  <div className="mt-2 flex items-center gap-2 text-sm text-green-600">
-                    <CheckCircle className="w-4 h-4" />
-                    Token configured
-                  </div>
-                )}
-              </div>
+              <p className="text-xs text-gray-500">
+                GitHub token is now configured in User Settings.
+              </p>
             </div>
           </section>
 

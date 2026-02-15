@@ -13,7 +13,8 @@ interface ChatViewProps {
 }
 
 export function ChatView({ projectId }: ChatViewProps) {
-  const { messages, isLoading, isSending, gmStatus, error, sendMessage } = useChat(projectId);
+  const { messages, isLoading, isSending, gmStatus, isAwaitingGmReply, error, sendMessage } =
+    useChat(projectId);
 
   const handleSend = useCallback(
     async (content: string) => {
@@ -38,9 +39,16 @@ export function ChatView({ projectId }: ChatViewProps) {
               }`}
             />
             <span className="text-gray-500">
-              {gmStatus === 'available' ? 'Available' : 'Processing...'}
+              {gmStatus === 'available'
+                ? 'Available'
+                : isAwaitingGmReply
+                  ? 'Waking up...'
+                  : 'Processing...'}
             </span>
           </div>
+          {gmStatus === 'busy' && isAwaitingGmReply && (
+            <p className="text-xs text-amber-600 mt-1">GM is waking up and processing your request.</p>
+          )}
         </div>
       </header>
 

@@ -1,7 +1,7 @@
 """Add git_token column to projects table.
 
 Revision ID: 002_add_project_git_token
-Revises: 001_init_mvp0_schema
+Revises: 001
 Create Date: 2026-02-14
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "002_add_project_git_token"
-down_revision = "001_init_mvp0_schema"
+down_revision = "001"
 branch_labels = None
 depends_on = None
 

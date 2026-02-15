@@ -10,12 +10,14 @@ import logging
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 from backend.config import settings
 from backend.core.exceptions import InvalidAgentRole
 from backend.db.models import Agent
+from backend.graph.events import emit_agent_log
+from backend.graph.utils import extract_text_content
 from backend.graph.workflow import create_graph
 from backend.services.e2b_service import E2BService, SandboxMetadata
 
@@ -186,6 +188,25 @@ class OrchestratorService:
             The Manager's response text. On error, returns a user-friendly error message
             rather than raising an exception.
         """
+        async def _emit_empty_output_diagnostic(
+            reason_code: str,
+            details: dict[str, Any],
+        ) -> None:
+            logger.warning(
+                "Manager empty output (%s) for project %s | details=%s",
+                reason_code,
+                manager.project_id,
+                details,
+            )
+            await emit_agent_log(
+                project_id=manager.project_id,
+                agent_role="manager",
+                log_type="error",
+                content=f"Manager returned no output ({reason_code}).",
+                agent_id=manager.id,
+                tool_output=str(details),
+            )
+
         try:
             await self.wake_agent(session, manager)
             graph_app = await get_graph_app()
@@ -222,22 +243,85 @@ class OrchestratorService:
             
             # Extract the final response from the Manager
             messages = final_state.get("messages", [])
-            if messages:
-                last_msg = messages[-1]
-                content = last_msg.content
-                # LangChain AIMessage.content can be a list (multi-part) or string
-                if isinstance(content, list):
-                    # Join text parts, skip non-text elements
-                    text_parts = []
-                    for part in content:
-                        if isinstance(part, str):
-                            text_parts.append(part)
-                        elif isinstance(part, dict) and "text" in part:
-                            text_parts.append(part["text"])
-                    content = "\n".join(text_parts) if text_parts else ""
-                return content if content else "Manager processed the request but returned no output."
-                
-            return "Manager processed the request but returned no output."
+            tool_messages = [msg for msg in messages if isinstance(msg, ToolMessage)]
+            for tool_msg in tool_messages[-5:]:
+                await emit_agent_log(
+                    project_id=manager.project_id,
+                    agent_id=manager.id,
+                    agent_role="manager",
+                    log_type="tool_result",
+                    content=f"Tool result: {tool_msg.name or 'tool'}",
+                    tool_name=tool_msg.name,
+                    tool_output=str(tool_msg.content)[:2000],
+                )
+            if not messages:
+                reason_code = "EMPTY_MESSAGES"
+                details = {
+                    "message_count": 0,
+                    "state_keys": list(final_state.keys()),
+                }
+                await _emit_empty_output_diagnostic(reason_code, details)
+                return (
+                    "I could not produce a response for this turn.\n\n"
+                    "Reason code: EMPTY_MESSAGES\n"
+                    "Please retry your request."
+                )
+
+            # Prefer the most recent AI message with extractable text.
+            ai_messages = [msg for msg in messages if isinstance(msg, AIMessage)]
+            for ai_msg in reversed(ai_messages):
+                extracted = extract_text_content(getattr(ai_msg, "content", ""))
+                if extracted.strip():
+                    return extracted
+
+            # No AI text found; produce diagnostic reason codes.
+            last_msg = messages[-1]
+            if not ai_messages:
+                reason_code = "LAST_MESSAGE_NOT_AI"
+                details = {
+                    "message_count": len(messages),
+                    "last_message_type": type(last_msg).__name__,
+                }
+                await _emit_empty_output_diagnostic(reason_code, details)
+                return (
+                    "I could not produce a response for this turn.\n\n"
+                    "Reason code: LAST_MESSAGE_NOT_AI\n"
+                    "Please retry your request."
+                )
+
+            last_ai = ai_messages[-1]
+            content = getattr(last_ai, "content", None)
+            if isinstance(content, str):
+                reason_code = "EMPTY_MANAGER_CONTENT"
+                details = {
+                    "message_count": len(messages),
+                    "last_message_type": type(last_ai).__name__,
+                    "content_shape": "str",
+                    "tool_call_count": len(getattr(last_ai, "tool_calls", []) or []),
+                }
+            elif isinstance(content, list):
+                reason_code = "UNSUPPORTED_MULTIPART_CONTENT"
+                details = {
+                    "message_count": len(messages),
+                    "last_message_type": type(last_ai).__name__,
+                    "content_shape": "list",
+                    "list_item_types": [type(part).__name__ for part in content[:5]],
+                    "tool_call_count": len(getattr(last_ai, "tool_calls", []) or []),
+                }
+            else:
+                reason_code = "UNSUPPORTED_CONTENT_TYPE"
+                details = {
+                    "message_count": len(messages),
+                    "last_message_type": type(last_ai).__name__,
+                    "content_shape": type(content).__name__,
+                }
+
+            await _emit_empty_output_diagnostic(reason_code, details)
+            return (
+                "I could not produce a response for this turn.\n\n"
+                f"Reason code: {reason_code}\n"
+                "Please retry your request."
+            )
             
         except Exception as exc:
             # Log the full error for debugging

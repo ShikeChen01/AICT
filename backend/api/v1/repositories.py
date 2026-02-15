@@ -1,0 +1,287 @@
+"""Repository REST API endpoints."""
+
+import logging
+import shutil
+import subprocess
+import uuid as uuid_module
+from pathlib import Path
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.config import settings
+from backend.core.auth import get_current_user
+from backend.core.exceptions import ProjectNotFoundError
+from backend.db.models import Agent, Repository, User
+from backend.db.session import get_db
+from backend.schemas.repository import (
+    RepositoryCreate,
+    RepositoryImport,
+    RepositoryResponse,
+    RepositoryUpdate,
+)
+from backend.services.git_service import GitService
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/repositories", tags=["repositories"])
+
+
+def _repository_to_response(repository: Repository) -> dict:
+    return {
+        "id": repository.id,
+        "owner_id": repository.owner_id,
+        "name": repository.name,
+        "description": repository.description,
+        "spec_repo_path": repository.spec_repo_path,
+        "code_repo_url": repository.code_repo_url,
+        "code_repo_path": repository.code_repo_path,
+        "created_at": repository.created_at,
+        "updated_at": repository.updated_at,
+    }
+
+
+@router.get("", response_model=list[RepositoryResponse])
+async def list_repositories(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Repository)
+        .where(Repository.owner_id == current_user.id)
+        .order_by(Repository.created_at.desc())
+    )
+    repositories = list(result.scalars().all())
+    return [_repository_to_response(r) for r in repositories]
+
+
+@router.get("/{repository_id}", response_model=RepositoryResponse)
+async def get_repository(
+    repository_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Repository).where(
+            Repository.id == repository_id,
+            Repository.owner_id == current_user.id,
+        )
+    )
+    repository = result.scalar_one_or_none()
+    if not repository:
+        raise ProjectNotFoundError(repository_id)
+    return _repository_to_response(repository)
+
+
+@router.post("", response_model=RepositoryResponse, status_code=status.HTTP_201_CREATED)
+async def create_repository(
+    data: RepositoryCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not current_user.github_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Configure a GitHub token in user settings before creating repositories.",
+        )
+
+    repository_id = uuid_module.uuid4()
+    spec_path = Path(settings.spec_repo_path) / str(repository_id)
+    code_path = Path(settings.code_repo_path) / str(repository_id)
+
+    spec_path.mkdir(parents=True, exist_ok=True)
+    code_path.mkdir(parents=True, exist_ok=True)
+
+    git_service = GitService(repo_path=str(code_path), github_token=current_user.github_token)
+    github_repo = git_service.create_repository(
+        name=data.name,
+        description=data.description or "",
+        private=data.private,
+    )
+    code_repo_url = github_repo.get("clone_url") or github_repo.get("html_url") or ""
+
+    try:
+        subprocess.run(
+            ["git", "clone", "--depth", "1", code_repo_url, str(code_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.CalledProcessError as exc:
+        shutil.rmtree(spec_path, ignore_errors=True)
+        shutil.rmtree(code_path, ignore_errors=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to clone repository: {(exc.stderr or exc.stdout or 'unknown error').strip()}",
+        ) from exc
+
+    repository = Repository(
+        id=repository_id,
+        owner_id=current_user.id,
+        name=data.name,
+        description=data.description,
+        spec_repo_path=str(spec_path),
+        code_repo_url=code_repo_url,
+        code_repo_path=str(code_path),
+    )
+    db.add(repository)
+
+    manager = Agent(
+        project_id=repository_id,
+        role="manager",
+        display_name="Manager",
+        model=settings.claude_model,
+        status="sleeping",
+        priority=0,
+        sandbox_persist=True,
+    )
+    om = Agent(
+        project_id=repository_id,
+        role="om",
+        display_name="Operations Manager",
+        model=settings.gemini_model,
+        status="sleeping",
+        priority=1,
+        sandbox_persist=True,
+    )
+    db.add(manager)
+    db.add(om)
+
+    await db.commit()
+    await db.refresh(repository)
+    logger.info("Created repository: %s (%s)", repository.id, repository.name)
+    return _repository_to_response(repository)
+
+
+@router.post("/import", response_model=RepositoryResponse, status_code=status.HTTP_201_CREATED)
+async def import_repository(
+    data: RepositoryImport,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    repository_id = uuid_module.uuid4()
+    spec_path = Path(settings.spec_repo_path) / str(repository_id)
+    code_path = Path(settings.code_repo_path) / str(repository_id)
+    spec_path.mkdir(parents=True, exist_ok=True)
+
+    clone_url = data.code_repo_url
+    if current_user.github_token and "github.com" in clone_url:
+        clone_url = clone_url.replace("https://", f"https://{current_user.github_token}@")
+
+    try:
+        subprocess.run(
+            ["git", "clone", "--depth", "1", clone_url, str(code_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        shutil.rmtree(spec_path, ignore_errors=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to clone repository: {stderr or 'unknown error'}",
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        shutil.rmtree(spec_path, ignore_errors=True)
+        raise HTTPException(
+            status_code=status.HTTP_408_REQUEST_TIMEOUT,
+            detail="Repository clone timed out",
+        ) from exc
+
+    repository = Repository(
+        id=repository_id,
+        owner_id=current_user.id,
+        name=data.name,
+        description=data.description,
+        spec_repo_path=str(spec_path),
+        code_repo_url=data.code_repo_url,
+        code_repo_path=str(code_path),
+    )
+    db.add(repository)
+
+    manager = Agent(
+        project_id=repository_id,
+        role="manager",
+        display_name="Manager",
+        model=settings.claude_model,
+        status="sleeping",
+        priority=0,
+        sandbox_persist=True,
+    )
+    om = Agent(
+        project_id=repository_id,
+        role="om",
+        display_name="Operations Manager",
+        model=settings.gemini_model,
+        status="sleeping",
+        priority=1,
+        sandbox_persist=True,
+    )
+    db.add(manager)
+    db.add(om)
+
+    await db.commit()
+    await db.refresh(repository)
+    return _repository_to_response(repository)
+
+
+@router.patch("/{repository_id}", response_model=RepositoryResponse)
+async def update_repository(
+    repository_id: UUID,
+    data: RepositoryUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Repository).where(
+            Repository.id == repository_id,
+            Repository.owner_id == current_user.id,
+        )
+    )
+    repository = result.scalar_one_or_none()
+    if not repository:
+        raise ProjectNotFoundError(repository_id)
+
+    if data.name is not None:
+        repository.name = data.name
+    if data.description is not None:
+        repository.description = data.description
+    if data.code_repo_url is not None:
+        repository.code_repo_url = data.code_repo_url
+
+    await db.commit()
+    await db.refresh(repository)
+    return _repository_to_response(repository)
+
+
+@router.delete("/{repository_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_repository(
+    repository_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Repository).where(
+            Repository.id == repository_id,
+            Repository.owner_id == current_user.id,
+        )
+    )
+    repository = result.scalar_one_or_none()
+    if not repository:
+        raise ProjectNotFoundError(repository_id)
+
+    spec_path = Path(repository.spec_repo_path)
+    code_path = Path(repository.code_repo_path)
+    if spec_path.exists():
+        shutil.rmtree(spec_path, ignore_errors=True)
+    if code_path.exists():
+        shutil.rmtree(code_path, ignore_errors=True)
+
+    await db.delete(repository)
+    await db.commit()
+    return None

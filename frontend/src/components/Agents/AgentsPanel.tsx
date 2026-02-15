@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAgents } from '../../hooks';
-import type { AgentStatusWithQueue } from '../../types';
+import { useWebSocket } from '../../hooks/useWebSocket';
+import type { AgentLogData, AgentStatusWithQueue, JobEventData } from '../../types';
 
 interface AgentsPanelProps {
   projectId: string;
@@ -21,6 +22,8 @@ function statusDotClass(statusLabel: string): string {
 
 export function AgentsPanel({ projectId }: AgentsPanelProps) {
   const { agents, isLoading, error } = useAgents(projectId);
+  const { subscribe } = useWebSocket(projectId);
+  const [agentBuffers, setAgentBuffers] = useState<Record<string, string[]>>({});
 
   const rows = useMemo(() => {
     return agents.map((agent) => {
@@ -29,6 +32,51 @@ export function AgentsPanel({ projectId }: AgentsPanelProps) {
       return { ...agent, statusLabel };
     });
   }, [agents]);
+
+  useEffect(() => {
+    setAgentBuffers({});
+  }, [projectId]);
+
+  useEffect(() => {
+    const pushLine = (agentId: string, line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      setAgentBuffers((prev) => {
+        const current = prev[agentId] ?? [];
+        const next = [...current, trimmed].slice(-20);
+        return { ...prev, [agentId]: next };
+      });
+    };
+
+    const unsubscribeAgentLog = subscribe<AgentLogData>('agent_log', (data) => {
+      let prefix = data.log_type;
+      if (data.log_type === 'tool_call') prefix = `tool:${data.tool_name || 'call'}`;
+      if (data.log_type === 'tool_result') prefix = `result:${data.tool_name || 'tool'}`;
+      pushLine(data.agent_id, `[${prefix}] ${data.content}`);
+    });
+
+    const unsubscribeJobStarted = subscribe<JobEventData>('job_started', (data) => {
+      pushLine(data.agent_id, `[job] ${data.message || 'started'}`);
+    });
+    const unsubscribeJobProgress = subscribe<JobEventData>('job_progress', (data) => {
+      const prefix = data.tool_name ? `[tool:${data.tool_name}]` : '[job]';
+      pushLine(data.agent_id, `${prefix} ${data.message || 'in progress'}`);
+    });
+    const unsubscribeJobCompleted = subscribe<JobEventData>('job_completed', (data) => {
+      pushLine(data.agent_id, `[done] ${data.result || 'completed'}`);
+    });
+    const unsubscribeJobFailed = subscribe<JobEventData>('job_failed', (data) => {
+      pushLine(data.agent_id, `[error] ${data.error || 'failed'}`);
+    });
+
+    return () => {
+      unsubscribeAgentLog();
+      unsubscribeJobStarted();
+      unsubscribeJobProgress();
+      unsubscribeJobCompleted();
+      unsubscribeJobFailed();
+    };
+  }, [subscribe]);
 
   return (
     <aside className="w-96 border-l border-gray-200 bg-white flex flex-col overflow-hidden">
@@ -70,6 +118,26 @@ export function AgentsPanel({ projectId }: AgentsPanelProps) {
               <div className="mt-2 flex items-center gap-3 text-xs text-gray-600">
                 <span>Queue: {agent.queue_size}</span>
                 <span>Open tickets: {agent.open_ticket_count}</span>
+              </div>
+
+              <div className="mt-2">
+                <p className="text-[10px] uppercase tracking-wide text-gray-500">Latest activity</p>
+                <div className="mt-1 rounded border border-gray-100 bg-gray-50 px-2 py-1 text-[11px] text-gray-700 leading-4 overflow-hidden transition-all duration-200 max-h-10 hover:max-h-44">
+                  {(agentBuffers[agent.id] ?? []).length > 0 ? (
+                    <ul className="space-y-1">
+                      {(agentBuffers[agent.id] ?? [])
+                        .slice(-10)
+                        .reverse()
+                        .map((line, idx) => (
+                          <li key={`${agent.id}-buffer-${idx}`} className="truncate">
+                            {line}
+                          </li>
+                        ))}
+                    </ul>
+                  ) : (
+                    <p className="text-gray-400">No recent activity.</p>
+                  )}
+                </div>
               </div>
 
               {agent.task_queue.length > 0 ? (

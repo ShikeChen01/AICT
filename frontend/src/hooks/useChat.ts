@@ -13,6 +13,7 @@ interface UseChatReturn {
   isLoading: boolean;
   isSending: boolean;
   gmStatus: 'available' | 'busy';
+  isAwaitingGmReply: boolean;
   error: Error | null;
   sendMessage: (content: string) => Promise<ChatMessage>;
   refreshMessages: () => Promise<void>;
@@ -23,6 +24,7 @@ export function useChat(projectId: string | null): UseChatReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [gmStatus, setGmStatus] = useState<'available' | 'busy'>('available');
+  const [isAwaitingGmReply, setIsAwaitingGmReply] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
   const { subscribe } = useWebSocket(projectId);
@@ -37,6 +39,9 @@ export function useChat(projectId: string | null): UseChatReturn {
     try {
       const history = await api.getChatHistory(projectId);
       setMessages(history);
+      if (history.some((msg) => msg.role === 'gm' || msg.role === 'manager')) {
+        setIsAwaitingGmReply(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err : new Error('Failed to fetch chat history'));
     } finally {
@@ -54,6 +59,9 @@ export function useChat(projectId: string | null): UseChatReturn {
     if (!projectId) return;
 
     const unsubscribeMessage = subscribe<ChatMessage>('chat_message', (message) => {
+      if (message.role === 'gm' || message.role === 'manager') {
+        setIsAwaitingGmReply(false);
+      }
       setMessages((prev) => {
         if (prev.some((msg) => msg.id === message.id)) {
           return prev;
@@ -80,7 +88,11 @@ export function useChat(projectId: string | null): UseChatReturn {
     async (content: string): Promise<ChatMessage> => {
       if (!projectId) throw new Error('No project selected');
 
+      const isFirstTurn = !messages.some((msg) => msg.role === 'gm' || msg.role === 'manager');
       setIsSending(true);
+      setIsAwaitingGmReply(isFirstTurn);
+      // Optimistic status while waiting for backend status events.
+      setGmStatus('busy');
       setError(null);
 
       try {
@@ -112,12 +124,13 @@ export function useChat(projectId: string | null): UseChatReturn {
       } catch (err) {
         const error = err instanceof Error ? err : new Error('Failed to send message');
         setError(error);
+        setIsAwaitingGmReply(false);
         throw error;
       } finally {
         setIsSending(false);
       }
     },
-    [projectId]
+    [projectId, messages]
   );
 
   return {
@@ -125,6 +138,7 @@ export function useChat(projectId: string | null): UseChatReturn {
     isLoading,
     isSending,
     gmStatus,
+    isAwaitingGmReply,
     error,
     sendMessage,
     refreshMessages,

@@ -1,8 +1,9 @@
 """
 SQLAlchemy models for AICT MVP-0.
 
-7 tables:
-- projects: single project config
+8 tables:
+- repositories: per-repository config
+- users: authenticated users with GitHub credentials
 - agents: Manager, Engineers (max 5 engineers enforced in code)
 - tasks: Kanban cards with 2D priority (critical + urgent)
 - tickets: agent-to-agent communication queue
@@ -38,27 +39,49 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# ── Projects ────────────────────────────────────────────────────────
+# ── Users ───────────────────────────────────────────────────────────
 
-class Project(Base):
-    __tablename__ = "projects"
+
+class User(Base):
+    __tablename__ = "users"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    firebase_uid = Column(String(128), unique=True, nullable=False)
+    email = Column(String(255), unique=True, nullable=False)
+    display_name = Column(String(100), nullable=True)
+    github_token = Column(String(512), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    repositories = relationship("Repository", back_populates="owner")
+
+
+# ── Repositories ────────────────────────────────────────────────────
+
+
+class Repository(Base):
+    __tablename__ = "repositories"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner_id = Column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     spec_repo_path = Column(String(512), nullable=False)
     code_repo_url = Column(String(512), nullable=False)
     code_repo_path = Column(String(512), nullable=False)
-    # Per-project Git credentials (PAT) - encrypted in production
-    git_token = Column(String(512), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
     # relationships
+    owner = relationship("User", back_populates="repositories")
     agents = relationship("Agent", back_populates="project", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="project", cascade="all, delete-orphan")
     tickets = relationship("Ticket", back_populates="project", cascade="all, delete-orphan")
     chat_messages = relationship("ChatMessage", back_populates="project", cascade="all, delete-orphan")
+
+
+# Backwards compatibility for existing imports.
+Project = Repository
 
 
 # ── Agents ──────────────────────────────────────────────────────────
@@ -72,7 +95,7 @@ class Agent(Base):
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
     )
     role = Column(String(50), nullable=False)  # 'manager', 'engineer' (gm/om deprecated)
     display_name = Column(String(100), nullable=False)  # e.g. 'Manager', 'Engineer-3'
@@ -90,7 +113,7 @@ class Agent(Base):
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
     # relationships
-    project = relationship("Project", back_populates="agents")
+    project = relationship("Repository", back_populates="agents")
     current_task = relationship("Task", foreign_keys=[current_task_id])
 
 
@@ -111,7 +134,7 @@ class Task(Base):
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
     )
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
@@ -134,7 +157,7 @@ class Task(Base):
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
     # relationships
-    project = relationship("Project", back_populates="tasks")
+    project = relationship("Repository", back_populates="tasks")
     assigned_agent = relationship("Agent", foreign_keys=[assigned_agent_id])
     created_by = relationship("Agent", foreign_keys=[created_by_id])
     subtasks = relationship("Task", back_populates="parent_task", foreign_keys=[parent_task_id])
@@ -152,7 +175,7 @@ class Ticket(Base):
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
     )
     from_agent_id = Column(
         Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
@@ -172,7 +195,7 @@ class Ticket(Base):
     )
 
     # relationships
-    project = relationship("Project", back_populates="tickets")
+    project = relationship("Repository", back_populates="tickets")
     from_agent = relationship("Agent", foreign_keys=[from_agent_id])
     to_agent = relationship("Agent", foreign_keys=[to_agent_id])
     closed_by = relationship("Agent", foreign_keys=[closed_by_id])
@@ -211,7 +234,7 @@ class ChatMessage(Base):
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
     )
     role = Column(String(20), nullable=False)  # 'user', 'manager' ('gm' deprecated)
     content = Column(Text, nullable=False)
@@ -219,7 +242,7 @@ class ChatMessage(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     # relationships
-    project = relationship("Project", back_populates="chat_messages")
+    project = relationship("Repository", back_populates="chat_messages")
 
 
 # ── Engineer Jobs (Background Task Queue) ──────────────────────────
@@ -238,7 +261,7 @@ class EngineerJob(Base):
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
     )
     task_id = Column(
         Uuid, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
@@ -255,7 +278,7 @@ class EngineerJob(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
     # relationships
-    project = relationship("Project")
+    project = relationship("Repository")
     task = relationship("Task")
     agent = relationship("Agent")
 

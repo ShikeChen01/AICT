@@ -16,11 +16,12 @@ from dataclasses import dataclass
 from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.core.exceptions import SandboxNotFoundError
-from backend.db.models import Agent, Project
+from backend.db.models import Agent, Repository
 
 try:
     from e2b import AsyncSandbox
@@ -54,16 +55,20 @@ class E2BService:
         # SDK reads from env var.
         os.environ["E2B_API_KEY"] = settings.e2b_api_key
 
-    async def _get_project(self, session: AsyncSession, project_id) -> Optional[Project]:
-        """Get project by ID for sandbox initialization."""
-        result = await session.execute(select(Project).where(Project.id == project_id))
+    async def _get_project(self, session: AsyncSession, project_id) -> Optional[Repository]:
+        """Get repository by ID for sandbox initialization."""
+        result = await session.execute(
+            select(Repository)
+            .options(selectinload(Repository.owner))
+            .where(Repository.id == project_id)
+        )
         return result.scalar_one_or_none()
 
     async def _initialize_sandbox(
         self,
         sandbox,
         agent: Agent,
-        project: Optional[Project],
+        project: Optional[Repository],
     ) -> None:
         """
         Initialize sandbox with project setup.
@@ -81,10 +86,11 @@ class E2BService:
             if agent.role == "engineer" and project.code_repo_url:
                 # Clone code repo for engineers
                 clone_cmd = f"git clone {project.code_repo_url} /home/user/project"
-                if settings.github_token:
-                    # Use token for private repos
+                owner_github_token = project.owner.github_token if project.owner else None
+                if owner_github_token:
+                    # Use the repository owner's token for private repos.
                     repo_url = project.code_repo_url.replace(
-                        "https://", f"https://{settings.github_token}@"
+                        "https://", f"https://{owner_github_token}@"
                     )
                     clone_cmd = f"git clone {repo_url} /home/user/project"
 

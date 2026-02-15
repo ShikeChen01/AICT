@@ -14,7 +14,8 @@ import type {
   AgentStatusWithQueue,
   Ticket,
   TicketCreate,
-  Project,
+  Repository,
+  UserProfile,
   WSEvent,
   APIError,
 } from '../types';
@@ -27,7 +28,7 @@ const WS_BASE = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${wi
 // Token stored in memory (in production, use secure storage)
 let authToken: string | null = null;
 
-export function setAuthToken(token: string): void {
+export function setAuthToken(token: string | null): void {
   authToken = token;
 }
 
@@ -207,48 +208,67 @@ export async function closeTicket(ticketId: string, closingAgentId: string): Pro
   return request<Ticket>('POST', `/tickets/${ticketId}/close?closing_agent_id=${closingAgentId}`);
 }
 
-// ─── Projects ────────────────────────────────────────────────────────
+// ─── User Settings ───────────────────────────────────────────────────
 
-export async function getProjects(): Promise<Project[]> {
-  return request<Project[]>('GET', '/projects');
+export async function getMe(): Promise<UserProfile> {
+  return request<UserProfile>('GET', '/auth/me');
 }
 
-export async function getProject(projectId: string): Promise<Project> {
-  return request<Project>('GET', `/projects/${projectId}`);
+export async function updateMe(data: {
+  display_name?: string | null;
+  github_token?: string | null;
+}): Promise<UserProfile> {
+  return request<UserProfile>('PATCH', '/auth/me', data);
 }
 
-export async function createProject(data: {
+// ─── Repositories ────────────────────────────────────────────────────
+
+export async function getRepositories(): Promise<Repository[]> {
+  return request<Repository[]>('GET', '/repositories');
+}
+
+export async function getRepository(repositoryId: string): Promise<Repository> {
+  return request<Repository>('GET', `/repositories/${repositoryId}`);
+}
+
+export async function createRepository(data: {
   name: string;
   description?: string | null;
-  code_repo_url?: string;
-}): Promise<Project> {
-  return request<Project>('POST', '/projects', data);
+  private?: boolean;
+}): Promise<Repository> {
+  return request<Repository>('POST', '/repositories', data);
 }
 
-export async function importProject(data: {
+export async function importRepository(data: {
   name: string;
   description?: string | null;
   code_repo_url: string;
-  git_token?: string | null;
-}): Promise<Project> {
-  return request<Project>('POST', '/projects/import', data);
+}): Promise<Repository> {
+  return request<Repository>('POST', '/repositories/import', data);
 }
 
-export async function updateProject(
-  projectId: string,
+export async function updateRepository(
+  repositoryId: string,
   data: {
     name?: string | null;
     description?: string | null;
     code_repo_url?: string | null;
-    git_token?: string | null;
   }
-): Promise<Project> {
-  return request<Project>('PATCH', `/projects/${projectId}`, data);
+): Promise<Repository> {
+  return request<Repository>('PATCH', `/repositories/${repositoryId}`, data);
 }
 
-export async function deleteProject(projectId: string): Promise<void> {
-  return request<void>('DELETE', `/projects/${projectId}`);
+export async function deleteRepository(repositoryId: string): Promise<void> {
+  return request<void>('DELETE', `/repositories/${repositoryId}`);
 }
+
+// Backward-compatible aliases while frontend migrates.
+export const getProjects = getRepositories;
+export const getProject = getRepository;
+export const createProject = createRepository;
+export const importProject = importRepository;
+export const updateProject = updateRepository;
+export const deleteProject = deleteRepository;
 
 // ─── Agent Context ────────────────────────────────────────────────────
 

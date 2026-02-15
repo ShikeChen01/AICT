@@ -10,6 +10,7 @@ import {
   Route,
   NavLink,
   Navigate,
+  Outlet,
   useNavigate,
   useParams,
 } from 'react-router-dom';
@@ -19,20 +20,18 @@ import { AgentInspector, AgentsPanel } from './components/Agents';
 import { WorkflowGraph } from './components/Workflow';
 import { ActivityFeed } from './components/ActivityFeed';
 import { ArtifactBrowser } from './components/Artifacts';
-import { ProjectsPage, SettingsPage } from './pages';
-import { getProjects, healthCheck, setAuthToken } from './api/client';
+import { LoginPage, ProjectsPage, RegisterPage, SettingsPage, UserSettingsPage } from './pages';
+import { getProjects, healthCheck } from './api/client';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useAgents, useWebSocket } from './hooks';
 import type {
   AgentLogData,
+  JobEventData,
   AgentRole,
   Project,
   SandboxLogData,
   WorkflowUpdateData,
 } from './types';
-
-// Set auth token SYNCHRONOUSLY before any component renders/fetches.
-// Must run at module level so child useEffect hooks already have the token.
-setAuthToken(import.meta.env.VITE_API_TOKEN || 'change-me-in-production');
 
 type AppView = 'chat' | 'kanban' | 'workflow' | 'artifacts';
 
@@ -44,16 +43,16 @@ interface SidebarProps {
 }
 
 function Sidebar({ projects, activeProjectId, activeView, onProjectChange }: SidebarProps) {
-  const chatPath = activeProjectId ? `/project/${activeProjectId}/chat` : '/';
-  const kanbanPath = activeProjectId ? `/project/${activeProjectId}/kanban` : '/';
-  const workflowPath = activeProjectId ? `/project/${activeProjectId}/workflow` : '/';
-  const artifactsPath = activeProjectId ? `/project/${activeProjectId}/artifacts` : '/';
+  const chatPath = activeProjectId ? `/repository/${activeProjectId}/chat` : '/';
+  const kanbanPath = activeProjectId ? `/repository/${activeProjectId}/kanban` : '/';
+  const workflowPath = activeProjectId ? `/repository/${activeProjectId}/workflow` : '/';
+  const artifactsPath = activeProjectId ? `/repository/${activeProjectId}/artifacts` : '/';
 
   return (
     <aside className="w-64 bg-gray-900 text-white flex flex-col">
       {/* Logo */}
       <div className="p-6 border-b border-gray-800">
-        <NavLink to="/projects" className="group block">
+        <NavLink to="/repositories" className="group block">
           <h1 className="text-2xl font-bold group-hover:text-blue-300 transition-colors">AICT</h1>
           <p className="text-sm text-gray-400 group-hover:text-gray-300 transition-colors">
             Multi-Agent Platform
@@ -61,10 +60,10 @@ function Sidebar({ projects, activeProjectId, activeView, onProjectChange }: Sid
         </NavLink>
       </div>
 
-      {/* Project selector */}
+      {/* Repository selector */}
       <div className="p-4 border-b border-gray-800">
         <label htmlFor="project-selector" className="block text-xs uppercase tracking-wide text-gray-400 mb-2">
-          Project
+          Repository
         </label>
         <select
           id="project-selector"
@@ -176,6 +175,12 @@ function Sidebar({ projects, activeProjectId, activeView, onProjectChange }: Sid
 
       {/* Footer */}
       <div className="p-4 border-t border-gray-800">
+        <NavLink
+          to="/settings"
+          className="mb-3 inline-flex items-center gap-2 text-sm text-gray-300 hover:text-white"
+        >
+          User Settings
+        </NavLink>
         <div className="flex items-center gap-3 text-sm text-gray-400">
           <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -233,11 +238,11 @@ function LegacyRouteRedirect({
   if (projects.length === 0) {
     return (
       <div className="h-screen flex items-center justify-center text-gray-600">
-        No projects available.
+        No repositories available.
       </div>
     );
   }
-  return <Navigate to={`/project/${projects[0].id}/${view}`} replace />;
+  return <Navigate to={`/repository/${projects[0].id}/${view}`} replace />;
 }
 
 function ProjectPage({
@@ -258,18 +263,18 @@ function ProjectPage({
   useEffect(() => {
     if (isProjectsLoading) return;
     if (projects.length === 0) {
-      navigate('/projects', { replace: true });
+      navigate('/repositories', { replace: true });
       return;
     }
     if (!projectId || !activeProject) {
-      navigate(`/project/${projects[0].id}/${view}`, { replace: true });
+      navigate(`/repository/${projects[0].id}/${view}`, { replace: true });
     }
   }, [activeProject, isProjectsLoading, navigate, projectId, projects, view]);
 
   if (projects.length === 0) {
     return (
       <div className="h-screen flex items-center justify-center text-gray-600">
-        No projects available.
+        No repositories available.
       </div>
     );
   }
@@ -292,17 +297,21 @@ function ProjectPage({
   useEffect(() => {
     if (view !== 'workflow') return;
 
-    const unsubscribeWorkflow = subscribe<WorkflowUpdateData>('workflow_update', (data) => {
-      setWorkflowUpdate(data);
-    });
-
-    const unsubscribeAgentLog = subscribe<AgentLogData>('agent_log', (data) => {
+    const appendActivityLog = (data: AgentLogData) => {
       const next = {
         ...data,
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         timestamp: new Date().toISOString(),
       };
       setActivityLogs((prev) => [...prev.slice(-199), next]);
+    };
+
+    const unsubscribeWorkflow = subscribe<WorkflowUpdateData>('workflow_update', (data) => {
+      setWorkflowUpdate(data);
+    });
+
+    const unsubscribeAgentLog = subscribe<AgentLogData>('agent_log', (data) => {
+      appendActivityLog(data);
     });
 
     const unsubscribeSandboxLog = subscribe<SandboxLogData>('sandbox_log', (data) => {
@@ -320,10 +329,65 @@ function ProjectPage({
       setActivityLogs((prev) => [...prev.slice(-199), next]);
     });
 
+    const inferAgentRole = (agentId: string): AgentRole => {
+      return (agents.find((agent) => agent.id === agentId)?.role ?? 'engineer') as AgentRole;
+    };
+
+    const unsubscribeJobStarted = subscribe<JobEventData>('job_started', (data) => {
+      appendActivityLog({
+        project_id: data.project_id,
+        agent_id: data.agent_id,
+        agent_role: inferAgentRole(data.agent_id),
+        log_type: 'thought',
+        content: data.message || 'Engineer job started.',
+      });
+    });
+
+    const unsubscribeJobProgress = subscribe<JobEventData>('job_progress', (data) => {
+      const isToolProgress = Boolean(data.tool_name);
+      appendActivityLog({
+        project_id: data.project_id,
+        agent_id: data.agent_id,
+        agent_role: inferAgentRole(data.agent_id),
+        log_type: isToolProgress ? 'tool_call' : 'thought',
+        content: data.message || (isToolProgress ? `Using tool: ${data.tool_name}` : 'Job in progress'),
+        tool_name: data.tool_name || undefined,
+        tool_input: data.tool_args || undefined,
+      });
+    });
+
+    const unsubscribeJobCompleted = subscribe<JobEventData>('job_completed', (data) => {
+      const content = data.result
+        ? `Job completed: ${data.result}`
+        : 'Engineer job completed.';
+      appendActivityLog({
+        project_id: data.project_id,
+        agent_id: data.agent_id,
+        agent_role: inferAgentRole(data.agent_id),
+        log_type: 'message',
+        content,
+        tool_output: data.pr_url || undefined,
+      });
+    });
+
+    const unsubscribeJobFailed = subscribe<JobEventData>('job_failed', (data) => {
+      appendActivityLog({
+        project_id: data.project_id,
+        agent_id: data.agent_id,
+        agent_role: inferAgentRole(data.agent_id),
+        log_type: 'error',
+        content: data.error || 'Engineer job failed.',
+      });
+    });
+
     return () => {
       unsubscribeWorkflow();
       unsubscribeAgentLog();
       unsubscribeSandboxLog();
+      unsubscribeJobStarted();
+      unsubscribeJobProgress();
+      unsubscribeJobCompleted();
+      unsubscribeJobFailed();
     };
   }, [agents, subscribe, view]);
 
@@ -407,7 +471,7 @@ function ProjectPage({
         projects={projects}
         activeProjectId={resolvedProject.id}
         activeView={view}
-        onProjectChange={(nextProjectId) => navigate(`/project/${nextProjectId}/${view}`)}
+        onProjectChange={(nextProjectId) => navigate(`/repository/${nextProjectId}/${view}`)}
       />
       <main className="flex-1 overflow-hidden">
         {renderView()}
@@ -417,7 +481,19 @@ function ProjectPage({
   );
 }
 
-function App() {
+function ProtectedRoute() {
+  const { firebaseUser, loading } = useAuth();
+  if (loading) {
+    return <div className="h-screen flex items-center justify-center text-gray-600">Loading...</div>;
+  }
+  if (!firebaseUser) {
+    return <Navigate to="/login" replace />;
+  }
+  return <Outlet />;
+}
+
+function AppShell() {
+  const { firebaseUser, loading } = useAuth();
   const [isBackendConnected, setIsBackendConnected] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [isProjectsLoading, setIsProjectsLoading] = useState(false);
@@ -433,7 +509,7 @@ function App() {
       setProjects(nextProjects);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to load projects';
+        error instanceof Error ? error.message : 'Failed to load repositories';
       setProjectsError(message);
     } finally {
       setIsProjectsLoading(false);
@@ -441,8 +517,9 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (loading || !firebaseUser) return;
     void loadProjects();
-  }, [loadProjects]);
+  }, [firebaseUser, loading, loadProjects]);
 
   // Check backend connection
   useEffect(() => {
@@ -470,72 +547,79 @@ function App() {
       )}
 
       <Routes>
-        {/* Projects Dashboard */}
-        <Route path="/projects" element={<ProjectsPage onProjectsUpdated={loadProjects} />} />
-        
-        {/* Project Settings */}
-        <Route path="/project/:projectId/settings" element={<SettingsPage />} />
-        
-        {/* Legacy routes redirect to first project */}
-        <Route
-          path="/"
-          element={
-            isProjectsLoading ? (
-              <div className="h-screen flex items-center justify-center text-gray-600">
-                Loading...
-              </div>
-            ) : projects.length === 0 ? (
-              <Navigate to="/projects" replace />
-            ) : (
-              <Navigate to={`/project/${projects[0].id}/chat`} replace />
-            )
-          }
-        />
-        <Route
-          path="/chat"
-          element={
-            <LegacyRouteRedirect
-              projects={projects}
-              view="chat"
-              isLoading={isProjectsLoading}
-            />
-          }
-        />
-        <Route
-          path="/kanban"
-          element={
-            <LegacyRouteRedirect
-              projects={projects}
-              view="kanban"
-              isLoading={isProjectsLoading}
-            />
-          }
-        />
-        
-        {/* Project views */}
-        <Route
-          path="/project/:projectId/chat"
-          element={<ProjectPage projects={projects} view="chat" isProjectsLoading={isProjectsLoading} />}
-        />
-        <Route
-          path="/project/:projectId/kanban"
-          element={<ProjectPage projects={projects} view="kanban" isProjectsLoading={isProjectsLoading} />}
-        />
-        <Route
-          path="/project/:projectId/workflow"
-          element={<ProjectPage projects={projects} view="workflow" isProjectsLoading={isProjectsLoading} />}
-        />
-        <Route
-          path="/project/:projectId/artifacts"
-          element={<ProjectPage projects={projects} view="artifacts" isProjectsLoading={isProjectsLoading} />}
-        />
-        
-        {/* Fallback */}
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+
+        <Route element={<ProtectedRoute />}>
+          <Route path="/repositories" element={<ProjectsPage onProjectsUpdated={loadProjects} />} />
+          <Route path="/settings" element={<UserSettingsPage />} />
+          <Route path="/repository/:projectId/settings" element={<SettingsPage />} />
+
+          <Route
+            path="/"
+            element={
+              isProjectsLoading ? (
+                <div className="h-screen flex items-center justify-center text-gray-600">
+                  Loading...
+                </div>
+              ) : projects.length === 0 ? (
+                <Navigate to="/repositories" replace />
+              ) : (
+                <Navigate to={`/repository/${projects[0].id}/chat`} replace />
+              )
+            }
+          />
+          <Route
+            path="/chat"
+            element={
+              <LegacyRouteRedirect
+                projects={projects}
+                view="chat"
+                isLoading={isProjectsLoading}
+              />
+            }
+          />
+          <Route
+            path="/kanban"
+            element={
+              <LegacyRouteRedirect
+                projects={projects}
+                view="kanban"
+                isLoading={isProjectsLoading}
+              />
+            }
+          />
+          <Route
+            path="/repository/:projectId/chat"
+            element={<ProjectPage projects={projects} view="chat" isProjectsLoading={isProjectsLoading} />}
+          />
+          <Route
+            path="/repository/:projectId/kanban"
+            element={<ProjectPage projects={projects} view="kanban" isProjectsLoading={isProjectsLoading} />}
+          />
+          <Route
+            path="/repository/:projectId/workflow"
+            element={<ProjectPage projects={projects} view="workflow" isProjectsLoading={isProjectsLoading} />}
+          />
+          <Route
+            path="/repository/:projectId/artifacts"
+            element={<ProjectPage projects={projects} view="artifacts" isProjectsLoading={isProjectsLoading} />}
+          />
+        </Route>
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
       <ConnectionStatus isConnected={isBackendConnected} />
     </BrowserRouter>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppShell />
+    </AuthProvider>
   );
 }
 

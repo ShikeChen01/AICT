@@ -18,6 +18,8 @@ class Settings(BaseSettings):
 
     # Auth
     api_token: str = "change-me-in-production"
+    firebase_credentials_path: str = ""
+    firebase_project_id: str = ""
 
     # E2B
     e2b_api_key: str = ""
@@ -54,6 +56,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = False
+    auto_run_migrations_on_startup: bool = True
 
     model_config = {
         "env_file": _env_file,

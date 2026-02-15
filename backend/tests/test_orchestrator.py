@@ -1,8 +1,10 @@
 import pytest
+from unittest.mock import AsyncMock
 
 from backend.core.exceptions import InvalidAgentRole
 import backend.services.orchestrator as orchestrator_module
 from backend.services.orchestrator import OrchestratorService, sandbox_should_persist
+from langchain_core.messages import AIMessage, HumanMessage
 
 
 def test_sandbox_policy_by_role():
@@ -90,4 +92,81 @@ async def test_graph_runtime_initializes_with_memory_when_postgres_disabled(monk
     assert app is not None
 
     await orchestrator_module.shutdown_graph_runtime()
+
+
+class _DummyState:
+    def __init__(self, values):
+        self.values = values
+
+
+class _DummyGraph:
+    def __init__(self, final_state):
+        self._final_state = final_state
+
+    async def aget_state(self, config):
+        return _DummyState(values={})
+
+    async def ainvoke(self, inputs, config=None):
+        return self._final_state
+
+
+@pytest.mark.asyncio
+async def test_run_manager_graph_returns_reason_for_empty_messages(session, sample_manager, monkeypatch):
+    graph = _DummyGraph(final_state={"messages": []})
+    monkeypatch.setattr(orchestrator_module, "get_graph_app", AsyncMock(return_value=graph))
+    monkeypatch.setattr(OrchestratorService, "wake_agent", AsyncMock())
+    emit_log = AsyncMock()
+    monkeypatch.setattr(orchestrator_module, "emit_agent_log", emit_log)
+
+    orchestrator = OrchestratorService()
+    result = await orchestrator.run_manager_graph(
+        session=session,
+        manager=sample_manager,
+        user_message="hello",
+    )
+
+    assert "Reason code: EMPTY_MESSAGES" in result
+    emit_log.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_manager_graph_returns_reason_when_last_message_not_ai(
+    session, sample_manager, monkeypatch
+):
+    graph = _DummyGraph(final_state={"messages": [HumanMessage(content="user-only")]})
+    monkeypatch.setattr(orchestrator_module, "get_graph_app", AsyncMock(return_value=graph))
+    monkeypatch.setattr(OrchestratorService, "wake_agent", AsyncMock())
+    emit_log = AsyncMock()
+    monkeypatch.setattr(orchestrator_module, "emit_agent_log", emit_log)
+
+    orchestrator = OrchestratorService()
+    result = await orchestrator.run_manager_graph(
+        session=session,
+        manager=sample_manager,
+        user_message="hello",
+    )
+
+    assert "Reason code: LAST_MESSAGE_NOT_AI" in result
+    emit_log.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_manager_graph_returns_reason_for_unsupported_multipart_content(
+    session, sample_manager, monkeypatch
+):
+    graph = _DummyGraph(final_state={"messages": [AIMessage(content=[{"type": "image"}])]})
+    monkeypatch.setattr(orchestrator_module, "get_graph_app", AsyncMock(return_value=graph))
+    monkeypatch.setattr(OrchestratorService, "wake_agent", AsyncMock())
+    emit_log = AsyncMock()
+    monkeypatch.setattr(orchestrator_module, "emit_agent_log", emit_log)
+
+    orchestrator = OrchestratorService()
+    result = await orchestrator.run_manager_graph(
+        session=session,
+        manager=sample_manager,
+        user_message="hello",
+    )
+
+    assert "Reason code: UNSUPPORTED_MULTIPART_CONTENT" in result
+    emit_log.assert_awaited()
 

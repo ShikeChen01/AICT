@@ -1,6 +1,5 @@
 /**
- * Projects Dashboard Page
- * Create, import, and manage projects
+ * Repositories dashboard page.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -12,7 +11,6 @@ import {
   Trash2,
   FolderOpen,
   ExternalLink,
-  Key,
   Loader2,
   AlertCircle,
 } from 'lucide-react';
@@ -42,7 +40,7 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
   const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formRepoUrl, setFormRepoUrl] = useState('');
-  const [formGitToken, setFormGitToken] = useState('');
+  const [formPrivate, setFormPrivate] = useState(true);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -70,12 +68,12 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
       const project = await createProject({
         name: formName.trim(),
         description: formDescription.trim() || null,
-        code_repo_url: formRepoUrl.trim() || undefined,
+        private: formPrivate,
       });
       setProjects((prev) => [project, ...prev]);
       await onProjectsUpdated?.();
       closeModal();
-      navigate(`/project/${project.id}/chat`);
+      navigate(`/repository/${project.id}/chat`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create project');
     } finally {
@@ -93,12 +91,11 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
         name: formName.trim(),
         description: formDescription.trim() || null,
         code_repo_url: formRepoUrl.trim(),
-        git_token: formGitToken.trim() || null,
       });
       setProjects((prev) => [project, ...prev]);
       await onProjectsUpdated?.();
       closeModal();
-      navigate(`/project/${project.id}/chat`);
+      navigate(`/repository/${project.id}/chat`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to import project');
     } finally {
@@ -107,7 +104,7 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
   };
 
   const handleDelete = async (projectId: string, projectName: string) => {
-    if (!confirm(`Delete project "${projectName}"? This cannot be undone.`)) {
+    if (!confirm(`Delete repository "${projectName}"? This cannot be undone.`)) {
       return;
     }
 
@@ -116,7 +113,7 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
       setProjects((prev) => prev.filter((p) => p.id !== projectId));
       await onProjectsUpdated?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete project');
+      setError(err instanceof Error ? err.message : 'Failed to delete repository');
     }
   };
 
@@ -125,7 +122,7 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
     setFormName('');
     setFormDescription('');
     setFormRepoUrl('');
-    setFormGitToken('');
+    setFormPrivate(true);
     setError(null);
   };
 
@@ -139,9 +136,9 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Projects</h1>
+              <h1 className="text-2xl font-bold text-gray-900">Repositories</h1>
               <p className="text-sm text-gray-500 mt-1">
-                Manage your AI-assisted software projects
+                Manage your AI-assisted software repositories
               </p>
             </div>
             <div className="flex gap-3">
@@ -157,7 +154,7 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                 className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
                 <Plus className="w-4 h-4" />
-                New Project
+                New Repository
               </button>
             </div>
           </div>
@@ -183,8 +180,8 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
         ) : projects.length === 0 ? (
           <div className="text-center py-16">
             <FolderOpen className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No projects yet</h3>
-            <p className="text-gray-500 mb-6">Get started by creating a new project or importing an existing repository.</p>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No repositories yet</h3>
+            <p className="text-gray-500 mb-6">Get started by creating a new repository or importing an existing repository.</p>
             <div className="flex justify-center gap-3">
               <button
                 onClick={openImportModal}
@@ -198,7 +195,7 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                 className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 <Plus className="w-4 h-4" />
-                New Project
+                New Repository
               </button>
             </div>
           </div>
@@ -213,7 +210,7 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
                       <h3
-                        onClick={() => navigate(`/project/${project.id}/chat`)}
+                        onClick={() => navigate(`/repository/${project.id}/chat`)}
                         className="text-lg font-semibold text-gray-900 truncate cursor-pointer hover:text-blue-600"
                       >
                         {project.name}
@@ -225,7 +222,7 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                     <button
                       onClick={() => handleDelete(project.id, project.name)}
                       className="ml-2 p-1 text-gray-400 hover:text-red-500 transition-colors"
-                      title="Delete project"
+                      title="Delete repository"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -246,12 +243,6 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                         <ExternalLink className="w-3 h-3" />
                       </a>
                     )}
-                    {project.git_token_set && (
-                      <span className="flex items-center gap-1 text-green-600" title="Git token configured">
-                        <Key className="w-3 h-3" />
-                        Token
-                      </span>
-                    )}
                   </div>
 
                   <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
@@ -259,10 +250,10 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                       Created {format(new Date(project.created_at), 'MMM d, yyyy')}
                     </span>
                     <button
-                      onClick={() => navigate(`/project/${project.id}/chat`)}
+                      onClick={() => navigate(`/repository/${project.id}/chat`)}
                       className="text-xs font-medium text-blue-600 hover:text-blue-800"
                     >
-                      Open Project &rarr;
+                      Open Repository &rarr;
                     </button>
                   </div>
                 </div>
@@ -278,21 +269,21 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
           <div className="absolute inset-0 bg-black/50" onClick={closeModal} />
           <div className="relative bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">
-              {modal === 'create' ? 'Create New Project' : 'Import Repository'}
+              {modal === 'create' ? 'Create New Repository' : 'Import Repository'}
             </h2>
 
             <form onSubmit={modal === 'create' ? handleCreate : handleImport}>
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Project Name *
+                    Repository Name *
                   </label>
                   <input
                     type="text"
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="My Project"
+                    placeholder="my-repository"
                     required
                   />
                 </div>
@@ -306,13 +297,14 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                     onChange={(e) => setFormDescription(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     rows={3}
-                    placeholder="Brief description of the project..."
+                    placeholder="Brief description of the repository..."
                   />
                 </div>
 
+                {modal === 'import' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Repository URL {modal === 'import' && '*'}
+                    Repository URL *
                   </label>
                   <input
                     type="url"
@@ -320,26 +312,19 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                     onChange={(e) => setFormRepoUrl(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="https://github.com/user/repo"
-                    required={modal === 'import'}
+                    required
                   />
                 </div>
-
-                {modal === 'import' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Personal Access Token (for private repos)
-                    </label>
+                )}
+                {modal === 'create' && (
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
                     <input
-                      type="password"
-                      value={formGitToken}
-                      onChange={(e) => setFormGitToken(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="ghp_xxxxxxxxxxxx"
+                      type="checkbox"
+                      checked={formPrivate}
+                      onChange={(e) => setFormPrivate(e.target.checked)}
                     />
-                    <p className="mt-1 text-xs text-gray-500">
-                      Required for private repositories. Token will be stored securely.
-                    </p>
-                  </div>
+                    Create as private GitHub repository
+                  </label>
                 )}
               </div>
 
@@ -362,7 +347,7 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                 >
                   {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {modal === 'create' ? 'Create Project' : 'Import Repository'}
+                  {modal === 'create' ? 'Create Repository' : 'Import Repository'}
                 </button>
               </div>
             </form>

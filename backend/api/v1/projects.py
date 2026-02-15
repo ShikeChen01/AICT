@@ -1,5 +1,4 @@
-"""
-Projects REST API endpoints.
+"""Deprecated projects routes (compatibility shim)."""
 
 List, create, import, and delete projects.
 """
@@ -12,7 +11,7 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
@@ -252,6 +251,14 @@ async def delete_project(
         shutil.rmtree(spec_path, ignore_errors=True)
     if code_path.exists():
         shutil.rmtree(code_path, ignore_errors=True)
+
+    # Break Agent <-> Task cross-references first to avoid ORM circular delete ordering.
+    # Older projects may still have mutually linked rows (agent.current_task_id and task.assigned_agent_id).
+    await db.execute(
+        update(Agent)
+        .where(Agent.project_id == project_id)
+        .values(current_task_id=None)
+    )
 
     # Delete from database (cascades to agents, tasks, tickets, etc.)
     await db.delete(project)
