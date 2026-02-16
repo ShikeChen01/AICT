@@ -8,16 +8,21 @@ const API_TOKEN = process.env.API_TOKEN || 'change-me-in-production';
 
 /**
  * Set up authentication for the page.
- * Stores the API token in localStorage for the frontend to use.
+ * Stores a seeded API token in localStorage for deterministic test auth.
  */
 export async function setupAuth(page: Page): Promise<void> {
-  // Navigate to the app first to set localStorage on the correct origin
+  await setupAuthenticatedSession(page, API_TOKEN);
+}
+
+export async function setupAuthenticatedSession(page: Page, token: string): Promise<void> {
+  // Navigate first to set storage on app origin
   await page.goto('/');
-  
-  // Set the auth token in localStorage
-  await page.evaluate((token) => {
-    localStorage.setItem('auth_token', token);
-  }, API_TOKEN);
+  await page.evaluate((nextToken) => {
+    localStorage.setItem('auth_token', nextToken);
+  }, token);
+
+  // Reload so auth bootstrap reads seeded values at startup.
+  await page.reload();
 }
 
 /**
@@ -31,7 +36,27 @@ export function getAuthHeader(): string {
  * Clear authentication.
  */
 export async function clearAuth(page: Page): Promise<void> {
-  await page.evaluate(() => {
+  await setupSignedOutSession(page);
+}
+
+export async function setupSignedOutSession(page: Page): Promise<void> {
+  await page.goto('/');
+  await page.evaluate(async () => {
     localStorage.removeItem('auth_token');
+    sessionStorage.clear();
+    if ('databases' in indexedDB) {
+      const databases = await indexedDB.databases();
+      await Promise.all(
+        databases
+          .filter((db) => db.name)
+          .map((db) => new Promise<void>((resolve) => {
+            const request = indexedDB.deleteDatabase(db.name!);
+            request.onsuccess = () => resolve();
+            request.onerror = () => resolve();
+            request.onblocked = () => resolve();
+          }))
+      );
+    }
   });
+  await page.reload();
 }

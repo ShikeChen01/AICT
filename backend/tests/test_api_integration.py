@@ -51,8 +51,8 @@ class TestHealthEndpoints:
         assert data["status"] == "ok"
 
 
-class TestProjectsAPI:
-    """Test project CRUD endpoints."""
+class TestRepositoriesAPI:
+    """Test repository CRUD endpoints."""
 
     async def test_list_projects(
         self,
@@ -60,7 +60,7 @@ class TestProjectsAPI:
         auth_headers: dict,
         sample_project: Project,
     ):
-        response = await api_client.get("/api/v1/projects", headers=auth_headers)
+        response = await api_client.get("/api/v1/repositories", headers=auth_headers)
         assert response.status_code == 200
         
         data = response.json()
@@ -79,7 +79,7 @@ class TestProjectsAPI:
         sample_project: Project,
     ):
         response = await api_client.get(
-            f"/api/v1/projects/{sample_project.id}",
+            f"/api/v1/repositories/{sample_project.id}",
             headers=auth_headers,
         )
         assert response.status_code == 200
@@ -95,7 +95,7 @@ class TestProjectsAPI:
     ):
         fake_id = uuid.uuid4()
         response = await api_client.get(
-            f"/api/v1/projects/{fake_id}",
+            f"/api/v1/repositories/{fake_id}",
             headers=auth_headers,
         )
         assert response.status_code == 404
@@ -311,8 +311,8 @@ class TestJobsAPI:
 class TestAuthenticationRequired:
     """Test that endpoints require authentication."""
 
-    async def test_projects_requires_auth(self, api_client: AsyncClient):
-        response = await api_client.get("/api/v1/projects")
+    async def test_repositories_requires_auth(self, api_client: AsyncClient):
+        response = await api_client.get("/api/v1/repositories")
         # Should return 401 or 422 (missing header)
         assert response.status_code in (401, 422)
 
@@ -468,14 +468,14 @@ class TestDatabaseIntegration:
         await session.commit()
 
         response = await api_client.delete(
-            f"/api/v1/projects/{project.id}",
+            f"/api/v1/repositories/{project.id}",
             headers=auth_headers,
         )
         assert response.status_code == 204
 
         # Project should no longer be fetchable after deletion.
         get_response = await api_client.get(
-            f"/api/v1/projects/{project.id}",
+            f"/api/v1/repositories/{project.id}",
             headers=auth_headers,
         )
         assert get_response.status_code == 404

@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = False
     auto_run_migrations_on_startup: bool = True
+    startup_step_timeout_seconds: int = Field(default=20, ge=1, le=300)
 
     model_config = {
         "env_file": _env_file,

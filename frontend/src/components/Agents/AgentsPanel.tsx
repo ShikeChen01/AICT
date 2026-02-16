@@ -49,7 +49,7 @@ export function AgentsPanel({ projectId }: AgentsPanelProps) {
     };
 
     const unsubscribeAgentLog = subscribe<AgentLogData>('agent_log', (data) => {
-      let prefix = data.log_type;
+      let prefix: string = data.log_type;
       if (data.log_type === 'tool_call') prefix = `tool:${data.tool_name || 'call'}`;
       if (data.log_type === 'tool_result') prefix = `result:${data.tool_name || 'tool'}`;
       pushLine(data.agent_id, `[${prefix}] ${data.content}`);

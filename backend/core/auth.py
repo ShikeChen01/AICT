@@ -5,6 +5,10 @@ Supports Firebase ID tokens with an API token fallback.
 
 from __future__ import annotations
 
+import logging
+import os
+from pathlib import Path
+
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +28,20 @@ except Exception:  # pragma: no cover - dependency may be absent in local tests
 
 
 _firebase_ready = False
+logger = logging.getLogger(__name__)
+
+
+def _resolve_credentials_path() -> Path | None:
+    raw_path = (settings.firebase_credentials_path or "").strip()
+    if not raw_path:
+        raw_path = (os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
+    if not raw_path:
+        return None
+
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path
 
 
 def _init_firebase() -> bool:
@@ -32,15 +50,31 @@ def _init_firebase() -> bool:
         return True
     if firebase_admin is None or credentials is None:
         return False
-    if not settings.firebase_credentials_path:
-        return False
     try:
         if not firebase_admin._apps:
-            cred = credentials.Certificate(settings.firebase_credentials_path)
-            firebase_admin.initialize_app(cred)
+            options = (
+                {"projectId": settings.firebase_project_id}
+                if settings.firebase_project_id
+                else None
+            )
+            credentials_path = _resolve_credentials_path()
+            if credentials_path:
+                if not credentials_path.exists():
+                    logger.warning(
+                        "Firebase credentials file not found: %s",
+                        credentials_path,
+                    )
+                    firebase_admin.initialize_app(options=options)
+                else:
+                    cred = credentials.Certificate(str(credentials_path))
+                    firebase_admin.initialize_app(cred, options=options)
+            else:
+                # Fallback to Application Default Credentials (useful for Cloud Run).
+                firebase_admin.initialize_app(options=options)
         _firebase_ready = True
         return True
-    except Exception:
+    except Exception as exc:
+        logger.warning("Firebase initialization failed: %s", exc)
         return False
 
 

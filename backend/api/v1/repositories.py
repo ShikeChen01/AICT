@@ -8,7 +8,7 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
@@ -50,7 +50,12 @@ async def list_repositories(
 ):
     result = await db.execute(
         select(Repository)
-        .where(Repository.owner_id == current_user.id)
+        .where(
+            or_(
+                Repository.owner_id == current_user.id,
+                Repository.owner_id.is_(None),
+            )
+        )
         .order_by(Repository.created_at.desc())
     )
     repositories = list(result.scalars().all())
@@ -66,7 +71,10 @@ async def get_repository(
     result = await db.execute(
         select(Repository).where(
             Repository.id == repository_id,
-            Repository.owner_id == current_user.id,
+            or_(
+                Repository.owner_id == current_user.id,
+                Repository.owner_id.is_(None),
+            ),
         )
     )
     repository = result.scalar_one_or_none()
@@ -240,7 +248,10 @@ async def update_repository(
     result = await db.execute(
         select(Repository).where(
             Repository.id == repository_id,
-            Repository.owner_id == current_user.id,
+            or_(
+                Repository.owner_id == current_user.id,
+                Repository.owner_id.is_(None),
+            ),
         )
     )
     repository = result.scalar_one_or_none()
@@ -268,7 +279,10 @@ async def delete_repository(
     result = await db.execute(
         select(Repository).where(
             Repository.id == repository_id,
-            Repository.owner_id == current_user.id,
+            or_(
+                Repository.owner_id == current_user.id,
+                Repository.owner_id.is_(None),
+            ),
         )
     )
     repository = result.scalar_one_or_none()
@@ -281,6 +295,13 @@ async def delete_repository(
         shutil.rmtree(spec_path, ignore_errors=True)
     if code_path.exists():
         shutil.rmtree(code_path, ignore_errors=True)
+
+    # Break Agent <-> Task cross references before cascading delete.
+    await db.execute(
+        update(Agent)
+        .where(Agent.project_id == repository_id)
+        .values(current_task_id=None)
+    )
 
     await db.delete(repository)
     await db.commit()

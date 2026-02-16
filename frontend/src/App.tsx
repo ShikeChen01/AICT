@@ -20,7 +20,7 @@ import { AgentInspector, AgentsPanel } from './components/Agents';
 import { WorkflowGraph } from './components/Workflow';
 import { ActivityFeed } from './components/ActivityFeed';
 import { ArtifactBrowser } from './components/Artifacts';
-import { LoginPage, ProjectsPage, RegisterPage, SettingsPage, UserSettingsPage } from './pages';
+import { AuthCallbackPage, LoginPage, ProjectsPage, RegisterPage, SettingsPage, UserSettingsPage } from './pages';
 import { getProjects, healthCheck } from './api/client';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useAgents, useWebSocket } from './hooks';
@@ -482,18 +482,18 @@ function ProjectPage({
 }
 
 function ProtectedRoute() {
-  const { firebaseUser, loading } = useAuth();
+  const { firebaseUser, user, loading } = useAuth();
   if (loading) {
     return <div className="h-screen flex items-center justify-center text-gray-600">Loading...</div>;
   }
-  if (!firebaseUser) {
+  if (!firebaseUser && !user) {
     return <Navigate to="/login" replace />;
   }
   return <Outlet />;
 }
 
 function AppShell() {
-  const { firebaseUser, loading } = useAuth();
+  const { firebaseUser, user, loading } = useAuth();
   const [isBackendConnected, setIsBackendConnected] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [isProjectsLoading, setIsProjectsLoading] = useState(false);
@@ -517,9 +517,9 @@ function AppShell() {
   }, []);
 
   useEffect(() => {
-    if (loading || !firebaseUser) return;
+    if (loading || (!firebaseUser && !user)) return;
     void loadProjects();
-  }, [firebaseUser, loading, loadProjects]);
+  }, [firebaseUser, user, loading, loadProjects]);
 
   // Check backend connection
   useEffect(() => {
@@ -549,6 +549,7 @@ function AppShell() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/auth/callback" element={<AuthCallbackPage />} />
 
         <Route element={<ProtectedRoute />}>
           <Route path="/repositories" element={<ProjectsPage onProjectsUpdated={loadProjects} />} />

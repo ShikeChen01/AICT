@@ -10,8 +10,9 @@ cd c:\Personal-Project\AICT\AICT
 ```
 
 This starts:
-- Backend at http://localhost:8000
-- Frontend at http://localhost:3000
+
+- Backend at `http://localhost:8000`
+- Frontend at `http://localhost:3000`
 
 **Run backend only (uses Cloud SQL from .env.development):**
 
@@ -75,6 +76,7 @@ $env:DATABASE_URL = "postgresql+asyncpg://aict:aict@localhost:5432/aict"
 ```
 
 This checks:
+
 - `GET /api/v1/health`
 - `GET /internal/agent/health`
 - Authenticated API smoke flow (`projects` -> `agents` -> create/update/delete task)
@@ -85,3 +87,24 @@ This checks:
 
 - **Local:** Python 3.11+, `.env.development` with DATABASE_URL and API keys
 - **Cloud:** `gcloud` CLI, project with Cloud Run + Cloud SQL + Artifact Registry enabled
+
+---
+
+## Firebase Credentials (Local + Docker)
+
+Backend token verification needs Firebase Admin credentials. Set:
+
+```powershell
+FIREBASE_CREDENTIALS_PATH=./aict-487016-firebase-adminsdk-fbsvc-98e0fed33c.json
+```
+
+When running backend in Docker, mount the same JSON file into the container and
+set an in-container path:
+
+```powershell
+docker run --rm -p 8000:8080 `
+  --env-file .env.development `
+  -e FIREBASE_CREDENTIALS_PATH=/app/secrets/firebase-admin.json `
+  -v ${PWD}\aict-487016-firebase-adminsdk-fbsvc-98e0fed33c.json:/app/secrets/firebase-admin.json:ro `
+  us-central1-docker.pkg.dev/aict-487016/aict-dev/backend:latest
+```

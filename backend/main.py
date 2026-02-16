@@ -5,6 +5,7 @@ AICT Backend — FastAPI application entry point.
 import asyncio
 from contextlib import asynccontextmanager
 import logging
+from collections.abc import Awaitable
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +30,22 @@ logger = logging.getLogger(__name__)
 
 # Track background tasks
 _background_tasks: list[asyncio.Task] = []
+
+
+async def _run_startup_step(name: str, step: Awaitable[None]) -> None:
+    """
+    Run a startup step with timeout and soft-fail behavior.
+    """
+    try:
+        await asyncio.wait_for(step, timeout=settings.startup_step_timeout_seconds)
+    except TimeoutError:
+        logger.warning(
+            "Startup step timed out and was skipped: %s (timeout=%ss)",
+            name,
+            settings.startup_step_timeout_seconds,
+        )
+    except Exception as exc:
+        logger.warning("Startup step failed and was skipped: %s (%s)", name, exc)
 
 
 async def _provision_repositories_on_startup() -> None:
@@ -79,10 +96,10 @@ async def _stop_background_tasks() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    await _run_startup_migrations()
-    await initialize_graph_runtime()
-    await _provision_repositories_on_startup()
-    await _start_engineer_worker()
+    await _run_startup_step("run_startup_migrations", _run_startup_migrations())
+    await _run_startup_step("initialize_graph_runtime", initialize_graph_runtime())
+    await _run_startup_step("provision_repositories_on_startup", _provision_repositories_on_startup())
+    await _run_startup_step("start_engineer_worker", _start_engineer_worker())
     yield
     # Shutdown
     await _stop_background_tasks()
