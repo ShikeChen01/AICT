@@ -29,11 +29,11 @@ export function RegisterPage() {
     setIsSubmitting(true);
     try {
       await loginWithGoogle();
-      // If using redirect flow, the page will redirect to Google
-      // If using seeded token fallback, navigate directly
+      // Popup resolves directly; navigate on success.
       navigate('/repositories', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to sign in with Google');
+    } finally {
       setIsSubmitting(false);
     }
   };

@@ -1,6 +1,13 @@
 /**
  * Firebase Configuration
  * Initialize Firebase with environment variables for Google authentication.
+ *
+ * Google Sign-In redirect: Set the Authorized redirect URI to the exact callback URL
+ * so the user lands on /auth/callback with the OAuth hash intact.
+ * - Firebase Console: Authentication → Sign-in method → Google
+ * - Google Cloud Console: APIs & Services → Credentials → OAuth 2.0 client
+ * Example (local): http://localhost:5173/auth/callback
+ * Example (prod): https://your-domain.com/auth/callback
  */
 
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';

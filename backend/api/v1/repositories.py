@@ -110,9 +110,13 @@ async def create_repository(
     )
     code_repo_url = github_repo.get("clone_url") or github_repo.get("html_url") or ""
 
+    clone_url = code_repo_url
+    if current_user.github_token and "github.com" in code_repo_url:
+        clone_url = code_repo_url.replace("https://", f"https://{current_user.github_token}@")
+
     try:
         subprocess.run(
-            ["git", "clone", "--depth", "1", code_repo_url, str(code_path)],
+            ["git", "clone", "--depth", "1", clone_url, str(code_path)],
             check=True,
             capture_output=True,
             text=True,

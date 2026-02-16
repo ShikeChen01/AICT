@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { ChatMessage, ChatMessageCreate } from '../types';
 import * as api from '../api/client';
+import { APIClientError } from '../api/client';
 import { useWebSocket } from './useWebSocket';
 
 interface UseChatReturn {
@@ -61,6 +62,10 @@ export function useChat(projectId: string | null): UseChatReturn {
     const unsubscribeMessage = subscribe<ChatMessage>('chat_message', (message) => {
       if (message.role === 'gm' || message.role === 'manager') {
         setIsAwaitingGmReply(false);
+        // Clear timeout error if GM reply arrived via WebSocket (backend finished after HTTP timed out)
+        setError((prev) =>
+          prev instanceof APIClientError && prev.errorType === 'request_timeout' ? null : prev
+        );
       }
       setMessages((prev) => {
         if (prev.some((msg) => msg.id === message.id)) {

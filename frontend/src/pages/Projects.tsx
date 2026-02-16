@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import {
   Plus,
@@ -13,12 +13,14 @@ import {
   ExternalLink,
   Loader2,
   AlertCircle,
+  Settings,
 } from 'lucide-react';
 import {
   getProjects,
   createProject,
   importProject,
   deleteProject,
+  getAuthToken,
 } from '../api/client';
 import type { Project } from '../types';
 
@@ -56,6 +58,7 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
   }, []);
 
   useEffect(() => {
+    if (!getAuthToken()) return;
     fetchProjects();
   }, [fetchProjects]);
 
@@ -141,7 +144,14 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                 Manage your AI-assisted software repositories
               </p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex items-center gap-3">
+              <Link
+                to="/settings"
+                className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+              >
+                <Settings className="w-4 h-4" />
+                User Settings
+              </Link>
               <button
                 onClick={openImportModal}
                 className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 transition-colors"

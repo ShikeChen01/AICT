@@ -1,146 +1,184 @@
 /**
  * Auth Callback Page
- * Intermediate page that processes Firebase redirect authentication results.
- * Shows loading state while processing, handles success/failure/timeout.
+ * Handles returning from Firebase redirect (legacy/fallback) or direct visits.
+ * Primary sign-in now uses signInWithPopup from Login/Register pages.
+ * This page remains for:
+ *   1. Processing any pending redirect result (getRedirectResult)
+ *   2. Recovering an existing Firebase session (currentUser / onAuthStateChanged)
+ *   3. Graceful error display if no session is found
  */
 
 import { useEffect, useState, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { getRedirectResult } from 'firebase/auth';
+import { useNavigate } from 'react-router-dom';
+import { onAuthStateChanged, type User } from 'firebase/auth';
 
 import { useAuth } from '../contexts/AuthContext';
 import { auth } from '../config/firebase';
-import { setAuthToken, getMe } from '../api/client';
+import { APIClientError, setAuthToken } from '../api/client';
 
 type AuthStatus = 'processing' | 'success' | 'error' | 'timeout';
 
-const AUTH_TIMEOUT_MS = 30000; // 30 seconds timeout
+const AUTH_TIMEOUT_MS = 30000;
+const HYDRATION_WAIT_MS = 10000;
+
+function summarizeAuthError(error: unknown): string {
+  if (error instanceof APIClientError) {
+    return `status=${error.status} type=${error.errorType} message=${error.message}`;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
 
 export function AuthCallbackPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const { loginWithGoogle } = useAuth();
+  const { getRedirectResultForCallback, refreshProfile } = useAuth();
   const [status, setStatus] = useState<AuthStatus>('processing');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const processedRef = useRef(false);
 
+  const goToLogin = () => navigate('/login', { replace: true });
+
   useEffect(() => {
-    // Prevent double processing in React strict mode
     if (processedRef.current) return;
     processedRef.current = true;
 
-    const processAuthResult = async () => {
-      // Always check for redirect result first. When user returns from Google they land here
-      // (sometimes still with ?mode=google). If we see mode=google before checking result,
-      // we'd start another redirect and send them back to Google.
-      if (auth) {
-        let result;
-        try {
-          result = await getRedirectResult(auth);
-        } catch (err) {
-          setStatus('error');
-          setErrorMessage(err instanceof Error ? err.message : 'Authentication failed');
-          setTimeout(() => {
-            navigate('/login?error=' + encodeURIComponent('Authentication failed'), { replace: true });
-          }, 2000);
-          return;
-        }
-        if (result?.user) {
-          // User just returned from Google – process the result (no new redirect).
-          const timeoutId = setTimeout(() => {
-            setStatus('timeout');
-            setErrorMessage('Authentication timed out. Please try again.');
-            setTimeout(() => {
-              navigate('/login?error=' + encodeURIComponent('Authentication timed out'), { replace: true });
-            }, 2000);
-          }, AUTH_TIMEOUT_MS);
-          try {
-            const idToken = await result.user.getIdToken();
-            setAuthToken(idToken);
-            try {
-              await getMe();
-              clearTimeout(timeoutId);
-              setStatus('success');
-              setTimeout(() => navigate('/repositories', { replace: true }), 500);
-              return;
-            } catch {
-              const refreshedToken = await result.user.getIdToken(true);
-              setAuthToken(refreshedToken);
-              await getMe();
-              clearTimeout(timeoutId);
-              setStatus('success');
-              setTimeout(() => navigate('/repositories', { replace: true }), 500);
-              return;
-            }
-          } catch (backendError) {
-            clearTimeout(timeoutId);
-            setStatus('error');
-            setErrorMessage('Failed to verify authentication with server.');
-            setTimeout(() => {
-              navigate('/login?error=' + encodeURIComponent('Server verification failed'), { replace: true });
-            }, 2000);
-            return;
-          }
-        }
-      }
-
-      // No redirect result: either we're here to start the flow (mode=google) or user opened URL directly.
-      const mode = searchParams.get('mode');
-      if (mode === 'google') {
-        try {
-          await loginWithGoogle();
-          navigate('/repositories', { replace: true });
-        } catch (err) {
-          setStatus('error');
-          setErrorMessage(err instanceof Error ? err.message : 'Failed to start sign-in');
-          setTimeout(() => {
-            navigate('/login?error=' + encodeURIComponent('Failed to start sign-in'), { replace: true });
-          }, 2000);
-        }
+    const logStep = (step: string, details?: Record<string, unknown>) => {
+      if (details) {
+        console.info(`[AuthCallback] ${step}`, details);
         return;
       }
+      console.info(`[AuthCallback] ${step}`);
+    };
 
+    const setTokenWithLog = (token: string, source: string) => {
+      setAuthToken(token);
+      logStep('token_set', { source, tokenLength: token.length });
+    };
+
+    const waitForFirebaseUser = (): Promise<User | null> => {
+      const firebaseAuth = auth;
+      if (!firebaseAuth) return Promise.resolve(null);
+      if (firebaseAuth.currentUser) return Promise.resolve(firebaseAuth.currentUser);
+      return new Promise<User | null>((resolve) => {
+        let settled = false;
+        let unsubscribe: (() => void) | null = null;
+        const settle = (user: User | null) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(tid);
+          unsubscribe?.();
+          resolve(user);
+        };
+        const tid = window.setTimeout(() => {
+          settle(firebaseAuth.currentUser);
+        }, HYDRATION_WAIT_MS);
+        unsubscribe = onAuthStateChanged(firebaseAuth, (nextUser) => {
+          if (nextUser) settle(nextUser);
+        });
+      });
+    };
+
+    const authenticateWithUser = async (
+      fbUser: User,
+      source: string,
+    ): Promise<boolean> => {
+      const timeoutId = setTimeout(() => {
+        logStep('authenticate:timeout');
+        setStatus('timeout');
+        setErrorMessage('Authentication timed out. Please try again.');
+      }, AUTH_TIMEOUT_MS);
+      try {
+        const idToken = await fbUser.getIdToken();
+        setTokenWithLog(idToken, source);
+        logStep('refresh_profile:start', { source });
+        await refreshProfile();
+        logStep('refresh_profile:success', { source });
+        clearTimeout(timeoutId);
+        setStatus('success');
+        navigate('/repositories', { replace: true });
+        return true;
+      } catch (firstErr) {
+        logStep('refresh_profile:error', {
+          source,
+          detail: summarizeAuthError(firstErr),
+        });
+        try {
+          const refreshedToken = await fbUser.getIdToken(true);
+          setTokenWithLog(refreshedToken, `${source}_forced_refresh`);
+          await refreshProfile();
+          clearTimeout(timeoutId);
+          setStatus('success');
+          navigate('/repositories', { replace: true });
+          return true;
+        } catch (retryErr) {
+          clearTimeout(timeoutId);
+          logStep('authenticate:retry_failed', {
+            detail: summarizeAuthError(retryErr),
+          });
+          return false;
+        }
+      }
+    };
+
+    const processAuthResult = async () => {
+      logStep('process_start', {
+        hasFirebaseAuth: Boolean(auth),
+        href: window.location.href,
+      });
+
+      // 1. Try pending redirect result (legacy redirect flow / returning from Google).
+      if (auth) {
+        try {
+          logStep('get_redirect_result:start');
+          const result = await getRedirectResultForCallback();
+          logStep('get_redirect_result:done', { hasUser: Boolean(result?.user) });
+          if (result?.user) {
+            if (await authenticateWithUser(result.user, 'redirect_result')) return;
+          }
+        } catch (err) {
+          logStep('get_redirect_result:error', { detail: summarizeAuthError(err) });
+          setStatus('error');
+          setErrorMessage(`Authentication failed: ${summarizeAuthError(err)}`);
+          return;
+        }
+      }
+
+      // 2. Wait for Firebase to hydrate an existing session (currentUser / onAuthStateChanged).
+      logStep('waiting_for_firebase_user', { waitMs: HYDRATION_WAIT_MS });
+      const currentUser = await waitForFirebaseUser();
+      if (currentUser) {
+        logStep('firebase_user_found', { uid: currentUser.uid });
+        if (await authenticateWithUser(currentUser, 'existing_firebase_user')) return;
+      }
+
+      // 3. Seeded-token fallback (dev / E2E).
       if (!auth) {
-        // Firebase not configured, try seeded token fallback
         const seededToken = localStorage.getItem('auth_token');
         if (seededToken) {
-          setAuthToken(seededToken);
+          setTokenWithLog(seededToken, 'seeded_token_fallback');
           try {
-            await getMe();
+            await refreshProfile();
             setStatus('success');
             navigate('/repositories', { replace: true });
             return;
           } catch {
-            // Fall through to error
+            // fall through
           }
         }
-        setStatus('error');
-        setErrorMessage('Firebase authentication is not configured.');
-        setTimeout(() => {
-          navigate('/login?error=' + encodeURIComponent('Authentication not configured'), { replace: true });
-        }, 2000);
-        return;
       }
 
-      // No redirect result and not mode=google: user opened /auth/callback directly
-      const currentUser = auth.currentUser;
-      if (currentUser) {
-        try {
-          const idToken = await currentUser.getIdToken();
-          setAuthToken(idToken);
-          await getMe();
-          setStatus('success');
-          navigate('/repositories', { replace: true });
-          return;
-        } catch {
-          // Fall through to redirect login
-        }
-      }
-      navigate('/login', { replace: true });
+      // 4. Nothing worked — show error.
+      logStep('no_recoverable_auth_state');
+      setStatus('error');
+      setErrorMessage(
+        'No authenticated session found. Please go back to login and sign in again.',
+      );
     };
 
     void processAuthResult();
-  }, [navigate, searchParams, loginWithGoogle]);
+  }, [navigate, getRedirectResultForCallback, refreshProfile]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
@@ -167,9 +205,7 @@ export function AuthCallbackPage() {
               </div>
             </div>
             <h1 className="text-xl font-semibold text-gray-900">Authentication Successful</h1>
-            <p className="text-sm text-gray-600">
-              Redirecting you to the application...
-            </p>
+            <p className="text-sm text-gray-600">Redirecting you to the application...</p>
           </>
         )}
 
@@ -184,7 +220,13 @@ export function AuthCallbackPage() {
             </div>
             <h1 className="text-xl font-semibold text-gray-900">Authentication Failed</h1>
             <p className="text-sm text-red-600">{errorMessage}</p>
-            <p className="text-sm text-gray-600">Redirecting to login...</p>
+            <button
+              type="button"
+              onClick={goToLogin}
+              className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              Back to Login
+            </button>
           </>
         )}
 
@@ -199,7 +241,13 @@ export function AuthCallbackPage() {
             </div>
             <h1 className="text-xl font-semibold text-gray-900">Authentication Timed Out</h1>
             <p className="text-sm text-gray-600">{errorMessage}</p>
-            <p className="text-sm text-gray-600">Redirecting to login...</p>
+            <button
+              type="button"
+              onClick={goToLogin}
+              className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              Back to Login
+            </button>
           </>
         )}
       </div>

@@ -21,7 +21,7 @@ import { WorkflowGraph } from './components/Workflow';
 import { ActivityFeed } from './components/ActivityFeed';
 import { ArtifactBrowser } from './components/Artifacts';
 import { AuthCallbackPage, LoginPage, ProjectsPage, RegisterPage, SettingsPage, UserSettingsPage } from './pages';
-import { getProjects, healthCheck } from './api/client';
+import { getProjects, getAuthToken, healthCheck } from './api/client';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useAgents, useWebSocket } from './hooks';
 import type {
@@ -483,10 +483,11 @@ function ProjectPage({
 
 function ProtectedRoute() {
   const { firebaseUser, user, loading } = useAuth();
+  const hasToken = Boolean(getAuthToken());
   if (loading) {
     return <div className="h-screen flex items-center justify-center text-gray-600">Loading...</div>;
   }
-  if (!firebaseUser && !user) {
+  if (!firebaseUser && !user && !hasToken) {
     return <Navigate to="/login" replace />;
   }
   return <Outlet />;
@@ -518,6 +519,7 @@ function AppShell() {
 
   useEffect(() => {
     if (loading || (!firebaseUser && !user)) return;
+    if (!getAuthToken()) return; // Don't fetch after logout (token cleared before firebaseUser updates)
     void loadProjects();
   }, [firebaseUser, user, loading, loadProjects]);
 

@@ -4,7 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 export function LoginPage() {
-  const { firebaseUser, user, loading } = useAuth();
+  const { firebaseUser, user, loading, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -28,9 +28,13 @@ export function LoginPage() {
     setError(null);
     setIsSubmitting(true);
     try {
-      // Route to auth callback page so user returns there after Google (not here)
-      navigate('/auth/callback?mode=google', { replace: true });
-    } catch {
+      await loginWithGoogle();
+      // Popup resolves directly; onAuthStateChanged will update state and
+      // the effect above will navigate to /repositories.
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Sign-in failed';
+      setError(message);
+    } finally {
       setIsSubmitting(false);
     }
   };

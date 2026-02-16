@@ -2,6 +2,15 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+## Google / Firebase auth
+
+For Google Sign-In (redirect flow), set the **Authorized redirect URI** to the full callback URL, not just the origin. Otherwise the user may land on `/` and the OAuth hash can be lost on navigation.
+
+- **Firebase Console:** Authentication → Sign-in method → Google  
+- **Google Cloud Console:** APIs & Services → Credentials → OAuth 2.0 client  
+
+Examples: `http://localhost:5173/auth/callback` (local), `https://your-domain.com/auth/callback` (prod).
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh

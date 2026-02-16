@@ -25,12 +25,25 @@ import type {
 const API_BASE = '/api/v1';
 const WS_BASE = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
 const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS ?? 10000);
+/** Longer timeout for chat send; backend may take 30–60s for GM (LangGraph + LLM). */
+const CHAT_SEND_TIMEOUT_MS = Number(import.meta.env.VITE_CHAT_SEND_TIMEOUT_MS ?? 120000);
 
-// Token stored in memory (in production, use secure storage)
+// Token stored in memory; persisted to localStorage so it survives full page reload.
 let authToken: string | null = null;
+
+const AUTH_TOKEN_KEY = 'auth_token';
 
 export function setAuthToken(token: string | null): void {
   authToken = token;
+  try {
+    if (token !== null) {
+      localStorage.setItem(AUTH_TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+    }
+  } catch {
+    // localStorage may be unavailable (private mode, etc.)
+  }
 }
 
 export function getAuthToken(): string | null {
@@ -61,7 +74,8 @@ class APIClientError extends Error {
 async function request<T>(
   method: string,
   path: string,
-  body?: unknown
+  body?: unknown,
+  timeoutMs: number = REQUEST_TIMEOUT_MS
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -72,7 +86,7 @@ async function request<T>(
   }
 
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
@@ -86,7 +100,7 @@ async function request<T>(
       throw new APIClientError(
         504,
         'request_timeout',
-        `Request timed out after ${REQUEST_TIMEOUT_MS}ms`
+        `Request timed out after ${timeoutMs}ms`
       );
     }
     throw error;
@@ -135,7 +149,12 @@ export async function sendChatMessage(
   projectId: string,
   message: ChatMessageCreate
 ): Promise<SendChatMessageResponse> {
-  return request<SendChatMessageResponse>('POST', `/chat/send?project_id=${projectId}`, message);
+  return request<SendChatMessageResponse>(
+    'POST',
+    `/chat/send?project_id=${projectId}`,
+    message,
+    CHAT_SEND_TIMEOUT_MS
+  );
 }
 
 export async function getChatMessage(messageId: string): Promise<ChatMessage> {

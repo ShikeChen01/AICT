@@ -5,11 +5,12 @@ Supports Firebase ID tokens with an API token fallback.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from pathlib import Path
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +30,24 @@ except Exception:  # pragma: no cover - dependency may be absent in local tests
 
 _firebase_ready = False
 logger = logging.getLogger(__name__)
+
+
+def _token_fingerprint(token: str) -> str:
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:10]
+    return f"len={len(token)},sha256={digest}"
+
+
+def _request_context(request: Request | None) -> str:
+    if request is None:
+        return "method=unknown path=unknown"
+    return f"method={request.method} path={request.url.path}"
+
+
+def _error_summary(exc: Exception, max_len: int = 160) -> str:
+    message = str(exc).replace("\n", " ").strip()
+    if len(message) > max_len:
+        message = message[:max_len] + "..."
+    return f"{exc.__class__.__name__}: {message}"
 
 
 def _resolve_credentials_path() -> Path | None:
@@ -78,28 +97,68 @@ def _init_firebase() -> bool:
         return False
 
 
-def _verify_firebase_token(token: str) -> dict | None:
+def _verify_firebase_token(token: str, request_context: str = "method=unknown path=unknown") -> dict | None:
     if not _init_firebase() or firebase_auth is None:
+        logger.warning(
+            "Firebase verification unavailable (%s, token=%s)",
+            request_context,
+            _token_fingerprint(token),
+        )
         return None
     try:
-        return firebase_auth.verify_id_token(token)
-    except Exception:
+        decoded = firebase_auth.verify_id_token(token)
+        logger.debug(
+            "Firebase token verified (%s, token=%s)",
+            request_context,
+            _token_fingerprint(token),
+        )
+        return decoded
+    except Exception as exc:
+        logger.warning(
+            "Firebase token verification failed (%s, token=%s, error=%s)",
+            request_context,
+            _token_fingerprint(token),
+            _error_summary(exc),
+        )
         return None
 
 
-async def verify_token(authorization: str = Header(...)) -> bool:
+async def verify_token(
+    request: Request,
+    authorization: str = Header(...),
+) -> bool:
     """Verify bearer auth for API endpoints."""
+    request_context = _request_context(request)
     if not authorization.startswith("Bearer "):
+        logger.warning("Authorization header malformed (%s)", request_context)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authorization header format. Expected 'Bearer <token>'",
         )
 
     token = authorization.removeprefix("Bearer ").strip()
+    token_fingerprint = _token_fingerprint(token)
     if token == settings.api_token:
+        logger.info(
+            "Auth accepted via api_token (%s, token=%s)",
+            request_context,
+            token_fingerprint,
+        )
         return True
-    if _verify_firebase_token(token) is not None:
+    decoded = _verify_firebase_token(token, request_context=request_context)
+    if decoded is not None:
+        logger.info(
+            "Auth accepted via firebase_token (%s, token=%s, uid_present=%s)",
+            request_context,
+            token_fingerprint,
+            bool(decoded.get("uid")),
+        )
         return True
+    logger.warning(
+        "Auth rejected (%s, token=%s, source=unknown)",
+        request_context,
+        token_fingerprint,
+    )
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid token",
@@ -107,21 +166,30 @@ async def verify_token(authorization: str = Header(...)) -> bool:
 
 
 async def get_current_user(
+    request: Request,
     authorization: str = Header(...),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """Verify Firebase ID token and return/create the app user."""
+    request_context = _request_context(request)
     if not authorization.startswith("Bearer "):
+        logger.warning("Authorization header malformed in get_current_user (%s)", request_context)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authorization header format. Expected 'Bearer <token>'",
         )
 
     token = authorization.removeprefix("Bearer ").strip()
+    token_fingerprint = _token_fingerprint(token)
     if token == settings.api_token:
         result = await db.execute(select(User).where(User.firebase_uid == "local-api-token-user"))
         local_user = result.scalar_one_or_none()
         if local_user:
+            logger.info(
+                "Resolved current user via api_token (%s, token=%s, resolution=existing_user)",
+                request_context,
+                token_fingerprint,
+            )
             return local_user
         local_user = User(
             firebase_uid="local-api-token-user",
@@ -131,10 +199,20 @@ async def get_current_user(
         db.add(local_user)
         await db.commit()
         await db.refresh(local_user)
+        logger.info(
+            "Resolved current user via api_token (%s, token=%s, resolution=created_user)",
+            request_context,
+            token_fingerprint,
+        )
         return local_user
 
-    decoded = _verify_firebase_token(token)
+    decoded = _verify_firebase_token(token, request_context=request_context)
     if decoded is None:
+        logger.warning(
+            "Rejected firebase_token in get_current_user (%s, token=%s)",
+            request_context,
+            token_fingerprint,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid Firebase token",
@@ -142,14 +220,27 @@ async def get_current_user(
 
     firebase_uid = decoded.get("uid")
     if not firebase_uid:
+        logger.warning(
+            "Firebase token missing uid (%s, token=%s)",
+            request_context,
+            token_fingerprint,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Firebase token missing uid",
         )
 
+    email_present = bool(decoded.get("email"))
     result = await db.execute(select(User).where(User.firebase_uid == firebase_uid))
     user = result.scalar_one_or_none()
     if user:
+        logger.info(
+            "Resolved current user via firebase_token (%s, token=%s, uid_present=%s, email_present=%s, resolution=existing_user)",
+            request_context,
+            token_fingerprint,
+            True,
+            email_present,
+        )
         return user
 
     user = User(
@@ -160,6 +251,13 @@ async def get_current_user(
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    logger.info(
+        "Resolved current user via firebase_token (%s, token=%s, uid_present=%s, email_present=%s, resolution=created_user)",
+        request_context,
+        token_fingerprint,
+        True,
+        email_present,
+    )
     return user
 
 
