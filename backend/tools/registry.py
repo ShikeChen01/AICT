@@ -10,6 +10,7 @@ from backend.tools.e2b import execute_in_sandbox
 from backend.tools.tasks import create_kanban_task, list_tasks, assign_task, update_task_status, get_task_details
 from backend.tools.agents import spawn_engineer, list_engineers, dispatch_to_engineer
 from backend.tools.files import read_file, write_file, list_directory, delete_file
+from backend.tools.tickets import request_human_input, report_to_manager, abort_mission
 
 
 def get_manager_tools():
@@ -71,4 +72,8 @@ def get_engineer_tools():
         # Task management
         update_task_status,
         get_task_details,
+        # Communication (tickets, abort)
+        request_human_input,
+        report_to_manager,
+        abort_mission,
     ]

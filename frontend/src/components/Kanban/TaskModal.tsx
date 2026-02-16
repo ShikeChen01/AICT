@@ -21,6 +21,7 @@ const STATUSES: { value: TaskStatus; label: string }[] = [
   { value: 'in_progress', label: 'In Progress' },
   { value: 'in_review', label: 'In Review' },
   { value: 'done', label: 'Done' },
+  { value: 'aborted', label: 'Aborted' },
 ];
 
 export function TaskModal({ task, agents = [], onClose, onUpdate, onDelete }: TaskModalProps) {
@@ -90,6 +91,22 @@ export function TaskModal({ task, agents = [], onClose, onUpdate, onDelete }: Ta
 
         {/* Content */}
         <div className="p-6 space-y-6">
+          {task.abort_reason && (
+            <div className="rounded border border-red-200 bg-red-50 p-3 mb-4">
+              <p className="text-sm font-medium text-red-800">Task Aborted</p>
+              <p className="text-sm text-red-700 mt-1">{task.abort_reason}</p>
+              {task.abort_documentation && (
+                <details className="mt-2">
+                  <summary className="text-xs text-red-600 cursor-pointer">
+                    Full documentation
+                  </summary>
+                  <pre className="mt-1 text-xs text-red-600 whitespace-pre-wrap">
+                    {task.abort_documentation}
+                  </pre>
+                </details>
+              )}
+            </div>
+          )}
           {/* Title */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>

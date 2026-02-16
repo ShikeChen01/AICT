@@ -7,9 +7,11 @@ Agent-to-agent ticket system for communication and escalation.
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.auth import verify_token
+from backend.db.models import Agent, TicketMessage, _utcnow
 from backend.db.session import get_db
 from backend.schemas.ticket import (
     TicketCreate,
@@ -81,3 +83,71 @@ async def close_ticket(
     """Close a ticket. Only the higher-priority agent can close."""
     service = get_ticket_service(db)
     return await service.close(ticket_id, closing_agent_id)
+
+
+@router.post("/{ticket_id}/user-reply", response_model=TicketMessageResponse, status_code=201)
+async def user_reply_to_ticket(
+    ticket_id: UUID,
+    data: TicketMessageCreate,
+    _auth: bool = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Reply to a ticket as the authenticated user.
+    If the ticket was created by an interrupted engineer (type=question), this also resumes the engineer graph.
+    """
+    service = get_ticket_service(db)
+    ticket = await service.get(ticket_id)
+
+    message = TicketMessage(
+        ticket_id=ticket_id,
+        from_user_id=None,  # TODO: get from auth context when user model is wired
+        from_agent_id=None,
+        content=data.content,
+    )
+    db.add(message)
+    await db.flush()
+    await db.refresh(message)
+
+    from backend.websocket.manager import ws_manager
+    await ws_manager.broadcast_ticket_reply(
+        ticket_id=ticket_id,
+        project_id=ticket.project_id,
+        to_agent_id=ticket.to_agent_id,
+        header=ticket.header,
+        ticket_type=ticket.ticket_type,
+        message=data.content,
+        from_agent_id=None,
+        from_user_id=None,
+    )
+
+    if ticket.ticket_type == "question" and ticket.status == "open":
+        from backend.services.engineer_graph_service import get_engineer_graph_service
+        svc = get_engineer_graph_service()
+        agent_result = await db.execute(
+            select(Agent).where(Agent.id == ticket.from_agent_id)
+        )
+        agent = agent_result.scalar_one_or_none()
+        if agent and agent.current_task_id:
+            await svc.resume_engineer(
+                agent_id=ticket.from_agent_id,
+                task_id=agent.current_task_id,
+                user_message=data.content,
+            )
+
+    ticket.status = "closed"
+    ticket.closed_at = _utcnow()
+    ticket.closed_by_id = None
+    await db.commit()
+    await db.refresh(ticket)
+
+    await ws_manager.broadcast_ticket_closed(
+        ticket_id=ticket_id,
+        project_id=ticket.project_id,
+        from_agent_id=ticket.from_agent_id,
+        to_agent_id=ticket.to_agent_id,
+        header=ticket.header,
+        ticket_type=ticket.ticket_type,
+    )
+
+    return message

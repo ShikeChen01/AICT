@@ -4,6 +4,7 @@
  */
 
 import { useEffect, useRef } from 'react';
+import { MarkdownContent } from '../MarkdownContent';
 import type { ChatMessage } from '../../types';
 
 interface MessageListProps {
@@ -39,7 +40,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
               : 'bg-gray-100 text-gray-900 rounded-bl-sm'
           }`}
         >
-          <p className="whitespace-pre-wrap break-words">{message.content}</p>
+          {message.role !== 'user' ? (
+            <MarkdownContent>{message.content}</MarkdownContent>
+          ) : (
+            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+          )}
           <p
             className={`text-xs mt-1 ${
               isUser ? 'text-blue-100' : 'text-gray-500'

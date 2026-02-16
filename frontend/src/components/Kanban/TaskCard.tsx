@@ -78,6 +78,11 @@ export function TaskCard({ task, assignedAgentName, onClick }: TaskCardProps) {
         <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-700">
           {task.status.replace('_', ' ')}
         </span>
+        {task.status === 'aborted' && (
+          <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full">
+            aborted
+          </span>
+        )}
 
         {/* PR URL */}
         {task.pr_url && (

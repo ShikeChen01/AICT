@@ -245,6 +245,10 @@ export async function closeTicket(ticketId: string, closingAgentId: string): Pro
   return request<Ticket>('POST', `/tickets/${ticketId}/close?closing_agent_id=${closingAgentId}`);
 }
 
+export async function replyToTicketAsUser(ticketId: string, content: string): Promise<unknown> {
+  return request('POST', `/tickets/${ticketId}/user-reply`, { content });
+}
+
 // ─── User Settings ───────────────────────────────────────────────────
 
 export async function getMe(): Promise<UserProfile> {

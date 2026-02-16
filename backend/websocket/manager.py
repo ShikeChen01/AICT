@@ -26,8 +26,12 @@ from backend.websocket.events import (
     create_job_failed_event,
     create_job_progress_event,
     create_job_started_event,
+    create_mission_aborted_event,
     create_sandbox_log_event,
     create_task_created_event,
+    create_ticket_closed_event,
+    create_ticket_created_event,
+    create_ticket_reply_event,
     create_task_update_event,
     create_workflow_update_event,
 )
@@ -394,6 +398,94 @@ class WebSocketManager:
             task_id=task_id,
             agent_id=agent_id,
             error=error,
+        )
+        return await self.broadcast(event, Channel.ACTIVITY, project_id)
+
+    # ── Ticket broadcast methods ─────────────────────────────────────
+
+    async def broadcast_ticket_created(
+        self,
+        ticket_id: UUID,
+        project_id: UUID,
+        from_agent_id: UUID,
+        to_agent_id: UUID,
+        header: str,
+        ticket_type: str,
+        message: str | None = None,
+    ) -> int:
+        """Broadcast ticket created event."""
+        event = create_ticket_created_event(
+            ticket_id=ticket_id,
+            project_id=project_id,
+            from_agent_id=from_agent_id,
+            to_agent_id=to_agent_id,
+            header=header,
+            ticket_type=ticket_type,
+            message=message,
+        )
+        return await self.broadcast(event, Channel.ACTIVITY, project_id)
+
+    async def broadcast_ticket_reply(
+        self,
+        ticket_id: UUID,
+        project_id: UUID,
+        to_agent_id: UUID,
+        header: str,
+        ticket_type: str,
+        message: str | None = None,
+        from_agent_id: UUID | None = None,
+        from_user_id: UUID | None = None,
+    ) -> int:
+        """Broadcast ticket reply event."""
+        event = create_ticket_reply_event(
+            ticket_id=ticket_id,
+            project_id=project_id,
+            to_agent_id=to_agent_id,
+            header=header,
+            ticket_type=ticket_type,
+            message=message,
+            from_agent_id=from_agent_id,
+            from_user_id=from_user_id,
+        )
+        return await self.broadcast(event, Channel.ACTIVITY, project_id)
+
+    async def broadcast_ticket_closed(
+        self,
+        ticket_id: UUID,
+        project_id: UUID,
+        from_agent_id: UUID | None,
+        to_agent_id: UUID,
+        header: str,
+        ticket_type: str,
+    ) -> int:
+        """Broadcast ticket closed event."""
+        event = create_ticket_closed_event(
+            ticket_id=ticket_id,
+            project_id=project_id,
+            from_agent_id=from_agent_id,
+            to_agent_id=to_agent_id,
+            header=header,
+            ticket_type=ticket_type,
+        )
+        return await self.broadcast(event, Channel.ACTIVITY, project_id)
+
+    async def broadcast_mission_aborted(
+        self,
+        ticket_id: UUID,
+        project_id: UUID,
+        from_agent_id: UUID,
+        to_agent_id: UUID,
+        header: str,
+        message: str | None = None,
+    ) -> int:
+        """Broadcast mission aborted event."""
+        event = create_mission_aborted_event(
+            ticket_id=ticket_id,
+            project_id=project_id,
+            from_agent_id=from_agent_id,
+            to_agent_id=to_agent_id,
+            header=header,
+            message=message,
         )
         return await self.broadcast(event, Channel.ACTIVITY, project_id)
 

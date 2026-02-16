@@ -71,4 +71,20 @@ describe('TaskCard', () => {
     
     expect(screen.getByText('Assigned')).toBeInTheDocument();
   });
+
+  it('should show aborted badge when task status is aborted', () => {
+    const abortedTask = {
+      ...mockTask,
+      status: 'aborted' as const,
+      abort_reason: 'Blocked by missing API key',
+      abort_documentation: null,
+      aborted_by_id: null,
+    };
+    render(<TaskCard task={abortedTask} />);
+
+    const abortedLabels = screen.getAllByText('aborted');
+    expect(abortedLabels.length).toBeGreaterThanOrEqual(1);
+    const redBadge = abortedLabels.find((el) => el.className.includes('red'));
+    expect(redBadge).toBeInTheDocument();
+  });
 });

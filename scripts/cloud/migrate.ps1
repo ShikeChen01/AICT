@@ -61,6 +61,7 @@ Write-Host "Deploying migration job $JobName to Cloud Run (region: $Region)..."
 $EnvFile = Join-Path $Root "tmp_env_vars_migrate.yaml"
 $yamlLines = @(
     "ENV: 'development'"
+    "PYTHONPATH: '/app'"
     "DATABASE_URL: '$DbUrl'"
     "API_TOKEN: '$($env:API_TOKEN)'"
     "CLAUDE_API_KEY: '$($env:CLAUDE_API_KEY)'"
@@ -82,14 +83,17 @@ try {
         # Ignore
     }
 
+    # Use sh -c "..." so the migration runs as one command (avoids Cloud Run arg-splitting issues).
+    $MigrateCmd = "python -m alembic -c backend/alembic.ini upgrade head"
+    $ShArgs = "-c," + $MigrateCmd
     if ($jobExists) {
         Write-Host "Updating existing job..."
         gcloud run jobs update $JobName `
             --project $ProjectId `
             --image $ImageTag `
             --region $Region `
-        --command "python" `
-        --args "-c","import os; print(os.getcwd()); print(os.listdir('.'))" `
+            --command "/bin/sh" `
+            --args="$ShArgs" `
             --set-cloudsql-instances $ConnName `
             --env-vars-file $EnvFile `
             --max-retries 0 `
@@ -100,8 +104,8 @@ try {
             --project $ProjectId `
             --image $ImageTag `
             --region $Region `
-        --command "python" `
-        --args "-c","import os; print(os.getcwd()); print(os.listdir('.'))" `
+            --command "/bin/sh" `
+            --args="$ShArgs" `
             --set-cloudsql-instances $ConnName `
             --env-vars-file $EnvFile `
             --max-retries 0 `
@@ -125,5 +129,5 @@ try {
 finally {
     Remove-Item $EnvFile -Force -ErrorAction SilentlyContinue
 }
-
 Write-Host "Migration completed successfully."
+

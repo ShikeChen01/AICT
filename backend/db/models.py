@@ -126,6 +126,7 @@ VALID_TASK_STATUSES = (
     "in_progress",
     "in_review",
     "done",
+    "aborted",
 )
 
 
@@ -153,6 +154,11 @@ class Task(Base):
     created_by_id = Column(
         Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
     )
+    abort_reason = Column(Text, nullable=True)
+    abort_documentation = Column(Text, nullable=True)
+    aborted_by_id = Column(
+        Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
+    )
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
@@ -160,13 +166,14 @@ class Task(Base):
     project = relationship("Repository", back_populates="tasks")
     assigned_agent = relationship("Agent", foreign_keys=[assigned_agent_id])
     created_by = relationship("Agent", foreign_keys=[created_by_id])
+    aborted_by = relationship("Agent", foreign_keys=[aborted_by_id])
     subtasks = relationship("Task", back_populates="parent_task", foreign_keys=[parent_task_id])
     parent_task = relationship("Task", remote_side=[id], foreign_keys=[parent_task_id])
 
 
 # ── Tickets ─────────────────────────────────────────────────────────
 
-VALID_TICKET_TYPES = ("task_assignment", "question", "help", "issue")
+VALID_TICKET_TYPES = ("task_assignment", "question", "help", "issue", "abort")
 VALID_TICKET_STATUSES = ("open", "closed")
 
 
@@ -214,7 +221,10 @@ class TicketMessage(Base):
         Uuid, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False
     )
     from_agent_id = Column(
-        Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
+    )
+    from_user_id = Column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
@@ -222,6 +232,7 @@ class TicketMessage(Base):
     # relationships
     ticket = relationship("Ticket", back_populates="messages")
     from_agent = relationship("Agent")
+    from_user = relationship("User")
 
 
 # ── Chat Messages ──────────────────────────────────────────────────

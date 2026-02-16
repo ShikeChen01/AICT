@@ -8,6 +8,7 @@ import { format } from 'date-fns';
 import { Bot, Wrench, MessageSquare, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { MarkdownContent } from '../MarkdownContent';
 import type { AgentLogData, AgentRole } from '../../types';
 
 interface ActivityLogItem extends AgentLogData {
@@ -70,9 +71,9 @@ function LogEntry({ log, expanded, onToggle }: { log: ActivityLogItem; expanded:
             </span>
           </div>
 
-          <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">
+          <MarkdownContent className="text-sm text-gray-700">
             {log.content}
-          </p>
+          </MarkdownContent>
         </div>
 
         {/* Expand indicator */}

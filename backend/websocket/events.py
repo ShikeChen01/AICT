@@ -40,6 +40,12 @@ class EventType(str, Enum):
     JOB_COMPLETED = "job_completed"
     JOB_FAILED = "job_failed"
 
+    # Ticket events
+    TICKET_CREATED = "ticket_created"
+    TICKET_REPLY = "ticket_reply"
+    TICKET_CLOSED = "ticket_closed"
+    MISSION_ABORTED = "mission_aborted"
+
 
 class WebSocketEvent(BaseModel):
     """Base WebSocket event structure."""
@@ -153,6 +159,18 @@ class JobEventPayload(BaseModel):
     pr_url: str | None = None
     tool_name: str | None = None
     tool_args: dict[str, Any] | None = None
+
+
+class TicketEventPayload(BaseModel):
+    """Payload for ticket events."""
+    ticket_id: UUID
+    project_id: UUID
+    from_agent_id: UUID | None = None
+    from_user_id: UUID | None = None
+    to_agent_id: UUID
+    header: str
+    ticket_type: str
+    message: str | None = None
 
 
 # ── Event Factory Functions ────────────────────────────────────────
@@ -407,5 +425,107 @@ def create_job_failed_event(
             agent_id=agent_id,
             status="failed",
             error=error,
+        ).model_dump(mode="json"),
+    )
+
+
+# ── Ticket Event Factories ─────────────────────────────────────────
+
+
+def create_ticket_created_event(
+    ticket_id: UUID,
+    project_id: UUID,
+    from_agent_id: UUID,
+    to_agent_id: UUID,
+    header: str,
+    ticket_type: str,
+    message: str | None = None,
+) -> WebSocketEvent:
+    """Create a ticket created event."""
+    return WebSocketEvent(
+        type=EventType.TICKET_CREATED,
+        data=TicketEventPayload(
+            ticket_id=ticket_id,
+            project_id=project_id,
+            from_agent_id=from_agent_id,
+            from_user_id=None,
+            to_agent_id=to_agent_id,
+            header=header,
+            ticket_type=ticket_type,
+            message=message,
+        ).model_dump(mode="json"),
+    )
+
+
+def create_ticket_reply_event(
+    ticket_id: UUID,
+    project_id: UUID,
+    to_agent_id: UUID,
+    header: str,
+    ticket_type: str,
+    message: str | None = None,
+    from_agent_id: UUID | None = None,
+    from_user_id: UUID | None = None,
+) -> WebSocketEvent:
+    """Create a ticket reply event."""
+    return WebSocketEvent(
+        type=EventType.TICKET_REPLY,
+        data=TicketEventPayload(
+            ticket_id=ticket_id,
+            project_id=project_id,
+            from_agent_id=from_agent_id,
+            from_user_id=from_user_id,
+            to_agent_id=to_agent_id,
+            header=header,
+            ticket_type=ticket_type,
+            message=message,
+        ).model_dump(mode="json"),
+    )
+
+
+def create_ticket_closed_event(
+    ticket_id: UUID,
+    project_id: UUID,
+    from_agent_id: UUID | None,
+    to_agent_id: UUID,
+    header: str,
+    ticket_type: str,
+) -> WebSocketEvent:
+    """Create a ticket closed event."""
+    return WebSocketEvent(
+        type=EventType.TICKET_CLOSED,
+        data=TicketEventPayload(
+            ticket_id=ticket_id,
+            project_id=project_id,
+            from_agent_id=from_agent_id,
+            from_user_id=None,
+            to_agent_id=to_agent_id,
+            header=header,
+            ticket_type=ticket_type,
+            message=None,
+        ).model_dump(mode="json"),
+    )
+
+
+def create_mission_aborted_event(
+    ticket_id: UUID,
+    project_id: UUID,
+    from_agent_id: UUID,
+    to_agent_id: UUID,
+    header: str,
+    message: str | None = None,
+) -> WebSocketEvent:
+    """Create a mission aborted event."""
+    return WebSocketEvent(
+        type=EventType.MISSION_ABORTED,
+        data=TicketEventPayload(
+            ticket_id=ticket_id,
+            project_id=project_id,
+            from_agent_id=from_agent_id,
+            from_user_id=None,
+            to_agent_id=to_agent_id,
+            header=header,
+            ticket_type="abort",
+            message=message,
         ).model_dump(mode="json"),
     )

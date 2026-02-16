@@ -4,12 +4,13 @@ Agent management tools for LangGraph agents.
 
 import uuid
 from langchain_core.tools import tool
+from sqlalchemy import select
 
 from backend.core.exceptions import MaxEngineersReached
-from backend.db.models import EngineerJob, Agent, Task
+from backend.db.models import Agent, Task
 from backend.db.session import AsyncSessionLocal
 from backend.services.agent_service import get_agent_service
-from sqlalchemy import select
+from backend.services.engineer_graph_service import start_engineer_task
 
 
 @tool
@@ -117,41 +118,25 @@ async def dispatch_to_engineer(task_id: str, agent_id: str) -> str:
         
         if not task:
             return f"Task not found: {task_id}"
-        
-        # Check if there's already a pending/running job for this task
+
+        # Check if this task is already being worked on by any engineer
         existing = await session.execute(
-            select(EngineerJob).where(
-                EngineerJob.task_id == task_uuid,
-                EngineerJob.status.in_(["pending", "running"])
-            )
+            select(Agent).where(Agent.current_task_id == task_uuid)
         )
-        existing_job = existing.scalar_one_or_none()
-        if existing_job:
-            return (
-                f"Task already has an active job (id={existing_job.id}, "
-                f"status={existing_job.status})"
-            )
-        
-        # Create the job
-        job = EngineerJob(
-            project_id=agent.project_id,
-            task_id=task_uuid,
-            agent_id=agent_uuid,
-            status="pending",
-        )
-        session.add(job)
-        
-        # Update task status to in_progress
+        if existing.scalar_one_or_none():
+            return "Task is already assigned to an engineer and in progress."
+
+        # Update task status to in_progress and mark engineer as busy
         task.status = "in_progress"
-        
-        # Mark engineer as busy
         agent.status = "busy"
         agent.current_task_id = task_uuid
-        
+
         await session.commit()
-        
+
+        # Start engineer graph in background (non-blocking)
+        run_id = await start_engineer_task(agent_uuid, task_uuid)
+
         return (
-            f"DISPATCHED: Job {job.id} created.\n"
-            f"Engineer {agent.display_name} will work on '{task.title}' in the background.\n"
-            f"Check job status via WebSocket 'job_*' events or the /api/v1/jobs endpoint."
+            f"DISPATCHED: Engineer {agent.display_name} will work on '{task.title}' in the background.\n"
+            f"Run ID: {run_id}. Check status via WebSocket 'job_*' events."
         )

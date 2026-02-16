@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAgents } from '../../hooks';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import type { AgentLogData, AgentStatusWithQueue, JobEventData } from '../../types';
+import { FloatingWindow, TicketChat } from '../TicketChat';
+import type { AgentLogData, AgentStatusWithQueue, JobEventData, TicketEventData } from '../../types';
 
 interface AgentsPanelProps {
   projectId: string;
@@ -16,6 +17,7 @@ function roleBadgeClass(role: AgentStatusWithQueue['role']): string {
 function statusDotClass(statusLabel: string): string {
   if (statusLabel === 'sleeping') return 'bg-gray-400';
   if (statusLabel === 'busy') return 'bg-amber-500 animate-pulse';
+  if (statusLabel === 'waiting') return 'bg-orange-500 animate-pulse';
   if (statusLabel === 'idle') return 'bg-blue-500';
   return 'bg-green-500';
 }
@@ -24,14 +26,23 @@ export function AgentsPanel({ projectId }: AgentsPanelProps) {
   const { agents, isLoading, error } = useAgents(projectId);
   const { subscribe } = useWebSocket(projectId);
   const [agentBuffers, setAgentBuffers] = useState<Record<string, string[]>>({});
+  const [agentTickets, setAgentTickets] = useState<Record<string, { ticketId: string; header: string }>>({});
+  const [activeTicket, setActiveTicket] = useState<{
+    ticketId: string;
+    agentName: string;
+    header: string;
+  } | null>(null);
 
   const rows = useMemo(() => {
     return agents.map((agent) => {
-      const statusLabel =
-        agent.status === 'active' && agent.queue_size === 0 ? 'idle' : agent.status;
+      const statusLabel = agentTickets[agent.id]
+        ? 'waiting'
+        : agent.status === 'active' && agent.queue_size === 0
+          ? 'idle'
+          : agent.status;
       return { ...agent, statusLabel };
     });
-  }, [agents]);
+  }, [agents, agentTickets]);
 
   useEffect(() => {
     setAgentBuffers({});
@@ -69,16 +80,37 @@ export function AgentsPanel({ projectId }: AgentsPanelProps) {
       pushLine(data.agent_id, `[error] ${data.error || 'failed'}`);
     });
 
+    const unsubTicketCreated = subscribe<TicketEventData>('ticket_created', (data) => {
+      if (data.from_agent_id) {
+        setAgentTickets((prev) => ({
+          ...prev,
+          [data.from_agent_id!]: { ticketId: data.ticket_id, header: data.header },
+        }));
+      }
+    });
+    const unsubTicketClosed = subscribe<TicketEventData>('ticket_closed', (data) => {
+      if (data.from_agent_id) {
+        setAgentTickets((prev) => {
+          const next = { ...prev };
+          delete next[data.from_agent_id!];
+          return next;
+        });
+      }
+    });
+
     return () => {
       unsubscribeAgentLog();
       unsubscribeJobStarted();
       unsubscribeJobProgress();
       unsubscribeJobCompleted();
       unsubscribeJobFailed();
+      unsubTicketCreated();
+      unsubTicketClosed();
     };
   }, [subscribe]);
 
   return (
+    <>
     <aside className="w-96 border-l border-gray-200 bg-white flex flex-col overflow-hidden">
       <div className="px-4 py-3 border-b border-gray-200">
         <h2 className="text-base font-semibold text-gray-900">Agents</h2>
@@ -122,7 +154,7 @@ export function AgentsPanel({ projectId }: AgentsPanelProps) {
 
               <div className="mt-2">
                 <p className="text-[10px] uppercase tracking-wide text-gray-500">Latest activity</p>
-                <div className="mt-1 rounded border border-gray-100 bg-gray-50 px-2 py-1 text-[11px] text-gray-700 leading-4 overflow-hidden transition-all duration-200 max-h-10 hover:max-h-44">
+                <div className="mt-1 rounded border border-gray-100 bg-gray-50 px-2 py-1 text-[11px] text-gray-700 leading-4 max-h-32 overflow-y-auto">
                   {(agentBuffers[agent.id] ?? []).length > 0 ? (
                     <ul className="space-y-1">
                       {(agentBuffers[agent.id] ?? [])
@@ -139,6 +171,22 @@ export function AgentsPanel({ projectId }: AgentsPanelProps) {
                   )}
                 </div>
               </div>
+
+              {agentTickets[agent.id] && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setActiveTicket({
+                      ticketId: agentTickets[agent.id].ticketId,
+                      agentName: agent.display_name,
+                      header: agentTickets[agent.id].header,
+                    })
+                  }
+                  className="mt-2 w-full text-xs bg-orange-50 border border-orange-200 text-orange-700 rounded px-2 py-1.5 hover:bg-orange-100 transition-colors"
+                >
+                  Engineer needs input — click to respond
+                </button>
+              )}
 
               {agent.task_queue.length > 0 ? (
                 <ul className="mt-3 space-y-2">
@@ -166,7 +214,24 @@ export function AgentsPanel({ projectId }: AgentsPanelProps) {
           )}
         </div>
       )}
+
     </aside>
+    {activeTicket != null && (
+      <FloatingWindow
+        title={`${activeTicket.agentName} — ${activeTicket.header}`}
+        isOpen
+        onClose={() => setActiveTicket(null)}
+      >
+        <TicketChat
+          ticketId={activeTicket.ticketId}
+          projectId={projectId}
+          agentName={activeTicket.agentName}
+          taskTitle={activeTicket.header}
+          onClose={() => setActiveTicket(null)}
+        />
+      </FloatingWindow>
+    )}
+    </>
   );
 }
 

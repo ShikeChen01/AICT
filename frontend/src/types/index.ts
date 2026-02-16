@@ -15,7 +15,8 @@ export type TaskStatus =
   | 'assigned'
   | 'in_progress'
   | 'in_review'
-  | 'done';
+  | 'done'
+  | 'aborted';
 
 export interface Task {
   id: UUID;
@@ -31,6 +32,9 @@ export interface Task {
   pr_url: string | null;
   parent_task_id: UUID | null;
   created_by_id: UUID | null;
+  abort_reason: string | null;
+  abort_documentation: string | null;
+  aborted_by_id: UUID | null;
   created_at: string;
   updated_at: string;
 }
@@ -117,13 +121,14 @@ export interface SendChatMessageResponse extends ChatMessage {
 
 // ─── Ticket ──────────────────────────────────────────────────────────
 
-export type TicketType = 'task_assignment' | 'question' | 'help' | 'issue';
+export type TicketType = 'task_assignment' | 'question' | 'help' | 'issue' | 'abort';
 export type TicketStatus = 'open' | 'closed';
 
 export interface TicketMessage {
   id: UUID;
   ticket_id: UUID;
-  from_agent_id: UUID;
+  from_agent_id: UUID | null;
+  from_user_id: UUID | null;
   content: string;
   created_at: string;
 }
@@ -234,7 +239,11 @@ export type WSEventType =
   | 'job_started'
   | 'job_progress'
   | 'job_completed'
-  | 'job_failed';
+  | 'job_failed'
+  | 'ticket_created'
+  | 'ticket_reply'
+  | 'ticket_closed'
+  | 'mission_aborted';
 
 export interface WSEvent<T = unknown> {
   type: WSEventType;
@@ -332,6 +341,17 @@ export interface JobEventData {
   pr_url?: string | null;
   tool_name?: string | null;
   tool_args?: Record<string, unknown> | null;
+}
+
+export interface TicketEventData {
+  ticket_id: UUID;
+  project_id: UUID;
+  from_agent_id: UUID | null;
+  from_user_id: UUID | null;
+  to_agent_id: UUID;
+  header: string;
+  ticket_type: TicketType;
+  message: string | null;
 }
 
 // ─── API Response ────────────────────────────────────────────────────

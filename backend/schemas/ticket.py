@@ -20,7 +20,8 @@ class TicketMessageCreate(BaseModel):
 class TicketMessageResponse(BaseModel):
     id: UUID
     ticket_id: UUID
-    from_agent_id: UUID
+    from_agent_id: UUID | None = None
+    from_user_id: UUID | None = None
     content: str
     created_at: datetime
 

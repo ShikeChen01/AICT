@@ -60,11 +60,27 @@ export function useAgents(projectId: string | null): UseAgentsReturn {
     const unsubscribeTaskUpdated = subscribe('task_update', () => {
       void refreshAgents();
     });
+    const unsubJobStarted = subscribe('job_started', () => {
+      void refreshAgents();
+    });
+    const unsubJobCompleted = subscribe('job_completed', () => {
+      void refreshAgents();
+    });
+    const unsubJobFailed = subscribe('job_failed', () => {
+      void refreshAgents();
+    });
+    const unsubTicketCreated = subscribe('ticket_created', () => {
+      void refreshAgents();
+    });
 
     return () => {
       unsubscribeAgent();
       unsubscribeTaskCreated();
       unsubscribeTaskUpdated();
+      unsubJobStarted();
+      unsubJobCompleted();
+      unsubJobFailed();
+      unsubTicketCreated();
     };
   }, [projectId, refreshAgents, subscribe]);
 

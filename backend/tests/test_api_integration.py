@@ -479,3 +479,57 @@ class TestDatabaseIntegration:
             headers=auth_headers,
         )
         assert get_response.status_code == 404
+
+
+class TestTicketsUserReply:
+    """Test POST /tickets/{ticket_id}/user-reply."""
+
+    async def test_user_reply_creates_message_and_closes_ticket(
+        self,
+        api_client: AsyncClient,
+        auth_headers: dict,
+        session: AsyncSession,
+        sample_project: Project,
+        sample_manager: Agent,
+        sample_engineer: Agent,
+    ):
+        """User reply creates a message, closes the ticket, and returns 201."""
+        from backend.core.auth import verify_token
+        from backend.db.models import Ticket
+        from backend.schemas.ticket import TicketCreate
+        from backend.services.ticket_service import get_ticket_service
+
+        async def mock_verify_token():
+            return True
+        app.dependency_overrides[verify_token] = mock_verify_token
+
+        try:
+            service = get_ticket_service(session)
+            ticket = await service.create(
+                sample_project.id,
+                sample_engineer.id,
+                TicketCreate(
+                    to_agent_id=sample_manager.id,
+                    header="Need API key",
+                    ticket_type="question",
+                    initial_message="What is the API key?",
+                ),
+            )
+            await session.commit()
+
+            response = await api_client.post(
+                f"/api/v1/tickets/{ticket.id}/user-reply",
+                headers=auth_headers,
+                json={"content": "Use env VAR API_KEY"},
+            )
+
+            assert response.status_code == 201
+            data = response.json()
+            assert data["content"] == "Use env VAR API_KEY"
+            assert data["ticket_id"] == str(ticket.id)
+            assert "id" in data
+
+            await session.refresh(ticket)
+            assert ticket.status == "closed"
+        finally:
+            app.dependency_overrides.pop(verify_token, None)
