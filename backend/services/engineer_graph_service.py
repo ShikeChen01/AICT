@@ -99,6 +99,13 @@ async def _run_engineer_graph(
     Background task: run the engineer graph to completion (or until interrupt).
     Broadcasts job_* events and updates agent/task on completion/failure.
     """
+    logger.info(
+        "_run_engineer_graph entered (background): run_id=%s agent_id=%s task_id=%s project_id=%s",
+        run_id,
+        agent_id,
+        task_id,
+        project_id,
+    )
     async with AsyncSessionLocal() as session:
         agent_result = await session.execute(select(Agent).where(Agent.id == agent_id))
         agent = agent_result.scalar_one_or_none()
@@ -115,6 +122,12 @@ async def _run_engineer_graph(
             )
             return
 
+    logger.info(
+        "Engineer graph loaded agent and task: agent_id=%s task_id=%s task_title=%s",
+        agent_id,
+        task_id,
+        task.title,
+    )
     try:
         await ws_manager.broadcast_job_started(
             job_id=run_id,
@@ -140,8 +153,18 @@ async def _run_engineer_graph(
         config = {"configurable": {"thread_id": _thread_id(agent_id, task_id)}}
         initial_state = _build_initial_state(agent, task)
 
+        logger.info(
+            "Invoking engineer graph: run_id=%s thread_id=%s",
+            run_id,
+            _thread_id(agent_id, task_id),
+        )
         # Invoke until completion or interrupt (stream or loop not required for first run)
         result = await app.ainvoke(initial_state, config=config)
+        logger.info(
+            "Engineer graph ainvoke returned: run_id=%s pending_ticket_id=%s",
+            run_id,
+            result.get("pending_ticket_id") or "",
+        )
 
         # Check for interrupt (pending_ticket_id set) - if so, we paused and will resume later
         pending = result.get("pending_ticket_id") or ""
@@ -229,17 +252,43 @@ async def start_engineer_task(agent_id: UUID, task_id: UUID) -> str:
     Start an engineer graph run in the background. Returns a run_id (used for job_* events).
     Caller must have already validated agent/task and set agent.status=busy, agent.current_task_id=task_id.
     """
+    logger.info(
+        "start_engineer_task called: agent_id=%s task_id=%s",
+        agent_id,
+        task_id,
+    )
     async with AsyncSessionLocal() as session:
         project_result = await session.execute(
             select(Agent.project_id).where(Agent.id == agent_id)
         )
         project_id = project_result.scalar_one_or_none()
         if not project_id:
+            logger.error(
+                "Cannot start engineer task: agent_id=%s has no project_id",
+                agent_id,
+            )
             return ""
     run_id = uuid4()
-    asyncio.create_task(
+    logger.info(
+        "Scheduling _run_engineer_graph: run_id=%s agent_id=%s task_id=%s project_id=%s",
+        run_id,
+        agent_id,
+        task_id,
+        project_id,
+    )
+
+    def _log_task_done(t: asyncio.Task) -> None:
+        try:
+            t.result()
+        except asyncio.CancelledError:
+            logger.warning("Engineer graph task cancelled: run_id=%s agent_id=%s", run_id, agent_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("Engineer graph background task failed: run_id=%s agent_id=%s task_id=%s", run_id, agent_id, task_id)
+
+    task = asyncio.create_task(
         _run_engineer_graph(agent_id, task_id, project_id, run_id)
     )
+    task.add_done_callback(_log_task_done)
     return str(run_id)
 
 

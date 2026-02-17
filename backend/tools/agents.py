@@ -2,8 +2,11 @@
 Agent management tools for LangGraph agents.
 """
 
+import logging
 import uuid
 from langchain_core.tools import tool
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import select
 
 from backend.core.exceptions import MaxEngineersReached
@@ -134,7 +137,26 @@ async def dispatch_to_engineer(task_id: str, agent_id: str) -> str:
         await session.commit()
 
         # Start engineer graph in background (non-blocking)
+        logger.info(
+            "Dispatching to engineer: agent_id=%s task_id=%s task_title=%s",
+            agent_uuid,
+            task_uuid,
+            task.title,
+        )
         run_id = await start_engineer_task(agent_uuid, task_uuid)
+        if not run_id:
+            logger.warning(
+                "start_engineer_task returned empty run_id for agent_id=%s task_id=%s (e.g. missing project_id)",
+                agent_uuid,
+                task_uuid,
+            )
+        else:
+            logger.info(
+                "Engineer graph scheduled: run_id=%s agent_id=%s task_id=%s",
+                run_id,
+                agent_uuid,
+                task_uuid,
+            )
 
         return (
             f"DISPATCHED: Engineer {agent.display_name} will work on '{task.title}' in the background.\n"
