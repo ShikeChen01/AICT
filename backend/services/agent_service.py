@@ -2,7 +2,7 @@
 Agent service — manages agent lifecycle and engineer spawning.
 
 - Enforces MAX_ENGINEERS limit when spawning engineers
-- Ensures GM and OM exist for new projects
+- Ensures Manager and CTO exist for new projects
 - Coordinates with E2B/orchestrator for sandbox lifecycle
 """
 
@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.core.exceptions import MaxEngineersReached, ProjectNotFoundError
-from backend.db.models import Agent, Project, VALID_ROLES
+from backend.db.models import Agent, Repository, VALID_ROLES
 
 
 class AgentService:
@@ -84,7 +84,6 @@ class AgentService:
             model=model,
             status="sleeping",
             sandbox_persist=False,
-            priority=2,
             current_task_id=None,
         )
         if module_path:
@@ -97,67 +96,64 @@ class AgentService:
 
     async def ensure_project_agents(
         self,
-        project: Project,
+        project: Repository,
         *,
-        gm_model: str = "gemini-2.5-pro",
-        om_model: str = "claude-4-sonnet",
+        manager_model: str = "gemini-2.5-pro",
+        cto_model: str = "claude-4-sonnet",
     ) -> tuple[Agent, Agent]:
         """
-        Ensure GM and OM agents exist for a project. Create them if missing.
+        Ensure manager and CTO agents exist for a project. Create them if missing.
 
-        Returns (gm, om).
+        Returns (manager, cto).
         """
         result = await self.session.execute(
             select(Agent).where(
                 Agent.project_id == project.id,
-                Agent.role.in_(("gm", "om", "manager")),
+                Agent.role.in_(("manager", "cto")),
             )
         )
         existing = {a.role: a for a in result.scalars().all()}
-        # Normalize manager -> gm for lookup
-        gm = existing.get("gm") or existing.get("manager")
-        om = existing.get("om")
+        manager = existing.get("manager")
+        cto = existing.get("cto")
 
-        if not gm:
-            gm = Agent(
+        if not manager:
+            manager = Agent(
                 project_id=project.id,
-                role="gm",
+                role="manager",
                 display_name="GM",
-                model=gm_model,
+                model=manager_model,
                 status="sleeping",
                 sandbox_persist=True,
-                priority=0,
             )
-            self.session.add(gm)
+            self.session.add(manager)
             await self.session.flush()
-            await self.session.refresh(gm)
+            await self.session.refresh(manager)
 
-        if not om:
-            om = Agent(
+        if not cto:
+            cto = Agent(
                 project_id=project.id,
-                role="om",
-                display_name="OM-1",
-                model=om_model,
+                role="cto",
+                display_name="CTO",
+                model=cto_model,
                 status="sleeping",
                 sandbox_persist=True,
-                priority=1,
             )
-            self.session.add(om)
+            self.session.add(cto)
             await self.session.flush()
-            await self.session.refresh(om)
+            await self.session.refresh(cto)
 
-        return gm, om
+        return manager, cto
 
     async def get_or_create_project_agents(
         self,
         project_id: UUID,
     ) -> tuple[Agent, Agent]:
         """
-        Get GM and OM for a project, creating them if the project exists but
+        Get manager and CTO for a project, creating them if the project exists but
         has no agents.
         """
         result = await self.session.execute(
-            select(Project).where(Project.id == project_id)
+            select(Repository).where(Repository.id == project_id)
         )
         project = result.scalar_one_or_none()
         if not project:

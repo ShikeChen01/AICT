@@ -182,3 +182,211 @@ class LLMService:
             raise RuntimeError("Gemini response did not contain text content")
         return text
 
+    # ── Universal loop: chat with tools (returns content + tool_calls) ──
+
+    async def chat_completion_with_tools(
+        self,
+        model: str,
+        system_prompt: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """
+        Non-streaming chat with tool support. Used by the universal agent loop.
+        messages: list of {role, content} or {role, content, tool_calls} / {role, role: "tool", content, tool_use_id}
+        tools: list of {name, description, input_schema}
+        Returns (content_text, tool_calls) where tool_calls is list of {id, name, input}.
+        """
+        provider = self._select_provider(model)
+        if provider == "anthropic":
+            return await self._call_anthropic_with_tools(
+                model, system_prompt, messages, tools
+            )
+        if provider == "google":
+            return await self._call_google_with_tools(
+                model, system_prompt, messages, tools
+            )
+        raise RuntimeError(
+            "No LLM provider configured. Set CLAUDE_API_KEY or GEMINI_API_KEY."
+        )
+
+    async def _call_anthropic_with_tools(
+        self,
+        model: str,
+        system_prompt: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """Anthropic messages API with tool use."""
+        # Build request messages (user/assistant with optional tool_use; tool results)
+        api_messages: list[dict] = []
+        for m in messages:
+            role = m.get("role")
+            content = m.get("content", "")
+            if role == "user":
+                api_messages.append({
+                    "role": "user",
+                    "content": [{"type": "text", "text": content or ""}],
+                })
+            elif role == "assistant":
+                blocks = []
+                if content:
+                    blocks.append({"type": "text", "text": content})
+                for tc in m.get("tool_calls", []):
+                    blocks.append({
+                        "type": "tool_use",
+                        "id": tc.get("id", ""),
+                        "name": tc.get("name", ""),
+                        "input": tc.get("input") or {},
+                    })
+                api_messages.append({"role": "assistant", "content": blocks})
+            elif role == "tool":
+                api_messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": m.get("tool_use_id", ""),
+                        "content": str(m.get("content", "")),
+                    }],
+                })
+
+        # Anthropic tools format
+        api_tools = [
+            {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "input_schema": t.get("input_schema", {"type": "object", "properties": {}}),
+            }
+            for t in tools
+        ]
+
+        payload = {
+            "model": model or settings.claude_model,
+            "max_tokens": settings.llm_max_tokens,
+            "temperature": settings.llm_temperature,
+            "system": system_prompt,
+            "messages": api_messages,
+            "tools": api_tools,
+        }
+        headers = {
+            "x-api-key": settings.claude_api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers=headers,
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        content_blocks = data.get("content", [])
+        text_parts = []
+        tool_calls = []
+        for block in content_blocks:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+            elif block.get("type") == "tool_use":
+                tool_calls.append({
+                    "id": block.get("id", ""),
+                    "name": block.get("name", ""),
+                    "input": block.get("input") or {},
+                })
+        text = "\n".join(p for p in text_parts if p).strip()
+        return text, tool_calls
+
+    async def _call_google_with_tools(
+        self,
+        model: str,
+        system_prompt: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """Gemini with function calling. Returns (text, tool_calls)."""
+        # Gemini function declarations
+        declarations = [
+            {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t.get("input_schema", {"type": "object", "properties": {}}),
+            }
+            for t in tools
+        ]
+        # Build contents (role + parts); tool results as function_response
+        contents = []
+        for m in messages:
+            role = m.get("role")
+            content = m.get("content", "")
+            if role == "user":
+                contents.append({
+                    "role": "user",
+                    "parts": [{"text": content or ""}],
+                })
+            elif role == "assistant":
+                parts = []
+                if content:
+                    parts.append({"text": content})
+                for tc in m.get("tool_calls", []):
+                    parts.append({
+                        "functionCall": {
+                            "name": tc.get("name", ""),
+                            "id": tc.get("id", ""),
+                            "args": tc.get("input") or {},
+                        }
+                    })
+                contents.append({"role": "model", "parts": parts})
+            elif role == "tool":
+                parts = [{
+                    "functionResponse": {
+                        "name": "",  # optional
+                        "id": m.get("tool_use_id", ""),
+                        "response": {"result": str(m.get("content", ""))},
+                    }
+                }]
+                contents.append({"role": "user", "parts": parts})
+
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model or settings.gemini_model}:"
+            f"generateContent?key={settings.gemini_api_key}"
+        )
+        payload = {
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "contents": contents,
+            "tools": [{"functionDeclarations": declarations}],
+            "generationConfig": {
+                "temperature": settings.llm_temperature,
+                "maxOutputTokens": settings.llm_max_tokens,
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+
+        candidates = data.get("candidates") or []
+        if not candidates:
+            raise RuntimeError("Gemini response did not include candidates")
+        c = candidates[0]
+        parts = (c.get("content") or {}).get("parts") or []
+        text_parts = []
+        tool_calls = []
+        for part in parts:
+            if isinstance(part, dict):
+                if "text" in part:
+                    text_parts.append(part.get("text", ""))
+                if "functionCall" in part:
+                    fc = part["functionCall"]
+                    tool_calls.append({
+                        "id": fc.get("id", ""),
+                        "name": fc.get("name", ""),
+                        "input": fc.get("args") or {},
+                    })
+        text = "\n".join(p for p in text_parts if p).strip()
+        return text, tool_calls
+

@@ -16,6 +16,11 @@ from backend.core.auth import get_current_user
 from backend.core.exceptions import ProjectNotFoundError
 from backend.db.models import Agent, Repository, User
 from backend.db.session import get_db
+from backend.db.repositories.project_settings import ProjectSettingsRepository
+from backend.schemas.project_settings import (
+    ProjectSettingsResponse,
+    ProjectSettingsUpdate,
+)
 from backend.schemas.repository import (
     RepositoryCreate,
     RepositoryImport,
@@ -147,20 +152,18 @@ async def create_repository(
         display_name="Manager",
         model=settings.claude_model,
         status="sleeping",
-        priority=0,
         sandbox_persist=True,
     )
-    om = Agent(
+    cto = Agent(
         project_id=repository_id,
-        role="om",
-        display_name="Operations Manager",
+        role="cto",
+        display_name="CTO",
         model=settings.gemini_model,
         status="sleeping",
-        priority=1,
         sandbox_persist=True,
     )
     db.add(manager)
-    db.add(om)
+    db.add(cto)
 
     await db.commit()
     await db.refresh(repository)
@@ -222,20 +225,18 @@ async def import_repository(
         display_name="Manager",
         model=settings.claude_model,
         status="sleeping",
-        priority=0,
         sandbox_persist=True,
     )
-    om = Agent(
+    cto = Agent(
         project_id=repository_id,
-        role="om",
-        display_name="Operations Manager",
+        role="cto",
+        display_name="CTO",
         model=settings.gemini_model,
         status="sleeping",
-        priority=1,
         sandbox_persist=True,
     )
     db.add(manager)
-    db.add(om)
+    db.add(cto)
 
     await db.commit()
     await db.refresh(repository)
@@ -272,6 +273,63 @@ async def update_repository(
     await db.commit()
     await db.refresh(repository)
     return _repository_to_response(repository)
+
+
+@router.get("/{repository_id}/settings", response_model=ProjectSettingsResponse)
+async def get_repository_settings(
+    repository_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get project settings for a repository."""
+    result = await db.execute(
+        select(Repository).where(
+            Repository.id == repository_id,
+            or_(
+                Repository.owner_id == current_user.id,
+                Repository.owner_id.is_(None),
+            ),
+        )
+    )
+    repository = result.scalar_one_or_none()
+    if not repository:
+        raise ProjectNotFoundError(repository_id)
+    repo_settings = ProjectSettingsRepository(db)
+    settings = await repo_settings.get_or_create_defaults(repository_id)
+    await db.commit()
+    await db.refresh(settings)
+    return ProjectSettingsResponse.model_validate(settings)
+
+
+@router.patch("/{repository_id}/settings", response_model=ProjectSettingsResponse)
+async def update_repository_settings(
+    repository_id: UUID,
+    data: ProjectSettingsUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update project settings."""
+    result = await db.execute(
+        select(Repository).where(
+            Repository.id == repository_id,
+            or_(
+                Repository.owner_id == current_user.id,
+                Repository.owner_id.is_(None),
+            ),
+        )
+    )
+    repository = result.scalar_one_or_none()
+    if not repository:
+        raise ProjectNotFoundError(repository_id)
+    repo_settings = ProjectSettingsRepository(db)
+    settings = await repo_settings.get_or_create_defaults(repository_id)
+    if data.max_engineers is not None:
+        settings.max_engineers = data.max_engineers
+    if data.persistent_sandbox_count is not None:
+        settings.persistent_sandbox_count = data.persistent_sandbox_count
+    await db.commit()
+    await db.refresh(settings)
+    return ProjectSettingsResponse.model_validate(settings)
 
 
 @router.delete("/{repository_id}", status_code=status.HTTP_204_NO_CONTENT)

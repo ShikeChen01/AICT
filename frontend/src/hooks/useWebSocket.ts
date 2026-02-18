@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { createWebSocketClient, WebSocketClient } from '../api/client';
+import { createWebSocketClient, getAuthToken, WebSocketClient } from '../api/client';
 import type { WSEvent, WSEventType } from '../types';
 
 interface UseWebSocketOptions {
@@ -23,33 +23,35 @@ export function useWebSocket(
   options: UseWebSocketOptions = {}
 ): UseWebSocketReturn {
   const { autoConnect = true } = options;
+  const token = getAuthToken();
   const clientRef = useRef<WebSocketClient | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
-  // Initialize client
+  // Initialize client only when projectId and token are available; reconnect when token appears
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || !token) {
+      clientRef.current?.disconnect();
+      clientRef.current = null;
+      setIsConnected(false);
+      return;
+    }
 
     const client = createWebSocketClient(projectId);
     clientRef.current = client;
 
     // Track connection state
     const unsubscribe = client.subscribe(() => {
-      // Connection state is managed internally by the client
       setIsConnected(client.isConnected);
     });
 
     if (autoConnect) {
       client.connect();
-      // Check connection after a short delay
       const checkConnection = setInterval(() => {
         setIsConnected(client.isConnected);
         if (client.isConnected) {
           clearInterval(checkConnection);
         }
       }, 100);
-
-      // Clear interval after 10 seconds max
       setTimeout(() => clearInterval(checkConnection), 10000);
     }
 
@@ -58,7 +60,7 @@ export function useWebSocket(
       client.disconnect();
       clientRef.current = null;
     };
-  }, [projectId, autoConnect]);
+  }, [projectId, token, autoConnect]);
 
   const connect = useCallback(() => {
     clientRef.current?.connect();

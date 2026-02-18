@@ -159,7 +159,7 @@ export function ActivityFeed({
             >
               <option value="all">All Agents</option>
               <option value="manager">Manager</option>
-              <option value="om">OM</option>
+              <option value="cto">CTO</option>
               <option value="engineer">Engineer</option>
             </select>
           )}

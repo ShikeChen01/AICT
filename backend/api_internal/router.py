@@ -8,8 +8,8 @@ from fastapi import APIRouter
 from backend.api_internal.files import router as files_router
 from backend.api_internal.git import router as git_router
 from backend.api_internal.lifecycle import router as lifecycle_router
+from backend.api_internal.messaging import router as messaging_router
 from backend.api_internal.tasks import router as tasks_router
-from backend.api_internal.tickets import router as tickets_router
 
 internal_router = APIRouter()
 
@@ -20,7 +20,7 @@ async def internal_health_check():
 
 
 internal_router.include_router(lifecycle_router)
+internal_router.include_router(messaging_router)
 internal_router.include_router(git_router)
 internal_router.include_router(files_router)
 internal_router.include_router(tasks_router)
-internal_router.include_router(tickets_router)

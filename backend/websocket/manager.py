@@ -1,10 +1,12 @@
 """
 WebSocket connection manager.
 
-Handles:
-- Connection lifecycle
-- Channel subscriptions (chat, kanban)
-- Broadcasting events to subscribers
+Docs contract (backend&API.md):
+- agent_stream: agent_text, agent_tool_call, agent_tool_result
+- messages: agent_message, system_message
+- kanban: task_created, task_update
+- agents: agent_status
+- activity: agent_log, sandbox_log
 """
 
 import asyncio
@@ -19,19 +21,14 @@ from backend.websocket.events import (
     EventType,
     WebSocketEvent,
     create_agent_log_event,
+    create_agent_message_event,
     create_agent_status_event,
-    create_chat_message_event,
+    create_agent_text_event,
+    create_agent_tool_call_event,
+    create_agent_tool_result_event,
     create_gm_status_event,
-    create_job_completed_event,
-    create_job_failed_event,
-    create_job_progress_event,
-    create_job_started_event,
-    create_mission_aborted_event,
     create_sandbox_log_event,
     create_task_created_event,
-    create_ticket_closed_event,
-    create_ticket_created_event,
-    create_ticket_reply_event,
     create_task_update_event,
     create_workflow_update_event,
 )
@@ -40,12 +37,14 @@ logger = logging.getLogger(__name__)
 
 
 class Channel(str, Enum):
-    """WebSocket subscription channels."""
-    CHAT = "chat"
+    """WebSocket subscription channels (docs contract)."""
+    AGENT_STREAM = "agent_stream"
+    MESSAGES = "messages"
     KANBAN = "kanban"
-    WORKFLOW = "workflow"  # Frontend V2: workflow graph updates
-    ACTIVITY = "activity"  # Frontend V2: agent activity feed
-    ALL = "all"  # Subscribe to everything
+    AGENTS = "agents"
+    ACTIVITY = "activity"
+    WORKFLOW = "workflow"
+    ALL = "all"
 
 
 class ConnectionInfo:
@@ -59,7 +58,14 @@ class ConnectionInfo:
     def subscribe(self, channel: Channel) -> None:
         self.channels.add(channel)
         if channel == Channel.ALL:
-            self.channels.update([Channel.CHAT, Channel.KANBAN, Channel.WORKFLOW, Channel.ACTIVITY])
+            self.channels.update([
+                Channel.AGENT_STREAM,
+                Channel.MESSAGES,
+                Channel.KANBAN,
+                Channel.AGENTS,
+                Channel.ACTIVITY,
+                Channel.WORKFLOW,
+            ])
 
     def unsubscribe(self, channel: Channel) -> None:
         self.channels.discard(channel)
@@ -193,15 +199,10 @@ class WebSocketManager:
 
     # ── Convenience broadcast methods ─────────────────────────────
 
-    async def broadcast_chat_message(self, message) -> int:
-        """Broadcast a chat message event."""
-        event = create_chat_message_event(message)
-        return await self.broadcast(event, Channel.CHAT, message.project_id)
-
     async def broadcast_gm_status(self, project_id: UUID, status: str) -> int:
-        """Broadcast GM status change."""
+        """Broadcast GM/manager status change (agents channel)."""
         event = create_gm_status_event(project_id, status)
-        return await self.broadcast(event, Channel.CHAT, project_id)
+        return await self.broadcast(event, Channel.AGENTS, project_id)
 
     async def broadcast_task_created(self, task) -> int:
         """Broadcast task created event."""
@@ -216,7 +217,91 @@ class WebSocketManager:
     async def broadcast_agent_status(self, agent) -> int:
         """Broadcast agent status change."""
         event = create_agent_status_event(agent)
-        return await self.broadcast(event, Channel.KANBAN, agent.project_id)
+        return await self.broadcast(event, Channel.AGENTS, agent.project_id)
+
+    # ── Docs: agent stream & messages ─────────────────────────────
+
+    async def broadcast_agent_text(
+        self,
+        project_id: UUID,
+        agent_id: UUID,
+        agent_role: str,
+        content: str,
+        session_id: UUID | None = None,
+        iteration: int = 0,
+    ) -> int:
+        """Broadcast agent_text (incremental LLM output)."""
+        event = create_agent_text_event(
+            agent_id=agent_id,
+            agent_role=agent_role,
+            content=content,
+            session_id=session_id,
+            iteration=iteration,
+        )
+        return await self.broadcast(event, Channel.AGENT_STREAM, project_id)
+
+    async def broadcast_agent_tool_call(
+        self,
+        project_id: UUID,
+        agent_id: UUID,
+        agent_role: str,
+        tool_name: str,
+        tool_input: dict,
+        session_id: UUID | None = None,
+        iteration: int = 0,
+    ) -> int:
+        """Broadcast agent_tool_call event."""
+        event = create_agent_tool_call_event(
+            agent_id=agent_id,
+            agent_role=agent_role,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            session_id=session_id,
+            iteration=iteration,
+        )
+        return await self.broadcast(event, Channel.AGENT_STREAM, project_id)
+
+    async def broadcast_agent_tool_result(
+        self,
+        project_id: UUID,
+        agent_id: UUID,
+        tool_name: str,
+        output: str,
+        success: bool = True,
+        session_id: UUID | None = None,
+        iteration: int = 0,
+    ) -> int:
+        """Broadcast agent_tool_result event."""
+        event = create_agent_tool_result_event(
+            agent_id=agent_id,
+            tool_name=tool_name,
+            output=output,
+            success=success,
+            session_id=session_id,
+            iteration=iteration,
+        )
+        return await self.broadcast(event, Channel.AGENT_STREAM, project_id)
+
+    async def broadcast_agent_message(
+        self,
+        project_id: UUID,
+        msg_id: UUID,
+        from_agent_id: UUID,
+        target_agent_id: UUID,
+        content: str,
+        message_type: str = "normal",
+        created_at=None,
+    ) -> int:
+        """Broadcast agent_message (message to user)."""
+        event = create_agent_message_event(
+            msg_id=msg_id,
+            from_agent_id=from_agent_id,
+            target_agent_id=target_agent_id,
+            content=content,
+            message_type=message_type,
+            created_at=created_at,
+        )
+        return await self.broadcast(event, Channel.MESSAGES, project_id)
 
     # ── Workflow & Activity broadcast methods (Frontend V2) ────────
 
@@ -320,174 +405,6 @@ class WebSocketManager:
                     self._connections.pop(conn_id, None)
 
         return sent
-
-    # ── Job broadcast methods ──────────────────────────────────────
-
-    async def broadcast_job_started(
-        self,
-        job_id: UUID,
-        project_id: UUID,
-        task_id: UUID,
-        agent_id: UUID,
-        message: str | None = None,
-    ) -> int:
-        """Broadcast job started event."""
-        event = create_job_started_event(
-            job_id=job_id,
-            project_id=project_id,
-            task_id=task_id,
-            agent_id=agent_id,
-            message=message,
-        )
-        return await self.broadcast(event, Channel.ACTIVITY, project_id)
-
-    async def broadcast_job_progress(
-        self,
-        job_id: UUID,
-        project_id: UUID,
-        task_id: UUID,
-        agent_id: UUID,
-        message: str | None = None,
-        tool_name: str | None = None,
-        tool_args: dict | None = None,
-    ) -> int:
-        """Broadcast job progress event."""
-        event = create_job_progress_event(
-            job_id=job_id,
-            project_id=project_id,
-            task_id=task_id,
-            agent_id=agent_id,
-            message=message,
-            tool_name=tool_name,
-            tool_args=tool_args,
-        )
-        return await self.broadcast(event, Channel.ACTIVITY, project_id)
-
-    async def broadcast_job_completed(
-        self,
-        job_id: UUID,
-        project_id: UUID,
-        task_id: UUID,
-        agent_id: UUID,
-        result: str | None = None,
-        pr_url: str | None = None,
-    ) -> int:
-        """Broadcast job completed event."""
-        event = create_job_completed_event(
-            job_id=job_id,
-            project_id=project_id,
-            task_id=task_id,
-            agent_id=agent_id,
-            result=result,
-            pr_url=pr_url,
-        )
-        return await self.broadcast(event, Channel.ACTIVITY, project_id)
-
-    async def broadcast_job_failed(
-        self,
-        job_id: UUID,
-        project_id: UUID,
-        task_id: UUID,
-        agent_id: UUID,
-        error: str,
-    ) -> int:
-        """Broadcast job failed event."""
-        event = create_job_failed_event(
-            job_id=job_id,
-            project_id=project_id,
-            task_id=task_id,
-            agent_id=agent_id,
-            error=error,
-        )
-        return await self.broadcast(event, Channel.ACTIVITY, project_id)
-
-    # ── Ticket broadcast methods ─────────────────────────────────────
-
-    async def broadcast_ticket_created(
-        self,
-        ticket_id: UUID,
-        project_id: UUID,
-        from_agent_id: UUID,
-        to_agent_id: UUID,
-        header: str,
-        ticket_type: str,
-        message: str | None = None,
-    ) -> int:
-        """Broadcast ticket created event."""
-        event = create_ticket_created_event(
-            ticket_id=ticket_id,
-            project_id=project_id,
-            from_agent_id=from_agent_id,
-            to_agent_id=to_agent_id,
-            header=header,
-            ticket_type=ticket_type,
-            message=message,
-        )
-        return await self.broadcast(event, Channel.ACTIVITY, project_id)
-
-    async def broadcast_ticket_reply(
-        self,
-        ticket_id: UUID,
-        project_id: UUID,
-        to_agent_id: UUID,
-        header: str,
-        ticket_type: str,
-        message: str | None = None,
-        from_agent_id: UUID | None = None,
-        from_user_id: UUID | None = None,
-    ) -> int:
-        """Broadcast ticket reply event."""
-        event = create_ticket_reply_event(
-            ticket_id=ticket_id,
-            project_id=project_id,
-            to_agent_id=to_agent_id,
-            header=header,
-            ticket_type=ticket_type,
-            message=message,
-            from_agent_id=from_agent_id,
-            from_user_id=from_user_id,
-        )
-        return await self.broadcast(event, Channel.ACTIVITY, project_id)
-
-    async def broadcast_ticket_closed(
-        self,
-        ticket_id: UUID,
-        project_id: UUID,
-        from_agent_id: UUID | None,
-        to_agent_id: UUID,
-        header: str,
-        ticket_type: str,
-    ) -> int:
-        """Broadcast ticket closed event."""
-        event = create_ticket_closed_event(
-            ticket_id=ticket_id,
-            project_id=project_id,
-            from_agent_id=from_agent_id,
-            to_agent_id=to_agent_id,
-            header=header,
-            ticket_type=ticket_type,
-        )
-        return await self.broadcast(event, Channel.ACTIVITY, project_id)
-
-    async def broadcast_mission_aborted(
-        self,
-        ticket_id: UUID,
-        project_id: UUID,
-        from_agent_id: UUID,
-        to_agent_id: UUID,
-        header: str,
-        message: str | None = None,
-    ) -> int:
-        """Broadcast mission aborted event."""
-        event = create_mission_aborted_event(
-            ticket_id=ticket_id,
-            project_id=project_id,
-            from_agent_id=from_agent_id,
-            to_agent_id=to_agent_id,
-            header=header,
-            message=message,
-        )
-        return await self.broadcast(event, Channel.ACTIVITY, project_id)
 
     @property
     def active_connections(self) -> int:

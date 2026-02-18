@@ -63,7 +63,7 @@ export interface TaskUpdate {
 
 // ─── Agent ───────────────────────────────────────────────────────────
 
-export type AgentRole = 'gm' | 'om' | 'manager' | 'engineer';
+export type AgentRole = 'gm' | 'manager' | 'cto' | 'engineer';
 export type AgentStatus = 'sleeping' | 'active' | 'busy';
 
 export interface Agent {
@@ -76,7 +76,7 @@ export interface Agent {
   current_task_id: UUID | null;
   sandbox_id: string | null;
   sandbox_persist: boolean;
-  priority: number; // 0=GM/Manager, 1=Engineer
+  memory?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -93,30 +93,86 @@ export interface AgentTaskQueueItem {
 
 export interface AgentStatusWithQueue extends Agent {
   queue_size: number;
-  open_ticket_count: number;
+  pending_message_count?: number;
+  open_ticket_count?: number;
   task_queue: AgentTaskQueueItem[];
 }
 
-// ─── Chat ────────────────────────────────────────────────────────────
+// ─── Agent Sessions (NEW) ──────────────────────────────────────────────
 
-export type ChatRole = 'user' | 'gm' | 'manager';
+export type AgentSessionStatus = 'running' | 'completed' | 'force_ended' | 'error';
+export type AgentSessionEndReason =
+  | 'normal_end'
+  | 'max_iterations'
+  | 'max_loopbacks'
+  | 'interrupted'
+  | 'aborted'
+  | 'error'
+  | null;
 
-export interface ChatMessage {
+export interface AgentSession {
   id: UUID;
+  agent_id: UUID;
   project_id: UUID;
-  role: ChatRole;
+  task_id: UUID | null;
+  trigger_message_id: UUID | null;
+  status: AgentSessionStatus;
+  end_reason: AgentSessionEndReason;
+  iteration_count: number;
+  started_at: string;
+  ended_at: string | null;
+}
+
+export interface AgentMessageLog {
+  id: UUID;
+  agent_id: UUID;
+  session_id: UUID | null;
+  project_id: UUID;
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
-  attachments: unknown[] | null;
+  tool_name: string | null;
+  tool_input: Record<string, unknown> | null;
+  tool_output: string | null;
+  loop_iteration: number;
   created_at: string;
 }
 
-export interface ChatMessageCreate {
-  content: string;
-  attachments?: unknown[] | null;
+// ─── Project Settings (NEW) ────────────────────────────────────────────
+
+export interface ProjectSettings {
+  id: UUID;
+  project_id: UUID;
+  max_engineers: number;
+  persistent_sandbox_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
-export interface SendChatMessageResponse extends ChatMessage {
-  user_message?: ChatMessage | null;
+export interface ProjectSettingsUpdate {
+  max_engineers?: number;
+  persistent_sandbox_count?: number;
+}
+
+// ─── Channel Messages (NEW — user-to-agent) ───────────────────────────
+
+export type ChannelMessageType = 'normal' | 'system';
+
+export interface ChannelMessage {
+  id: UUID;
+  project_id: UUID;
+  from_agent_id: UUID | null;
+  target_agent_id: UUID | null;
+  content: string;
+  message_type: ChannelMessageType;
+  status: 'sent' | 'received';
+  broadcast: boolean;
+  created_at: string;
+}
+
+export interface ChannelMessageSend {
+  project_id: UUID;
+  target_agent_id: UUID;
+  content: string;
 }
 
 // ─── Ticket ──────────────────────────────────────────────────────────
@@ -228,7 +284,6 @@ export interface AgentContext {
 // ─── WebSocket Events ────────────────────────────────────────────────
 
 export type WSEventType =
-  | 'chat_message'
   | 'gm_status'
   | 'task_created'
   | 'task_update'
@@ -243,16 +298,16 @@ export type WSEventType =
   | 'ticket_created'
   | 'ticket_reply'
   | 'ticket_closed'
-  | 'mission_aborted';
+  | 'mission_aborted'
+  // New stream events (Agent 2)
+  | 'agent_text'
+  | 'agent_tool_call'
+  | 'agent_tool_result'
+  | 'agent_message';
 
 export interface WSEvent<T = unknown> {
   type: WSEventType;
   data: T;
-}
-
-export interface WSChatMessageEvent {
-  type: 'chat_message';
-  data: ChatMessage;
 }
 
 export interface WSGMStatusEvent {
@@ -352,6 +407,56 @@ export interface TicketEventData {
   header: string;
   ticket_type: TicketType;
   message: string | null;
+}
+
+// ─── Agent Stream Events (NEW) ────────────────────────────────────────
+
+export interface AgentTextData {
+  project_id: UUID;
+  agent_id: UUID;
+  content: string;
+  timestamp?: string;
+}
+
+export interface AgentToolCallData {
+  project_id: UUID;
+  agent_id: UUID;
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+  timestamp?: string;
+}
+
+export interface AgentToolResultData {
+  project_id: UUID;
+  agent_id: UUID;
+  tool_name: string;
+  output: string;
+  success: boolean;
+  timestamp?: string;
+}
+
+export interface AgentMessageData {
+  project_id: UUID;
+  agent_id: UUID;
+  from_agent_id: UUID;
+  content: string;
+  timestamp?: string;
+}
+
+// ─── Stream buffer (frontend) ──────────────────────────────────────────
+
+export type StreamChunk =
+  | { type: 'text'; content: string; timestamp: string }
+  | { type: 'tool_call'; toolName: string; toolInput: Record<string, unknown>; timestamp: string }
+  | { type: 'tool_result'; toolName: string; output: string; success: boolean; timestamp: string }
+  | { type: 'message'; content: string; from: string; timestamp: string };
+
+export interface AgentStreamBuffer {
+  agentId: string;
+  sessionId: string | null;
+  chunks: StreamChunk[];
+  isStreaming: boolean;
+  lastActivity: number;
 }
 
 // ─── API Response ────────────────────────────────────────────────────

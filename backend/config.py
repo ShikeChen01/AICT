@@ -59,6 +59,16 @@ class Settings(BaseSettings):
     auto_run_migrations_on_startup: bool = True
     startup_step_timeout_seconds: int = Field(default=20, ge=1, le=300)
 
+    # Logging — Cloud Logging on Cloud Run (K_SERVICE) or when USE_CLOUD_LOGGING=true
+    use_cloud_logging: bool = Field(
+        default_factory=lambda: (
+            os.getenv("K_SERVICE") is not None
+            or os.getenv("USE_CLOUD_LOGGING", "").lower() in ("1", "true")
+        ),
+        description="Send logs to Google Cloud Logging",
+    )
+    log_level: str = Field(default="INFO", description="Root logger level (e.g. INFO, DEBUG)")
+
     model_config = {
         "env_file": _env_file,
         "env_file_encoding": "utf-8",

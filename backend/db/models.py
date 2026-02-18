@@ -1,15 +1,9 @@
 """
-SQLAlchemy models for AICT MVP-0.
+SQLAlchemy models for AICT.
 
-8 tables:
-- repositories: per-repository config
-- users: authenticated users with GitHub credentials
-- agents: Manager, Engineers (max 5 engineers enforced in code)
-- tasks: Kanban cards with 2D priority (critical + urgent)
-- tickets: agent-to-agent communication queue
-- ticket_messages: conversation within a ticket
-- chat_messages: user <-> Manager conversation
-- engineer_jobs: background task queue for parallel engineer execution
+Target schema per docs/db.md:
+- users, repositories, project_settings, agents, tasks
+- channel_messages, agent_messages, agent_sessions
 """
 
 import uuid
@@ -26,7 +20,6 @@ from sqlalchemy import (
     String,
     Text,
     Uuid,
-    event,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -72,21 +65,46 @@ class Repository(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
-    # relationships
     owner = relationship("User", back_populates="repositories")
     agents = relationship("Agent", back_populates="project", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="project", cascade="all, delete-orphan")
-    tickets = relationship("Ticket", back_populates="project", cascade="all, delete-orphan")
-    chat_messages = relationship("ChatMessage", back_populates="project", cascade="all, delete-orphan")
+    project_settings = relationship(
+        "ProjectSettings", back_populates="project", uselist=False, cascade="all, delete-orphan"
+    )
+    channel_messages = relationship(
+        "ChannelMessage", back_populates="project", cascade="all, delete-orphan"
+    )
 
 
-# Backwards compatibility for existing imports.
+# Backwards compatibility
 Project = Repository
 
 
-# ── Agents ──────────────────────────────────────────────────────────
+# ── Project Settings (NEW) ──────────────────────────────────────────
 
-VALID_ROLES = ("gm", "om", "manager", "engineer")
+
+class ProjectSettings(Base):
+    __tablename__ = "project_settings"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        Uuid,
+        ForeignKey("repositories.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
+    max_engineers = Column(Integer, default=5, nullable=False)
+    persistent_sandbox_count = Column(Integer, default=1, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    project = relationship("Repository", back_populates="project_settings")
+
+
+# ── Agents (MODIFIED: memory added, priority removed) ─────────────────
+
+
+VALID_ROLES = ("manager", "cto", "engineer")
 VALID_STATUSES = ("sleeping", "active", "busy")
 
 
@@ -97,9 +115,9 @@ class Agent(Base):
     project_id = Column(
         Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
     )
-    role = Column(String(50), nullable=False)  # 'manager', 'engineer' (gm/om deprecated)
-    display_name = Column(String(100), nullable=False)  # e.g. 'Manager', 'Engineer-3'
-    model = Column(String(100), nullable=False)  # e.g. 'gemini-3-pro', 'claude-4.5-opus'
+    role = Column(String(50), nullable=False)  # 'manager', 'cto', 'engineer'
+    display_name = Column(String(100), nullable=False)
+    model = Column(String(100), nullable=False)
     status = Column(String(20), default="sleeping", nullable=False)
     current_task_id = Column(
         Uuid,
@@ -108,16 +126,22 @@ class Agent(Base):
     )
     sandbox_id = Column(String(255), nullable=True)
     sandbox_persist = Column(Boolean, default=False, nullable=False)
-    priority = Column(Integer, default=2, nullable=False)  # 0=Manager, 1=Engineer
+    memory = Column(JSON, nullable=True)  # Layer 1 self-define block
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
-    # relationships
     project = relationship("Repository", back_populates="agents")
     current_task = relationship("Task", foreign_keys=[current_task_id])
+    agent_sessions = relationship(
+        "AgentSession", back_populates="agent", cascade="all, delete-orphan"
+    )
+    agent_messages = relationship(
+        "AgentMessage", back_populates="agent", cascade="all, delete-orphan"
+    )
 
 
-# ── Tasks (Kanban cards) ───────────────────────────────────────────
+# ── Tasks (MODIFIED: abort fields removed) ───────────────────────────
+
 
 VALID_TASK_STATUSES = (
     "backlog",
@@ -140,8 +164,8 @@ class Task(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     status = Column(String(50), default="backlog", nullable=False)
-    critical = Column(Integer, default=5, nullable=False)  # 0-10, 0=most critical
-    urgent = Column(Integer, default=5, nullable=False)  # 0-10, 0=most urgent
+    critical = Column(Integer, default=5, nullable=False)
+    urgent = Column(Integer, default=5, nullable=False)
     assigned_agent_id = Column(
         Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
     )
@@ -154,146 +178,109 @@ class Task(Base):
     created_by_id = Column(
         Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
     )
-    abort_reason = Column(Text, nullable=True)
-    abort_documentation = Column(Text, nullable=True)
-    aborted_by_id = Column(
-        Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
-    )
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
-    # relationships
     project = relationship("Repository", back_populates="tasks")
     assigned_agent = relationship("Agent", foreign_keys=[assigned_agent_id])
     created_by = relationship("Agent", foreign_keys=[created_by_id])
-    aborted_by = relationship("Agent", foreign_keys=[aborted_by_id])
     subtasks = relationship("Task", back_populates="parent_task", foreign_keys=[parent_task_id])
     parent_task = relationship("Task", remote_side=[id], foreign_keys=[parent_task_id])
 
 
-# ── Tickets ─────────────────────────────────────────────────────────
-
-VALID_TICKET_TYPES = ("task_assignment", "question", "help", "issue", "abort")
-VALID_TICKET_STATUSES = ("open", "closed")
+# ── Channel Messages (NEW) ──────────────────────────────────────────
+# from_agent_id / target_agent_id are NOT FKs (user = reserved UUID)
 
 
-class Ticket(Base):
-    __tablename__ = "tickets"
+class ChannelMessage(Base):
+    __tablename__ = "channel_messages"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
         Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
     )
-    from_agent_id = Column(
-        Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
-    )
-    to_agent_id = Column(
-        Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
-    )
-    header = Column(String(255), nullable=False)
-    ticket_type = Column(String(50), nullable=False)
-    critical = Column(Integer, default=5, nullable=False)
-    urgent = Column(Integer, default=5, nullable=False)
-    status = Column(String(20), default="open", nullable=False)
-    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
-    closed_at = Column(DateTime(timezone=True), nullable=True)
-    closed_by_id = Column(
-        Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
-    )
-
-    # relationships
-    project = relationship("Repository", back_populates="tickets")
-    from_agent = relationship("Agent", foreign_keys=[from_agent_id])
-    to_agent = relationship("Agent", foreign_keys=[to_agent_id])
-    closed_by = relationship("Agent", foreign_keys=[closed_by_id])
-    messages = relationship(
-        "TicketMessage", back_populates="ticket", cascade="all, delete-orphan"
-    )
-
-
-# ── Ticket Messages ────────────────────────────────────────────────
-
-class TicketMessage(Base):
-    __tablename__ = "ticket_messages"
-
-    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
-    ticket_id = Column(
-        Uuid, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False
-    )
-    from_agent_id = Column(
-        Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
-    )
-    from_user_id = Column(
-        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
-    )
+    from_agent_id = Column(Uuid, nullable=True)  # NULL = system; user = USER_AGENT_ID
+    target_agent_id = Column(Uuid, nullable=True)  # NULL = broadcast
     content = Column(Text, nullable=False)
+    message_type = Column(String(20), default="normal", nullable=False)  # 'normal', 'system'
+    status = Column(String(20), default="sent", nullable=False)  # 'sent', 'received'
+    broadcast = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
-    # relationships
-    ticket = relationship("Ticket", back_populates="messages")
-    from_agent = relationship("Agent")
-    from_user = relationship("User")
+    project = relationship("Repository", back_populates="channel_messages")
+
+    __table_args__ = (
+        Index("ix_channel_target_status", "target_agent_id", "status", "created_at"),
+        Index("ix_channel_project", "project_id", "created_at"),
+    )
 
 
-# ── Chat Messages ──────────────────────────────────────────────────
-
-VALID_CHAT_ROLES = ("user", "gm", "manager")
+# ── Agent Sessions (NEW) ────────────────────────────────────────────
 
 
-class ChatMessage(Base):
-    __tablename__ = "chat_messages"
+class AgentSession(Base):
+    __tablename__ = "agent_sessions"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
-    project_id = Column(
-        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
-    )
-    role = Column(String(20), nullable=False)  # 'user', 'manager' ('gm' deprecated)
-    content = Column(Text, nullable=False)
-    attachments = Column(JSON, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
-
-    # relationships
-    project = relationship("Repository", back_populates="chat_messages")
-
-
-# ── Engineer Jobs (Background Task Queue) ──────────────────────────
-
-VALID_JOB_STATUSES = ("pending", "running", "completed", "failed", "cancelled")
-
-
-class EngineerJob(Base):
-    """
-    Background job queue for engineer task execution.
-    
-    Engineers work asynchronously on tasks dispatched by the OM.
-    Multiple engineers can work in parallel on different tasks.
-    """
-    __tablename__ = "engineer_jobs"
-
-    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
-    project_id = Column(
-        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
-    )
-    task_id = Column(
-        Uuid, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
-    )
     agent_id = Column(
         Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
     )
-    status = Column(String(50), default="pending", nullable=False)
-    result = Column(Text, nullable=True)  # Final result summary
-    error = Column(Text, nullable=True)  # Error message if failed
-    pr_url = Column(String(512), nullable=True)  # PR URL if created
-    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
-    started_at = Column(DateTime(timezone=True), nullable=True)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
+    project_id = Column(
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    )
+    task_id = Column(Uuid, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
+    trigger_message_id = Column(
+        Uuid,
+        ForeignKey("channel_messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    status = Column(String(20), default="running", nullable=False)
+    end_reason = Column(String(50), nullable=True)
+    iteration_count = Column(Integer, default=0, nullable=False)
+    started_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    ended_at = Column(DateTime(timezone=True), nullable=True)
 
-    # relationships
-    project = relationship("Repository")
-    task = relationship("Task")
-    agent = relationship("Agent")
+    agent = relationship("Agent", back_populates="agent_sessions")
+    agent_messages = relationship(
+        "AgentMessage", back_populates="session", cascade="all, delete-orphan"
+    )
 
-    # Index for efficient job queue polling
     __table_args__ = (
-        Index("ix_engineer_jobs_status_created", "status", "created_at"),
+        Index("ix_agent_sessions_agent", "agent_id", "started_at"),
+        Index("ix_agent_sessions_status", "status"),
+    )
+
+
+# ── Agent Messages (NEW) ────────────────────────────────────────────
+
+
+class AgentMessage(Base):
+    __tablename__ = "agent_messages"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    agent_id = Column(
+        Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+    )
+    session_id = Column(
+        Uuid,
+        ForeignKey("agent_sessions.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    project_id = Column(
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    )
+    role = Column(String(20), nullable=False)  # 'system', 'user', 'assistant', 'tool'
+    content = Column(Text, nullable=False)
+    tool_name = Column(String(100), nullable=True)
+    tool_input = Column(JSON, nullable=True)
+    tool_output = Column(Text, nullable=True)
+    loop_iteration = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    agent = relationship("Agent", back_populates="agent_messages")
+    session = relationship("AgentSession", back_populates="agent_messages")
+
+    __table_args__ = (
+        Index("ix_agent_messages_agent_time", "agent_id", "created_at"),
+        Index("ix_agent_messages_session", "session_id", "loop_iteration"),
     )

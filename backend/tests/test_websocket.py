@@ -10,11 +10,9 @@ import pytest
 from backend.websocket.events import (
     EventType,
     WebSocketEvent,
-    ChatMessagePayload,
     GMStatusPayload,
     TaskPayload,
     AgentStatusPayload,
-    create_chat_message_event,
     create_gm_status_event,
     create_task_created_event,
     create_task_update_event,
@@ -48,7 +46,6 @@ class TestEventTypes:
     """Test WebSocket event types and payloads."""
 
     def test_event_type_values(self):
-        assert EventType.CHAT_MESSAGE.value == "chat_message"
         assert EventType.GM_STATUS.value == "gm_status"
         assert EventType.TASK_CREATED.value == "task_created"
         assert EventType.TASK_UPDATE.value == "task_update"
@@ -56,23 +53,12 @@ class TestEventTypes:
 
     def test_websocket_event_structure(self):
         event = WebSocketEvent(
-            type=EventType.CHAT_MESSAGE,
+            type=EventType.GM_STATUS,
             data={"test": "value"},
         )
-        assert event.type == EventType.CHAT_MESSAGE
+        assert event.type == EventType.GM_STATUS
         assert event.data == {"test": "value"}
         assert event.timestamp is not None
-
-    def test_chat_message_payload(self):
-        payload = ChatMessagePayload(
-            id=uuid.uuid4(),
-            project_id=uuid.uuid4(),
-            role="user",
-            content="Hello",
-            created_at=datetime.now(),
-        )
-        assert payload.role == "user"
-        assert payload.content == "Hello"
 
     def test_gm_status_payload(self):
         payload = GMStatusPayload(
@@ -117,22 +103,6 @@ class TestEventTypes:
 
 class TestEventFactories:
     """Test event factory functions."""
-
-    def test_create_chat_message_event(self):
-        # Mock message object
-        msg = type("ChatMessage", (), {
-            "id": uuid.uuid4(),
-            "project_id": uuid.uuid4(),
-            "role": "gm",
-            "content": "Hello user",
-            "attachments": None,
-            "created_at": datetime.now(),
-        })()
-
-        event = create_chat_message_event(msg)
-        assert event.type == EventType.CHAT_MESSAGE
-        assert event.data["role"] == "gm"
-        assert event.data["content"] == "Hello user"
 
     def test_create_gm_status_event(self):
         project_id = uuid.uuid4()
@@ -191,43 +161,44 @@ class TestEventFactories:
         agent = type("Agent", (), {
             "id": uuid.uuid4(),
             "project_id": uuid.uuid4(),
-            "role": "om",
-            "display_name": "OM-1",
+            "role": "cto",
+            "display_name": "CTO",
             "status": "busy",
             "current_task_id": uuid.uuid4(),
         })()
 
         event = create_agent_status_event(agent)
         assert event.type == EventType.AGENT_STATUS
-        assert event.data["role"] == "om"
+        assert event.data["role"] == "cto"
         assert event.data["status"] == "busy"
 
 
 class TestConnectionInfo:
-    """Test ConnectionInfo class."""
+    """Test ConnectionInfo class (docs channels: agent_stream, messages, kanban, agents, activity)."""
 
     def test_subscribe(self):
         ws = MockWebSocket()
         conn = ConnectionInfo(ws, uuid.uuid4())
 
-        conn.subscribe(Channel.CHAT)
-        assert Channel.CHAT in conn.channels
+        conn.subscribe(Channel.MESSAGES)
+        assert Channel.MESSAGES in conn.channels
 
     def test_subscribe_all(self):
         ws = MockWebSocket()
         conn = ConnectionInfo(ws, uuid.uuid4())
 
         conn.subscribe(Channel.ALL)
-        assert Channel.CHAT in conn.channels
+        assert Channel.MESSAGES in conn.channels
         assert Channel.KANBAN in conn.channels
+        assert Channel.AGENT_STREAM in conn.channels
 
     def test_unsubscribe(self):
         ws = MockWebSocket()
         conn = ConnectionInfo(ws, uuid.uuid4())
 
-        conn.subscribe(Channel.CHAT)
-        conn.unsubscribe(Channel.CHAT)
-        assert Channel.CHAT not in conn.channels
+        conn.subscribe(Channel.MESSAGES)
+        conn.unsubscribe(Channel.MESSAGES)
+        assert Channel.MESSAGES not in conn.channels
 
     def test_is_subscribed(self):
         ws = MockWebSocket()
@@ -235,7 +206,7 @@ class TestConnectionInfo:
 
         conn.subscribe(Channel.KANBAN)
         assert conn.is_subscribed(Channel.KANBAN) is True
-        assert conn.is_subscribed(Channel.CHAT) is False
+        assert conn.is_subscribed(Channel.MESSAGES) is False
 
 
 class TestWebSocketManager:
@@ -267,10 +238,9 @@ class TestWebSocketManager:
         ws = MockWebSocket()
         project_id = uuid.uuid4()
 
-        await manager.connect(ws, project_id, [Channel.CHAT])
+        await manager.connect(ws, project_id, [Channel.MESSAGES])
         await manager.subscribe(ws, Channel.KANBAN)
 
-        # Internal check that both channels are subscribed
         conn_id = manager._connection_id(ws)
         assert Channel.KANBAN in manager._connections[conn_id].channels
 
@@ -279,10 +249,10 @@ class TestWebSocketManager:
         project_id = uuid.uuid4()
 
         await manager.connect(ws, project_id)
-        await manager.unsubscribe(ws, Channel.CHAT)
+        await manager.unsubscribe(ws, Channel.MESSAGES)
 
         conn_id = manager._connection_id(ws)
-        assert Channel.CHAT not in manager._connections[conn_id].channels
+        assert Channel.MESSAGES not in manager._connections[conn_id].channels
 
     async def test_active_connections_count(self, manager):
         ws1 = MockWebSocket()

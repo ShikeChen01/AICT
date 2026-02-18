@@ -2,10 +2,16 @@
 Tests for authentication utilities.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 from fastapi import HTTPException
 
 from backend.core.auth import verify_agent_request, verify_token, verify_ws_token
+
+
+def _mock_request():
+    return MagicMock(method="GET", url=MagicMock(path="/test"))
 
 
 # ── verify_token ────────────────────────────────────────────────────
@@ -14,7 +20,7 @@ from backend.core.auth import verify_agent_request, verify_token, verify_ws_toke
 @pytest.mark.asyncio
 async def test_valid_token(monkeypatch):
     monkeypatch.setattr("backend.core.auth.settings.api_token", "test-secret-token")
-    result = await verify_token("Bearer test-secret-token")
+    result = await verify_token(_mock_request(), "Bearer test-secret-token")
     assert result is True
 
 
@@ -22,7 +28,7 @@ async def test_valid_token(monkeypatch):
 async def test_invalid_token(monkeypatch):
     monkeypatch.setattr("backend.core.auth.settings.api_token", "test-secret-token")
     with pytest.raises(HTTPException) as exc_info:
-        await verify_token("Bearer wrong-token")
+        await verify_token(_mock_request(), "Bearer wrong-token")
     assert exc_info.value.status_code == 401
     assert "Invalid token" in exc_info.value.detail
 
@@ -31,7 +37,7 @@ async def test_invalid_token(monkeypatch):
 async def test_missing_bearer_prefix(monkeypatch):
     monkeypatch.setattr("backend.core.auth.settings.api_token", "test-secret-token")
     with pytest.raises(HTTPException) as exc_info:
-        await verify_token("test-secret-token")
+        await verify_token(_mock_request(), "test-secret-token")
     assert exc_info.value.status_code == 401
     assert "Invalid authorization header" in exc_info.value.detail
 
@@ -40,7 +46,7 @@ async def test_missing_bearer_prefix(monkeypatch):
 async def test_empty_bearer(monkeypatch):
     monkeypatch.setattr("backend.core.auth.settings.api_token", "test-secret-token")
     with pytest.raises(HTTPException) as exc_info:
-        await verify_token("Bearer ")
+        await verify_token(_mock_request(), "Bearer ")
     assert exc_info.value.status_code == 401
 
 

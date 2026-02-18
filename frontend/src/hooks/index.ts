@@ -1,4 +1,6 @@
 export { useWebSocket } from './useWebSocket';
 export { useTasks } from './useTasks';
-export { useChat } from './useChat';
 export { useAgents } from './useAgents';
+export { useMessages } from './useMessages';
+export { useAgentStream } from './useAgentStream';
+export { useSessions } from './useSessions';

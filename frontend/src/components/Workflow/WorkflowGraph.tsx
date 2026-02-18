@@ -1,6 +1,6 @@
 /**
  * WorkflowGraph Component
- * Visualizes the LangGraph workflow (Manager -> OM -> Engineer)
+ * Visualizes the LangGraph workflow (Manager <-> CTO, Manager -> Engineer)
  */
 
 import { useCallback, useEffect, useMemo } from 'react';
@@ -28,7 +28,7 @@ const nodeTypes = {
   tool: ToolNode,
 };
 
-// Define the workflow graph structure (matches backend/graph/workflow.py)
+// Matches backend/graph/workflow.py: Manager, CTO (advisory), Engineer
 const initialNodes: Node[] = [
   {
     id: 'manager',
@@ -43,16 +43,16 @@ const initialNodes: Node[] = [
     data: { label: 'Manager Tools' },
   },
   {
-    id: 'om',
+    id: 'cto',
     type: 'agent',
     position: { x: 0, y: 0 },
-    data: { label: 'Operations Manager', role: 'om' as AgentRole, status: 'idle' },
+    data: { label: 'CTO', role: 'cto' as AgentRole, status: 'idle' },
   },
   {
-    id: 'om_tools',
+    id: 'cto_tools',
     type: 'tool',
     position: { x: 0, y: 0 },
-    data: { label: 'OM Tools' },
+    data: { label: 'CTO Tools' },
   },
   {
     id: 'engineer',
@@ -79,18 +79,17 @@ const initialEdges: Edge[] = [
   // Manager edges
   { id: 'e-manager-tools', source: 'manager', target: 'manager_tools', label: 'tools', animated: false },
   { id: 'e-tools-manager', source: 'manager_tools', target: 'manager', animated: false },
-  { id: 'e-manager-om', source: 'manager', target: 'om', label: 'delegate', markerEnd: { type: MarkerType.ArrowClosed } },
+  { id: 'e-manager-cto', source: 'manager', target: 'cto', label: 'consult', markerEnd: { type: MarkerType.ArrowClosed } },
+  { id: 'e-cto-manager', source: 'cto', target: 'manager', label: 'report', style: { strokeDasharray: '5,5' } },
   { id: 'e-manager-engineer', source: 'manager', target: 'engineer', label: 'assign', style: { strokeDasharray: '5,5' } },
   { id: 'e-manager-end', source: 'manager', target: 'end', label: 'done', markerEnd: { type: MarkerType.ArrowClosed } },
-  // OM edges
-  { id: 'e-om-tools', source: 'om', target: 'om_tools', label: 'tools', animated: false },
-  { id: 'e-tools-om', source: 'om_tools', target: 'om', animated: false },
-  { id: 'e-om-engineer', source: 'om', target: 'engineer', label: 'implement', markerEnd: { type: MarkerType.ArrowClosed } },
-  { id: 'e-om-manager', source: 'om', target: 'manager', label: 'report', style: { strokeDasharray: '5,5' } },
+  // CTO edges
+  { id: 'e-cto-tools', source: 'cto', target: 'cto_tools', label: 'tools', animated: false },
+  { id: 'e-tools-cto', source: 'cto_tools', target: 'cto', animated: false },
   // Engineer edges
   { id: 'e-engineer-tools', source: 'engineer', target: 'engineer_tools', label: 'tools', animated: false },
   { id: 'e-tools-engineer', source: 'engineer_tools', target: 'engineer', animated: false },
-  { id: 'e-engineer-om', source: 'engineer', target: 'om', label: 'complete', markerEnd: { type: MarkerType.ArrowClosed } },
+  { id: 'e-engineer-manager', source: 'engineer', target: 'manager', label: 'report', markerEnd: { type: MarkerType.ArrowClosed } },
 ];
 
 // Auto-layout using dagre

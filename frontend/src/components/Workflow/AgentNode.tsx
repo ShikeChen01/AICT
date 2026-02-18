@@ -17,14 +17,14 @@ interface AgentNodeData {
 const roleIcons: Record<AgentRole, React.ReactNode> = {
   manager: <User className="w-5 h-5" />,
   gm: <User className="w-5 h-5" />,
-  om: <Bot className="w-5 h-5" />,
-  engineer: <Wrench className="w-5 h-5" />,
+  cto: <Wrench className="w-5 h-5" />,
+  engineer: <Bot className="w-5 h-5" />,
 };
 
 const roleColors: Record<AgentRole, string> = {
   manager: 'bg-purple-100 border-purple-400 text-purple-700',
   gm: 'bg-purple-100 border-purple-400 text-purple-700',
-  om: 'bg-cyan-100 border-cyan-400 text-cyan-700',
+  cto: 'bg-cyan-100 border-cyan-400 text-cyan-700',
   engineer: 'bg-green-100 border-green-400 text-green-700',
 };
 

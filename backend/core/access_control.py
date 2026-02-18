@@ -17,7 +17,12 @@ AGENT_SPEC_ACCESS: dict[str, list[str]] = {
         "GrandArchitecture.tex",
         "API&Schema.tex",
     ],
-    "om": [
+    "manager": [
+        "GrandSpecification.tex",
+        "GrandArchitecture.tex",
+        "API&Schema.tex",
+    ],
+    "cto": [
         "API&Schema.tex",
     ],
     "engineer": [],
@@ -40,11 +45,11 @@ def enforce_spec_access(agent_role: str, file_path: str) -> None:
 
 # ── Kanban access ───────────────────────────────────────────────────
 
-KANBAN_WRITE_ROLES = ("gm", "om")
+KANBAN_WRITE_ROLES = ("gm", "manager", "cto")
 
 
 def can_write_kanban(agent_role: str) -> bool:
-    """GM and OM can write to Kanban; engineers can only read."""
+    """GM and CTO can write to Kanban; engineers can only read."""
     return agent_role in KANBAN_WRITE_ROLES
 
 
@@ -66,7 +71,7 @@ def can_write_code(agent_role: str) -> bool:
 def enforce_code_write(agent_role: str, file_path: str, module_path: str | None) -> None:
     """
     Enforce that engineers can only write within their assigned module_path.
-    GM and OM cannot write to the code repo.
+    GM and CTO cannot write to the code repo.
     """
     if not can_write_code(agent_role):
         raise ScopeViolationError(
@@ -91,8 +96,8 @@ def can_create_pr(agent_role: str) -> bool:
 
 
 def can_merge_pr(agent_role: str) -> bool:
-    """Only OM can merge PRs."""
-    return agent_role == "om"
+    """Only CTO can merge PRs (per docs; engineers create PRs)."""
+    return agent_role == "cto"
 
 
 def _normalize(path: str) -> str:
@@ -108,7 +113,7 @@ def _is_within(path: str, parent: str) -> bool:
 
 
 def can_read_code(agent_role: str) -> bool:
-    return agent_role in ("gm", "om", "engineer")
+    return agent_role in ("gm", "manager", "cto", "engineer")
 
 
 def enforce_code_read(agent_role: str, file_path: str, module_path: str | None) -> None:

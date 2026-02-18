@@ -53,22 +53,20 @@ async def internal_client(tmp_path: Path, monkeypatch):
         gm = Agent(
             id=uuid.uuid4(),
             project_id=project.id,
-            role="gm",
+            role="manager",
             display_name="GM",
             model="m",
             status="sleeping",
             sandbox_persist=True,
-            priority=0,
         )
-        om = Agent(
+        cto = Agent(
             id=uuid.uuid4(),
             project_id=project.id,
-            role="om",
-            display_name="OM",
+            role="cto",
+            display_name="CTO",
             model="m",
             status="sleeping",
             sandbox_persist=True,
-            priority=1,
         )
         engineer = Agent(
             id=uuid.uuid4(),
@@ -78,14 +76,13 @@ async def internal_client(tmp_path: Path, monkeypatch):
             model="m",
             status="sleeping",
             sandbox_persist=False,
-            priority=2,
         )
-        session.add_all([project, gm, om, engineer])
+        session.add_all([project, gm, cto, engineer])
         await session.commit()
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        yield client, gm, om, engineer, spec_root, code_root
+        yield client, gm, cto, engineer, spec_root, code_root
 
     app.dependency_overrides.clear()
     async with engine.begin() as conn:
@@ -119,7 +116,7 @@ async def test_lifecycle_wake_sleep_engineer_sandbox(internal_client):
 
 @pytest.mark.asyncio
 async def test_internal_files_access_matrix(internal_client):
-    client, gm, om, engineer, _, code_root = internal_client
+    client, gm, cto, engineer, _, code_root = internal_client
 
     gm_read = await client.post(
         "/internal/agent/files/read",
@@ -129,12 +126,12 @@ async def test_internal_files_access_matrix(internal_client):
     assert gm_read.status_code == 200
     assert "grand spec" in gm_read.json()["content"]
 
-    om_forbidden = await client.post(
+    cto_forbidden = await client.post(
         "/internal/agent/files/read",
-        headers={"X-Agent-ID": str(om.id)},
+        headers={"X-Agent-ID": str(cto.id)},
         json={"path": "GrandSpecification.tex"},
     )
-    assert om_forbidden.status_code == 403
+    assert cto_forbidden.status_code == 403
 
     engineer_write_ok = await client.post(
         "/internal/agent/files/write",

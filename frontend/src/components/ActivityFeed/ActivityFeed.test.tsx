@@ -20,7 +20,7 @@ const mockLogs = [
     id: 'log-2',
     project_id: 'project-1',
     agent_id: 'agent-2',
-    agent_role: 'om' as const,
+    agent_role: 'cto' as const,
     log_type: 'tool_call' as const,
     content: 'Creating task for implementation',
     tool_name: 'create_task',
@@ -55,7 +55,7 @@ describe('ActivityFeed', () => {
   it('displays agent role badges', () => {
     render(<ActivityFeed logs={mockLogs} />);
     expect(screen.getByText('manager')).toBeInTheDocument();
-    expect(screen.getByText('om')).toBeInTheDocument();
+    expect(screen.getByText('cto')).toBeInTheDocument();
     expect(screen.getByText('engineer')).toBeInTheDocument();
   });
 

@@ -1,15 +1,19 @@
 """
-Unit tests for ticket tools (request_human_input, report_to_manager, abort_mission).
+Unit tests for ticket tools. Tickets deprecated (docs-first); module skipped.
 """
+
+import pytest
+
+try:
+    from backend.tools.tickets import report_to_manager, abort_mission
+    from backend.db.models import Task, Ticket
+except ImportError:
+    pytest.skip("Ticket tools removed (docs-first deprecation)", allow_module_level=True)
 
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from backend.db.models import Task, Ticket
-from backend.tools.tickets import report_to_manager, abort_mission
 
 
 class _SessionContext:

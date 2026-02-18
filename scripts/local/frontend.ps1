@@ -32,5 +32,4 @@ if (-not $env:VITE_API_TOKEN -and $env:API_TOKEN) {
 }
 
 Write-Host "Starting frontend at http://localhost:${Port}"
-Write-Host "Backend proxy: http://localhost:8000"
 npm run dev -- --port $Port

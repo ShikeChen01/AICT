@@ -1,4 +1,4 @@
-import type { Task, ChatMessage, Agent, TaskStatus } from '../types';
+import type { Task, Agent, TaskStatus } from '../types';
 
 export const mockProjectId = '00000000-0000-0000-0000-000000000001';
 
@@ -65,25 +65,6 @@ export const mockTasks: Task[] = [
   },
 ];
 
-export const mockChatMessages: ChatMessage[] = [
-  {
-    id: 'msg-1',
-    project_id: mockProjectId,
-    role: 'user',
-    content: 'Hello GM, can you help me plan the authentication module?',
-    attachments: null,
-    created_at: '2026-02-10T09:00:00Z',
-  },
-  {
-    id: 'msg-2',
-    project_id: mockProjectId,
-    role: 'gm',
-    content: 'Of course! I\'d recommend starting with JWT tokens for stateless auth. Would you like me to create tasks for this?',
-    attachments: null,
-    created_at: '2026-02-10T09:01:00Z',
-  },
-];
-
 export const mockAgents: Agent[] = [
   {
     id: 'gm-agent-id',
@@ -102,8 +83,8 @@ export const mockAgents: Agent[] = [
   {
     id: 'om-agent-id',
     project_id: mockProjectId,
-    role: 'om',
-    display_name: 'OM',
+    role: 'cto',
+    display_name: 'CTO',
     model: 'gemini-3-pro',
     status: 'sleeping',
     current_task_id: null,

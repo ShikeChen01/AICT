@@ -9,8 +9,8 @@ interface AgentsPanelProps {
 }
 
 function roleBadgeClass(role: AgentStatusWithQueue['role']): string {
-  if (role === 'gm') return 'bg-purple-100 text-purple-700';
-  if (role === 'om') return 'bg-cyan-100 text-cyan-700';
+  if (role === 'gm' || role === 'manager') return 'bg-purple-100 text-purple-700';
+  if (role === 'cto') return 'bg-cyan-100 text-cyan-700';
   return 'bg-green-100 text-green-700';
 }
 
@@ -111,7 +111,7 @@ export function AgentsPanel({ projectId }: AgentsPanelProps) {
 
   return (
     <>
-    <aside className="w-96 border-l border-gray-200 bg-white flex flex-col overflow-hidden">
+    <aside className="w-full min-w-0 border-l border-gray-200 bg-white flex flex-col overflow-hidden">
       <div className="px-4 py-3 border-b border-gray-200">
         <h2 className="text-base font-semibold text-gray-900">Agents</h2>
         <p className="text-xs text-gray-500">Status and task queue</p>

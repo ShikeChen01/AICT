@@ -9,11 +9,15 @@ import json
 import os
 import uuid
 
+# Disable Cloud Logging in tests so we don't need GCP credentials or network
+os.environ["USE_CLOUD_LOGGING"] = "false"
+os.environ.pop("K_SERVICE", None)
+
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from backend.db.models import Agent, Base, ChatMessage, Project, Task, Ticket, TicketMessage
+from backend.db.models import Agent, Base, Project, Repository, Task
 
 # Use PostgreSQL when INTEGRATION_TEST=1, else SQLite for fast unit tests
 USE_POSTGRES = os.getenv("INTEGRATION_TEST") == "1"
@@ -106,9 +110,9 @@ async def session(engine) -> AsyncSession:
 # ============================================================================
 
 @pytest_asyncio.fixture
-async def sample_project(session: AsyncSession) -> Project:
-    """Create a test project."""
-    project = Project(
+async def sample_project(session: AsyncSession) -> Repository:
+    """Create a test project (Repository)."""
+    project = Repository(
         id=uuid.uuid4(),
         name="Test Project",
         description="A test project",
@@ -122,26 +126,8 @@ async def sample_project(session: AsyncSession) -> Project:
 
 
 @pytest_asyncio.fixture
-async def sample_gm(session: AsyncSession, sample_project: Project) -> Agent:
-    """Create a GM agent."""
-    agent = Agent(
-        id=uuid.uuid4(),
-        project_id=sample_project.id,
-        role="gm",
-        display_name="GM",
-        model="gemini-3-pro",
-        status="sleeping",
-        sandbox_persist=True,
-        priority=0,
-    )
-    session.add(agent)
-    await session.flush()
-    return agent
-
-
-@pytest_asyncio.fixture
-async def sample_manager(session: AsyncSession, sample_project: Project) -> Agent:
-    """Manager agent (unified GM+OM role)."""
+async def sample_manager(session: AsyncSession, sample_project: Repository) -> Agent:
+    """Manager agent (GM)."""
     agent = Agent(
         id=uuid.uuid4(),
         project_id=sample_project.id,
@@ -150,7 +136,6 @@ async def sample_manager(session: AsyncSession, sample_project: Project) -> Agen
         model="claude-4.5-opus",
         status="sleeping",
         sandbox_persist=True,
-        priority=0,
     )
     session.add(agent)
     await session.flush()
@@ -158,17 +143,16 @@ async def sample_manager(session: AsyncSession, sample_project: Project) -> Agen
 
 
 @pytest_asyncio.fixture
-async def sample_om(session: AsyncSession, sample_project: Project) -> Agent:
-    """Create an Operations Manager agent."""
+async def sample_cto(session: AsyncSession, sample_project: Repository) -> Agent:
+    """CTO agent."""
     agent = Agent(
         id=uuid.uuid4(),
         project_id=sample_project.id,
-        role="om",
-        display_name="OM-1",
-        model="claude-4.5-opus",
+        role="cto",
+        display_name="CTO",
+        model="claude-4-sonnet",
         status="sleeping",
         sandbox_persist=True,
-        priority=1,
     )
     session.add(agent)
     await session.flush()
@@ -176,7 +160,7 @@ async def sample_om(session: AsyncSession, sample_project: Project) -> Agent:
 
 
 @pytest_asyncio.fixture
-async def sample_engineer(session: AsyncSession, sample_project: Project) -> Agent:
+async def sample_engineer(session: AsyncSession, sample_project: Repository) -> Agent:
     """Create an Engineer agent."""
     agent = Agent(
         id=uuid.uuid4(),
@@ -186,7 +170,6 @@ async def sample_engineer(session: AsyncSession, sample_project: Project) -> Age
         model="claude-4.5",
         status="sleeping",
         sandbox_persist=False,
-        priority=2,
     )
     session.add(agent)
     await session.flush()
@@ -194,7 +177,7 @@ async def sample_engineer(session: AsyncSession, sample_project: Project) -> Age
 
 
 @pytest_asyncio.fixture
-async def sample_task(session: AsyncSession, sample_project: Project) -> Task:
+async def sample_task(session: AsyncSession, sample_project: Repository) -> Task:
     """Create a test task."""
     task = Task(
         id=uuid.uuid4(),
@@ -219,3 +202,15 @@ async def sample_task_assigned(
     sample_task.status = "in_progress"
     await session.flush()
     return sample_task
+
+
+@pytest_asyncio.fixture
+async def sample_gm(sample_manager: Agent) -> Agent:
+    """Alias for sample_manager (GM)."""
+    return sample_manager
+
+
+@pytest_asyncio.fixture
+async def sample_om(sample_cto: Agent) -> Agent:
+    """Alias for sample_cto (legacy name; use sample_cto)."""
+    return sample_cto

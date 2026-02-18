@@ -7,22 +7,22 @@ from contextlib import asynccontextmanager
 import logging
 from collections.abc import Awaitable
 
+from backend.config import settings
+from backend.core.logging_config import configure_logging
+
+configure_logging()
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.api.v1.router import api_router
 from backend.api_internal.router import internal_router
-from backend.config import settings
 from backend.core.error_handlers import aict_exception_handler
 from backend.core.exceptions import AICTException
 from backend.db.migration_runner import run_startup_migrations
 from backend.db.session import AsyncSessionLocal
-from backend.services.engineer_worker import get_engineer_worker, stop_engineer_worker
-from backend.services.orchestrator import (
-    initialize_graph_runtime,
-    shutdown_graph_runtime,
-)
+from backend.workers.worker_manager import get_worker_manager
 from backend.services.repo_provisioning import RepoProvisioningService
 from backend.websocket.endpoint import router as ws_router
 
@@ -61,12 +61,11 @@ async def _provision_repositories_on_startup() -> None:
         logger.warning("Repository provisioning skipped: %s", exc)
 
 
-async def _start_engineer_worker() -> None:
-    """Start the engineer worker as a background task."""
-    worker = get_engineer_worker()
-    task = asyncio.create_task(worker.start())
-    _background_tasks.append(task)
-    logger.info("Engineer worker background task started")
+async def _start_worker_manager() -> None:
+    """Start WorkerManager: MessageRouter + AgentWorkers per agent."""
+    manager = get_worker_manager()
+    await manager.start()
+    logger.info("WorkerManager started")
 
 
 async def _run_startup_migrations() -> None:
@@ -79,8 +78,9 @@ async def _run_startup_migrations() -> None:
 
 async def _stop_background_tasks() -> None:
     """Stop all background tasks gracefully."""
-    await stop_engineer_worker()
-    
+    manager = get_worker_manager()
+    await manager.stop()
+
     for task in _background_tasks:
         if not task.done():
             task.cancel()
@@ -97,13 +97,11 @@ async def _stop_background_tasks() -> None:
 async def lifespan(app: FastAPI):
     # Startup
     await _run_startup_step("run_startup_migrations", _run_startup_migrations())
-    await _run_startup_step("initialize_graph_runtime", initialize_graph_runtime())
     await _run_startup_step("provision_repositories_on_startup", _provision_repositories_on_startup())
-    await _run_startup_step("start_engineer_worker", _start_engineer_worker())
+    await _run_startup_step("start_worker_manager", _start_worker_manager())
     yield
     # Shutdown
     await _stop_background_tasks()
-    await shutdown_graph_runtime()
 
 
 app = FastAPI(title="AICT Backend", version="0.1.0", lifespan=lifespan)

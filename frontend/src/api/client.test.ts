@@ -3,11 +3,13 @@ import {
   healthCheck,
   getTasks,
   createTask,
-  getChatHistory,
   replyToTicketAsUser,
+  sendMessage,
+  getMessages,
+  getAllMessages,
   setAuthToken,
 } from './client';
-import { mockTasks, mockChatMessages, mockFetchResponse, mockProjectId } from '../test/mocks';
+import { mockTasks, mockFetchResponse, mockProjectId } from '../test/mocks';
 
 describe('API Client', () => {
   beforeEach(() => {
@@ -90,24 +92,6 @@ describe('API Client', () => {
     });
   });
 
-  describe('getChatHistory', () => {
-    it('should fetch chat history', async () => {
-      vi.mocked(global.fetch).mockResolvedValueOnce(
-        mockFetchResponse(mockChatMessages)
-      );
-
-      const result = await getChatHistory(mockProjectId);
-      
-      expect(result).toEqual(mockChatMessages);
-      expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/chat/history'),
-        expect.objectContaining({
-          method: 'GET',
-        })
-      );
-    });
-  });
-
   describe('replyToTicketAsUser', () => {
     it('should POST user reply to ticket', async () => {
       const ticketId = '55555555-5555-5555-5555-555555555555';
@@ -127,6 +111,82 @@ describe('API Client', () => {
             Authorization: 'Bearer test-token',
           }),
         })
+      );
+    });
+  });
+
+  describe('messages API', () => {
+    const agentId = '33333333-3333-3333-3333-333333333333';
+    const channelMsg = {
+      id: 'msg-001',
+      project_id: mockProjectId,
+      from_agent_id: null,
+      target_agent_id: agentId,
+      content: 'Hello agent',
+      message_type: 'normal',
+      status: 'sent',
+      broadcast: false,
+      created_at: '2026-02-01T12:00:00Z',
+    };
+
+    it('sendMessage should POST to /messages/send and return ChannelMessage', async () => {
+      vi.mocked(global.fetch).mockResolvedValueOnce(
+        mockFetchResponse(channelMsg, 202)
+      );
+
+      const result = await sendMessage({
+        project_id: mockProjectId,
+        target_agent_id: agentId,
+        content: 'Hello agent',
+      });
+
+      expect(result).toEqual(channelMsg);
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/v1/messages/send',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            project_id: mockProjectId,
+            target_agent_id: agentId,
+            content: 'Hello agent',
+          }),
+        })
+      );
+    });
+
+    it('getMessages should GET conversation with query params', async () => {
+      vi.mocked(global.fetch).mockResolvedValueOnce(
+        mockFetchResponse([channelMsg])
+      );
+
+      const result = await getMessages(mockProjectId, agentId, 50, 0);
+
+      expect(result).toEqual([channelMsg]);
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/messages?'),
+        expect.any(Object)
+      );
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringMatching(new RegExp(`project_id=${mockProjectId}`)),
+        expect.any(Object)
+      );
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringMatching(new RegExp(`agent_id=${agentId}`)),
+        expect.any(Object)
+      );
+    });
+
+    it('getAllMessages should GET all user messages for project', async () => {
+      vi.mocked(global.fetch).mockResolvedValueOnce(
+        mockFetchResponse([channelMsg])
+      );
+
+      const result = await getAllMessages(mockProjectId, 100, 0);
+
+      expect(result).toEqual([channelMsg]);
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/messages/all?'),
+        expect.any(Object)
       );
     });
   });

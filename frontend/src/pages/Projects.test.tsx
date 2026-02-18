@@ -13,6 +13,7 @@ vi.mock('../api/client', () => ({
   createProject: vi.fn(),
   importProject: vi.fn(),
   deleteProject: vi.fn(),
+  getAuthToken: vi.fn(() => 'test-token'),
 }));
 
 const mockProjects = [
@@ -86,7 +87,7 @@ describe('ProjectsPage', () => {
     });
   });
 
-  it('shows git token indicator for projects with token', async () => {
+  it('shows open repository link when projects load', async () => {
     render(
       <MemoryRouter>
         <ProjectsPage />
@@ -94,11 +95,13 @@ describe('ProjectsPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Token')).toBeInTheDocument();
+      expect(screen.getByText('Test Project 1')).toBeInTheDocument();
     });
+    const openLinks = screen.getAllByText('Open Repository →');
+    expect(openLinks.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('opens create modal when New Project button is clicked', async () => {
+  it('opens create modal when New Repository button is clicked', async () => {
     render(
       <MemoryRouter>
         <ProjectsPage />
@@ -109,9 +112,9 @@ describe('ProjectsPage', () => {
       expect(screen.getByText('Test Project 1')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('New Project'));
+    fireEvent.click(screen.getByText('New Repository'));
 
-    expect(screen.getByText('Create New Project')).toBeInTheDocument();
+    expect(screen.getByText('Create New Repository')).toBeInTheDocument();
   });
 
   it('opens import modal when Import Repository button is clicked', async () => {
@@ -125,12 +128,11 @@ describe('ProjectsPage', () => {
       expect(screen.getByText('Test Project 1')).toBeInTheDocument();
     });
 
-    // Click the first Import Repository button (in header)
-    const importButtons = screen.getAllByText('Import Repository');
+    const importButtons = screen.getAllByRole('button', { name: 'Import Repository' });
     fireEvent.click(importButtons[0]);
 
-    // Modal should now be open with the PAT field
-    expect(screen.getByText('Personal Access Token (for private repos)')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Import Repository' })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('https://github.com/user/repo')).toBeInTheDocument();
   });
 
   it('renders empty state when no projects', async () => {
@@ -143,7 +145,7 @@ describe('ProjectsPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('No projects yet')).toBeInTheDocument();
+      expect(screen.getByText('No repositories yet')).toBeInTheDocument();
     });
   });
 

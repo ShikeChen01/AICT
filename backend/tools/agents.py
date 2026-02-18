@@ -7,13 +7,11 @@ import uuid
 from langchain_core.tools import tool
 
 logger = logging.getLogger(__name__)
-from sqlalchemy import select
 
 from backend.core.exceptions import MaxEngineersReached
-from backend.db.models import Agent, Task
+from backend.db.models import Agent
 from backend.db.session import AsyncSessionLocal
 from backend.services.agent_service import get_agent_service
-from backend.services.engineer_graph_service import start_engineer_task
 
 
 @tool
@@ -75,90 +73,3 @@ async def list_engineers(project_id: str) -> str:
                 f"  - {eng.display_name} (id={eng.id}) [{status_indicator}]{task_info}"
             )
         return "\n".join(lines)
-
-
-@tool
-async def dispatch_to_engineer(task_id: str, agent_id: str) -> str:
-    """
-    Dispatch a task to an engineer for background execution.
-    
-    The engineer will work on this task asynchronously and report results
-    via WebSocket updates and tickets. This returns immediately without
-    waiting for the engineer to complete.
-    
-    Use this after assigning a task to an engineer to kick off their work.
-    
-    Args:
-        task_id: The UUID of the task to work on.
-        agent_id: The UUID of the engineer agent to assign.
-    
-    Returns:
-        Confirmation message with job ID, or error description.
-    """
-    async with AsyncSessionLocal() as session:
-        try:
-            task_uuid = uuid.UUID(task_id)
-            agent_uuid = uuid.UUID(agent_id)
-        except ValueError as e:
-            return f"Invalid UUID format: {e}"
-        
-        # Verify agent exists and is an engineer
-        result = await session.execute(
-            select(Agent).where(Agent.id == agent_uuid)
-        )
-        agent = result.scalar_one_or_none()
-        
-        if not agent:
-            return f"Engineer not found: {agent_id}"
-        if agent.role != "engineer":
-            return f"Agent {agent.display_name} is not an engineer (role: {agent.role})"
-        
-        # Verify task exists
-        result = await session.execute(
-            select(Task).where(Task.id == task_uuid)
-        )
-        task = result.scalar_one_or_none()
-        
-        if not task:
-            return f"Task not found: {task_id}"
-
-        # Check if this task is already being worked on by any engineer
-        existing = await session.execute(
-            select(Agent).where(Agent.current_task_id == task_uuid)
-        )
-        if existing.scalar_one_or_none():
-            return "Task is already assigned to an engineer and in progress."
-
-        # Update task status to in_progress and mark engineer as busy
-        task.status = "in_progress"
-        agent.status = "busy"
-        agent.current_task_id = task_uuid
-
-        await session.commit()
-
-        # Start engineer graph in background (non-blocking)
-        logger.info(
-            "Dispatching to engineer: agent_id=%s task_id=%s task_title=%s",
-            agent_uuid,
-            task_uuid,
-            task.title,
-        )
-        run_id = await start_engineer_task(agent_uuid, task_uuid)
-        if not run_id:
-            logger.warning(
-                "start_engineer_task returned empty run_id for agent_id=%s task_id=%s (e.g. missing project_id)",
-                agent_uuid,
-                task_uuid,
-            )
-        else:
-            logger.info(
-                "Engineer graph scheduled: run_id=%s agent_id=%s task_id=%s",
-                run_id,
-                agent_uuid,
-                task_uuid,
-            )
-
-        return (
-            f"DISPATCHED: Engineer {agent.display_name} will work on '{task.title}' in the background.\n"
-            f"Run ID: {run_id}. Check status via WebSocket 'job_*' events."
-        )

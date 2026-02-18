@@ -1,7 +1,7 @@
 """
 WebSocket endpoint for real-time updates.
 
-Clients connect via: /ws?token=<API_TOKEN>&project_id=<UUID>&channels=chat,kanban,workflow,activity,all
+Docs contract: /ws?token=<TOKEN>&project_id=<UUID>&channels=agent_stream,messages,kanban,agents,activity,workflow,all
 """
 
 from uuid import UUID
@@ -13,88 +13,61 @@ from backend.websocket.manager import Channel, ws_manager
 
 router = APIRouter()
 
+_CHANNEL_MAP = {
+    "agent_stream": Channel.AGENT_STREAM,
+    "messages": Channel.MESSAGES,
+    "kanban": Channel.KANBAN,
+    "agents": Channel.AGENTS,
+    "activity": Channel.ACTIVITY,
+    "workflow": Channel.WORKFLOW,
+    "all": Channel.ALL,
+}
+
 
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
     token: str = Query(..., description="API token for authentication"),
     project_id: UUID = Query(..., description="Project ID to subscribe to"),
-    channels: str = Query("all", description="Comma-separated channels: chat,kanban,all"),
+    channels: str = Query(
+        "all",
+        description="Comma-separated: agent_stream,messages,kanban,agents,activity,workflow,all",
+    ),
 ):
     """
-    WebSocket endpoint for real-time updates.
+    WebSocket endpoint for real-time updates (docs contract).
 
-    Query Parameters:
-    - token: API token for authentication
-    - project_id: Project ID to subscribe to events for
-    - channels: Comma-separated list of channels (chat, kanban, workflow, activity, all)
-
-    Events sent:
-    - chat_message: When Manager responds (channel: chat)
-    - gm_status: When Manager becomes busy/available (channel: chat)
-    - task_created: When a new task is created (channel: kanban)
-    - task_update: When a task is updated (channel: kanban)
-    - agent_status: When an agent's status changes (channel: kanban)
-    - workflow_update: When graph transitions between nodes (channel: workflow)
-    - agent_log: Agent thoughts and tool calls (channel: activity)
-    - sandbox_log: Sandbox terminal output (channel: activity)
+    Channels: agent_stream (agent_text, agent_tool_call, agent_tool_result),
+    messages (agent_message, system_message), kanban, agents, activity, workflow, all.
     """
-    # Authenticate
     if not verify_ws_token(token):
         await websocket.close(code=4001, reason="Invalid token")
         return
 
-    # Parse channels
     channel_list = []
     for ch in channels.split(","):
         ch = ch.strip().lower()
-        if ch == "chat":
-            channel_list.append(Channel.CHAT)
-        elif ch == "kanban":
-            channel_list.append(Channel.KANBAN)
-        elif ch == "workflow":
-            channel_list.append(Channel.WORKFLOW)
-        elif ch == "activity":
-            channel_list.append(Channel.ACTIVITY)
-        elif ch == "all":
-            channel_list.append(Channel.ALL)
+        if ch in _CHANNEL_MAP:
+            channel_list.append(_CHANNEL_MAP[ch])
 
     if not channel_list:
         channel_list.append(Channel.ALL)
 
-    # Connect and manage lifecycle
     await ws_manager.connect(websocket, project_id, channel_list)
 
     try:
         while True:
-            # Listen for client messages (ping/pong, subscribe/unsubscribe)
             data = await websocket.receive_json()
-
             if data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
-
             elif data.get("type") == "subscribe":
-                channel = data.get("channel", "").lower()
-                channel_map = {
-                    "chat": Channel.CHAT,
-                    "kanban": Channel.KANBAN,
-                    "workflow": Channel.WORKFLOW,
-                    "activity": Channel.ACTIVITY,
-                }
-                if channel in channel_map:
-                    await ws_manager.subscribe(websocket, channel_map[channel])
-
+                channel = data.get("channel", "").strip().lower()
+                if channel in _CHANNEL_MAP:
+                    await ws_manager.subscribe(websocket, _CHANNEL_MAP[channel])
             elif data.get("type") == "unsubscribe":
-                channel = data.get("channel", "").lower()
-                channel_map = {
-                    "chat": Channel.CHAT,
-                    "kanban": Channel.KANBAN,
-                    "workflow": Channel.WORKFLOW,
-                    "activity": Channel.ACTIVITY,
-                }
-                if channel in channel_map:
-                    await ws_manager.unsubscribe(websocket, channel_map[channel])
-
+                channel = data.get("channel", "").strip().lower()
+                if channel in _CHANNEL_MAP:
+                    await ws_manager.unsubscribe(websocket, _CHANNEL_MAP[channel])
     except WebSocketDisconnect:
         pass
     finally:

@@ -6,13 +6,11 @@ Run with INTEGRATION_TEST=1 to use PostgreSQL instead of SQLite.
 """
 
 import uuid
-from unittest.mock import AsyncMock, patch
-
 import pytest
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.db.models import Agent, ChatMessage, Project, Task
+from backend.db.models import Agent, Project, Task
 from backend.main import app
 
 
@@ -216,68 +214,10 @@ class TestAgentsAPI:
         assert isinstance(data, list)
 
 
-class TestChatAPI:
-    """Test chat endpoints."""
-
-    @patch("backend.services.chat_service.ChatService._invoke_manager")
-    async def test_send_chat_message(
-        self,
-        mock_invoke: AsyncMock,
-        api_client: AsyncClient,
-        auth_headers: dict,
-        sample_project: Project,
-        sample_gm: Agent,
-    ):
-        # Mock the LLM response
-        mock_invoke.return_value = "This is a mocked GM response."
-        
-        response = await api_client.post(
-            f"/api/v1/chat/send?project_id={sample_project.id}",
-            json={"content": "Hello GM!"},
-            headers=auth_headers,
-        )
-        assert response.status_code == 201
-        
-        data = response.json()
-        assert "user_message" in data
-        assert data["content"] == "This is a mocked GM response."
-
-    async def test_get_chat_history(
-        self,
-        api_client: AsyncClient,
-        auth_headers: dict,
-        sample_project: Project,
-        session: AsyncSession,
-    ):
-        # Add some chat messages
-        msg1 = ChatMessage(
-            project_id=sample_project.id,
-            role="user",
-            content="Test message 1",
-        )
-        msg2 = ChatMessage(
-            project_id=sample_project.id,
-            role="gm",
-            content="Test response 1",
-        )
-        session.add_all([msg1, msg2])
-        await session.flush()
-        
-        response = await api_client.get(
-            f"/api/v1/chat/history?project_id={sample_project.id}",
-            headers=auth_headers,
-        )
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert isinstance(data, list)
-        assert len(data) >= 2
-
-
 class TestJobsAPI:
-    """Test engineer job endpoints."""
+    """Jobs API removed (docs-first: replaced by sessions). Expect 404."""
 
-    async def test_list_jobs(
+    async def test_list_jobs_returns_404(
         self,
         api_client: AsyncClient,
         auth_headers: dict,
@@ -287,12 +227,9 @@ class TestJobsAPI:
             f"/api/v1/jobs?project_id={sample_project.id}",
             headers=auth_headers,
         )
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert isinstance(data, list)
+        assert response.status_code == 404
 
-    async def test_list_active_jobs(
+    async def test_list_active_jobs_returns_404(
         self,
         api_client: AsyncClient,
         auth_headers: dict,
@@ -302,10 +239,45 @@ class TestJobsAPI:
             f"/api/v1/jobs/active?project_id={sample_project.id}",
             headers=auth_headers,
         )
+        assert response.status_code == 404
+
+
+class TestSessionsAPI:
+    """Docs contract: GET /api/v1/sessions (replaces jobs)."""
+
+    async def test_list_sessions(
+        self,
+        api_client: AsyncClient,
+        auth_headers: dict,
+        sample_project: Project,
+    ):
+        response = await api_client.get(
+            f"/api/v1/sessions?project_id={sample_project.id}",
+            headers=auth_headers,
+        )
         assert response.status_code == 200
-        
         data = response.json()
         assert isinstance(data, list)
+
+
+class TestRepositorySettingsAPI:
+    """Docs contract: GET/PATCH /api/v1/repositories/{id}/settings."""
+
+    async def test_get_settings(
+        self,
+        api_client: AsyncClient,
+        auth_headers: dict,
+        sample_project: Project,
+    ):
+        response = await api_client.get(
+            f"/api/v1/repositories/{sample_project.id}/settings",
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "max_engineers" in data
+        assert "persistent_sandbox_count" in data
+        assert data["project_id"] == str(sample_project.id)
 
 
 class TestAuthenticationRequired:
@@ -320,14 +292,6 @@ class TestAuthenticationRequired:
         fake_id = uuid.uuid4()
         # Tasks endpoint requires project_id query param
         response = await api_client.get(f"/api/v1/tasks?project_id={fake_id}")
-        assert response.status_code in (401, 422)
-
-    async def test_chat_requires_auth(self, api_client: AsyncClient):
-        fake_id = uuid.uuid4()
-        response = await api_client.post(
-            f"/api/v1/chat/send?project_id={fake_id}",
-            json={"content": "test"},
-        )
         assert response.status_code in (401, 422)
 
 
@@ -360,11 +324,10 @@ class TestDatabaseIntegration:
         agent = Agent(
             id=uuid.uuid4(),
             project_id=project.id,
-            role="gm",
-            display_name="Test GM",
+            role="manager",
+            display_name="Test Manager",
             model="test-model",
             status="sleeping",
-            priority=0,
         )
         session.add(agent)
         
@@ -395,7 +358,6 @@ class TestDatabaseIntegration:
             display_name="Test Engineer",
             model="test-model",
             status="sleeping",
-            priority=2,
         )
         session.add(agent)
         await session.flush()
@@ -448,7 +410,6 @@ class TestDatabaseIntegration:
             display_name="Cycle Engineer",
             model="test-model",
             status="active",
-            priority=2,
         )
         session.add(agent)
         await session.flush()
@@ -479,57 +440,3 @@ class TestDatabaseIntegration:
             headers=auth_headers,
         )
         assert get_response.status_code == 404
-
-
-class TestTicketsUserReply:
-    """Test POST /tickets/{ticket_id}/user-reply."""
-
-    async def test_user_reply_creates_message_and_closes_ticket(
-        self,
-        api_client: AsyncClient,
-        auth_headers: dict,
-        session: AsyncSession,
-        sample_project: Project,
-        sample_manager: Agent,
-        sample_engineer: Agent,
-    ):
-        """User reply creates a message, closes the ticket, and returns 201."""
-        from backend.core.auth import verify_token
-        from backend.db.models import Ticket
-        from backend.schemas.ticket import TicketCreate
-        from backend.services.ticket_service import get_ticket_service
-
-        async def mock_verify_token():
-            return True
-        app.dependency_overrides[verify_token] = mock_verify_token
-
-        try:
-            service = get_ticket_service(session)
-            ticket = await service.create(
-                sample_project.id,
-                sample_engineer.id,
-                TicketCreate(
-                    to_agent_id=sample_manager.id,
-                    header="Need API key",
-                    ticket_type="question",
-                    initial_message="What is the API key?",
-                ),
-            )
-            await session.commit()
-
-            response = await api_client.post(
-                f"/api/v1/tickets/{ticket.id}/user-reply",
-                headers=auth_headers,
-                json={"content": "Use env VAR API_KEY"},
-            )
-
-            assert response.status_code == 201
-            data = response.json()
-            assert data["content"] == "Use env VAR API_KEY"
-            assert data["ticket_id"] == str(ticket.id)
-            assert "id" in data
-
-            await session.refresh(ticket)
-            assert ticket.status == "closed"
-        finally:
-            app.dependency_overrides.pop(verify_token, None)

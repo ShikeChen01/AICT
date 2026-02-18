@@ -1,12 +1,12 @@
 """
 WebSocket event types and payload definitions.
 
-Events:
-- chat_message: GM responds to user
-- gm_status: GM busy/available
-- task_created: New task created
-- task_update: Task status/assignment changed
-- agent_status: Agent sleeping/active/busy
+Docs contract (backend&API.md):
+- agent_stream: agent_text, agent_tool_call, agent_tool_result
+- messages: agent_message, system_message
+- kanban: task_created, task_update
+- agents: agent_status
+- activity: agent_log, sandbox_log
 """
 
 from datetime import datetime
@@ -18,33 +18,27 @@ from pydantic import BaseModel
 
 
 class EventType(str, Enum):
-    # Chat events
-    CHAT_MESSAGE = "chat_message"
+    # Agent stream (docs)
+    AGENT_TEXT = "agent_text"
+    AGENT_TOOL_CALL = "agent_tool_call"
+    AGENT_TOOL_RESULT = "agent_tool_result"
+
+    # Messages (docs)
+    AGENT_MESSAGE = "agent_message"
+    SYSTEM_MESSAGE = "system_message"
+
+    # Legacy / status
     GM_STATUS = "gm_status"
 
-    # Kanban events
+    # Kanban
     TASK_CREATED = "task_created"
     TASK_UPDATE = "task_update"
-
-    # Agent events
     AGENT_STATUS = "agent_status"
 
-    # Workflow events (Frontend V2)
+    # Workflow / activity
     WORKFLOW_UPDATE = "workflow_update"
     AGENT_LOG = "agent_log"
     SANDBOX_LOG = "sandbox_log"
-
-    # Engineer job events
-    JOB_STARTED = "job_started"
-    JOB_PROGRESS = "job_progress"
-    JOB_COMPLETED = "job_completed"
-    JOB_FAILED = "job_failed"
-
-    # Ticket events
-    TICKET_CREATED = "ticket_created"
-    TICKET_REPLY = "ticket_reply"
-    TICKET_CLOSED = "ticket_closed"
-    MISSION_ABORTED = "mission_aborted"
 
 
 class WebSocketEvent(BaseModel):
@@ -59,16 +53,7 @@ class WebSocketEvent(BaseModel):
         super().__init__(**kwargs)
 
 
-# ── Chat Events ────────────────────────────────────────────────────
-
-
-class ChatMessagePayload(BaseModel):
-    id: UUID
-    project_id: UUID
-    role: str  # 'user' or 'gm'
-    content: str
-    attachments: list | None = None
-    created_at: datetime
+# ── GM Status ──────────────────────────────────────────────────────
 
 
 class GMStatusPayload(BaseModel):
@@ -143,52 +128,49 @@ class SandboxLogPayload(BaseModel):
     content: str
 
 
-# ── Engineer Job Events ───────────────────────────────────────────
+# ── Agent stream payloads (docs) ───────────────────────────────────
 
 
-class JobEventPayload(BaseModel):
-    """Payload for engineer job status events."""
-    job_id: UUID
-    project_id: UUID
-    task_id: UUID
+class AgentTextPayload(BaseModel):
+    """Incremental text chunk from agent loop."""
     agent_id: UUID
-    status: str  # started, progress, completed, failed
-    message: str | None = None
-    result: str | None = None
-    error: str | None = None
-    pr_url: str | None = None
-    tool_name: str | None = None
-    tool_args: dict[str, Any] | None = None
+    agent_role: str
+    content: str
+    session_id: UUID | None = None
+    iteration: int = 0
 
 
-class TicketEventPayload(BaseModel):
-    """Payload for ticket events."""
-    ticket_id: UUID
-    project_id: UUID
-    from_agent_id: UUID | None = None
-    from_user_id: UUID | None = None
-    to_agent_id: UUID
-    header: str
-    ticket_type: str
-    message: str | None = None
+class AgentToolCallPayload(BaseModel):
+    """Tool call initiated by agent."""
+    agent_id: UUID
+    agent_role: str
+    tool_name: str
+    tool_input: dict[str, Any]
+    session_id: UUID | None = None
+    iteration: int = 0
+
+
+class AgentToolResultPayload(BaseModel):
+    """Tool result (truncated if large)."""
+    agent_id: UUID
+    tool_name: str
+    output: str
+    success: bool = True
+    session_id: UUID | None = None
+    iteration: int = 0
+
+
+class AgentMessagePayload(BaseModel):
+    """Message to user (target_agent_id = USER_AGENT_ID)."""
+    id: UUID
+    from_agent_id: UUID
+    target_agent_id: UUID
+    content: str
+    message_type: str = "normal"
+    created_at: datetime | None = None
 
 
 # ── Event Factory Functions ────────────────────────────────────────
-
-
-def create_chat_message_event(message) -> WebSocketEvent:
-    """Create a chat message WebSocket event."""
-    return WebSocketEvent(
-        type=EventType.CHAT_MESSAGE,
-        data=ChatMessagePayload(
-            id=message.id,
-            project_id=message.project_id,
-            role=message.role,
-            content=message.content,
-            attachments=message.attachments,
-            created_at=message.created_at,
-        ).model_dump(mode="json"),
-    )
 
 
 def create_gm_status_event(project_id: UUID, status: str) -> WebSocketEvent:
@@ -336,196 +318,90 @@ def create_sandbox_log_event(
     )
 
 
-# ── Job Event Factories ────────────────────────────────────────────
+# ── Agent stream / message factories (docs) ────────────────────────
 
 
-def create_job_started_event(
-    job_id: UUID,
-    project_id: UUID,
-    task_id: UUID,
+def create_agent_text_event(
     agent_id: UUID,
-    message: str | None = None,
+    agent_role: str,
+    content: str,
+    session_id: UUID | None = None,
+    iteration: int = 0,
 ) -> WebSocketEvent:
-    """Create a job started event."""
+    """Create agent_text event (incremental LLM output)."""
     return WebSocketEvent(
-        type=EventType.JOB_STARTED,
-        data=JobEventPayload(
-            job_id=job_id,
-            project_id=project_id,
-            task_id=task_id,
+        type=EventType.AGENT_TEXT,
+        data=AgentTextPayload(
             agent_id=agent_id,
-            status="started",
-            message=message,
+            agent_role=agent_role,
+            content=content,
+            session_id=session_id,
+            iteration=iteration,
         ).model_dump(mode="json"),
     )
 
 
-def create_job_progress_event(
-    job_id: UUID,
-    project_id: UUID,
-    task_id: UUID,
+def create_agent_tool_call_event(
     agent_id: UUID,
-    message: str | None = None,
-    tool_name: str | None = None,
-    tool_args: dict[str, Any] | None = None,
+    agent_role: str,
+    tool_name: str,
+    tool_input: dict[str, Any],
+    session_id: UUID | None = None,
+    iteration: int = 0,
 ) -> WebSocketEvent:
-    """Create a job progress event."""
+    """Create agent_tool_call event."""
     return WebSocketEvent(
-        type=EventType.JOB_PROGRESS,
-        data=JobEventPayload(
-            job_id=job_id,
-            project_id=project_id,
-            task_id=task_id,
+        type=EventType.AGENT_TOOL_CALL,
+        data=AgentToolCallPayload(
             agent_id=agent_id,
-            status="progress",
-            message=message,
+            agent_role=agent_role,
             tool_name=tool_name,
-            tool_args=tool_args,
+            tool_input=tool_input,
+            session_id=session_id,
+            iteration=iteration,
         ).model_dump(mode="json"),
     )
 
 
-def create_job_completed_event(
-    job_id: UUID,
-    project_id: UUID,
-    task_id: UUID,
+def create_agent_tool_result_event(
     agent_id: UUID,
-    result: str | None = None,
-    pr_url: str | None = None,
+    tool_name: str,
+    output: str,
+    success: bool = True,
+    session_id: UUID | None = None,
+    iteration: int = 0,
 ) -> WebSocketEvent:
-    """Create a job completed event."""
+    """Create agent_tool_result event."""
     return WebSocketEvent(
-        type=EventType.JOB_COMPLETED,
-        data=JobEventPayload(
-            job_id=job_id,
-            project_id=project_id,
-            task_id=task_id,
+        type=EventType.AGENT_TOOL_RESULT,
+        data=AgentToolResultPayload(
             agent_id=agent_id,
-            status="completed",
-            result=result,
-            pr_url=pr_url,
+            tool_name=tool_name,
+            output=output,
+            success=success,
+            session_id=session_id,
+            iteration=iteration,
         ).model_dump(mode="json"),
     )
 
 
-def create_job_failed_event(
-    job_id: UUID,
-    project_id: UUID,
-    task_id: UUID,
-    agent_id: UUID,
-    error: str,
-) -> WebSocketEvent:
-    """Create a job failed event."""
-    return WebSocketEvent(
-        type=EventType.JOB_FAILED,
-        data=JobEventPayload(
-            job_id=job_id,
-            project_id=project_id,
-            task_id=task_id,
-            agent_id=agent_id,
-            status="failed",
-            error=error,
-        ).model_dump(mode="json"),
-    )
-
-
-# ── Ticket Event Factories ─────────────────────────────────────────
-
-
-def create_ticket_created_event(
-    ticket_id: UUID,
-    project_id: UUID,
+def create_agent_message_event(
+    msg_id: UUID,
     from_agent_id: UUID,
-    to_agent_id: UUID,
-    header: str,
-    ticket_type: str,
-    message: str | None = None,
+    target_agent_id: UUID,
+    content: str,
+    message_type: str = "normal",
+    created_at: datetime | None = None,
 ) -> WebSocketEvent:
-    """Create a ticket created event."""
+    """Create agent_message event (message to user)."""
     return WebSocketEvent(
-        type=EventType.TICKET_CREATED,
-        data=TicketEventPayload(
-            ticket_id=ticket_id,
-            project_id=project_id,
+        type=EventType.AGENT_MESSAGE,
+        data=AgentMessagePayload(
+            id=msg_id,
             from_agent_id=from_agent_id,
-            from_user_id=None,
-            to_agent_id=to_agent_id,
-            header=header,
-            ticket_type=ticket_type,
-            message=message,
-        ).model_dump(mode="json"),
-    )
-
-
-def create_ticket_reply_event(
-    ticket_id: UUID,
-    project_id: UUID,
-    to_agent_id: UUID,
-    header: str,
-    ticket_type: str,
-    message: str | None = None,
-    from_agent_id: UUID | None = None,
-    from_user_id: UUID | None = None,
-) -> WebSocketEvent:
-    """Create a ticket reply event."""
-    return WebSocketEvent(
-        type=EventType.TICKET_REPLY,
-        data=TicketEventPayload(
-            ticket_id=ticket_id,
-            project_id=project_id,
-            from_agent_id=from_agent_id,
-            from_user_id=from_user_id,
-            to_agent_id=to_agent_id,
-            header=header,
-            ticket_type=ticket_type,
-            message=message,
-        ).model_dump(mode="json"),
-    )
-
-
-def create_ticket_closed_event(
-    ticket_id: UUID,
-    project_id: UUID,
-    from_agent_id: UUID | None,
-    to_agent_id: UUID,
-    header: str,
-    ticket_type: str,
-) -> WebSocketEvent:
-    """Create a ticket closed event."""
-    return WebSocketEvent(
-        type=EventType.TICKET_CLOSED,
-        data=TicketEventPayload(
-            ticket_id=ticket_id,
-            project_id=project_id,
-            from_agent_id=from_agent_id,
-            from_user_id=None,
-            to_agent_id=to_agent_id,
-            header=header,
-            ticket_type=ticket_type,
-            message=None,
-        ).model_dump(mode="json"),
-    )
-
-
-def create_mission_aborted_event(
-    ticket_id: UUID,
-    project_id: UUID,
-    from_agent_id: UUID,
-    to_agent_id: UUID,
-    header: str,
-    message: str | None = None,
-) -> WebSocketEvent:
-    """Create a mission aborted event."""
-    return WebSocketEvent(
-        type=EventType.MISSION_ABORTED,
-        data=TicketEventPayload(
-            ticket_id=ticket_id,
-            project_id=project_id,
-            from_agent_id=from_agent_id,
-            from_user_id=None,
-            to_agent_id=to_agent_id,
-            header=header,
-            ticket_type="abort",
-            message=message,
+            target_agent_id=target_agent_id,
+            content=content,
+            message_type=message_type,
+            created_at=created_at,
         ).model_dump(mode="json"),
     )

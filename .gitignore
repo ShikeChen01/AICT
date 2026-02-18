@@ -91,5 +91,3 @@ yarn-error.log*
 # Jupyter
 .ipynb_checkpoints/
 aict-487016-firebase-adminsdk-fbsvc-98e0fed33c.json
-docs/
-temp.txt

@@ -7,11 +7,14 @@ import type {
   Task,
   TaskCreate,
   TaskUpdate,
-  ChatMessage,
-  ChatMessageCreate,
-  SendChatMessageResponse,
+  ChannelMessage,
+  ChannelMessageSend,
   Agent,
   AgentStatusWithQueue,
+  AgentSession,
+  AgentMessageLog,
+  ProjectSettings,
+  ProjectSettingsUpdate,
   Ticket,
   TicketCreate,
   Repository,
@@ -25,8 +28,6 @@ import type {
 const API_BASE = '/api/v1';
 const WS_BASE = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
 const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS ?? 10000);
-/** Longer timeout for chat send; backend may take 30–60s for GM (LangGraph + LLM). */
-const CHAT_SEND_TIMEOUT_MS = Number(import.meta.env.VITE_CHAT_SEND_TIMEOUT_MS ?? 120000);
 
 // Token stored in memory; persisted to localStorage so it survives full page reload.
 let authToken: string | null = null;
@@ -139,26 +140,86 @@ export async function healthCheck(): Promise<{ status: string }> {
   return request<{ status: string }>('GET', '/health');
 }
 
-// ─── Chat ────────────────────────────────────────────────────────────
+// ─── Messages (NEW — user-to-agent) ────────────────────────────────────
 
-export async function getChatHistory(projectId: string, limit = 100, offset = 0): Promise<ChatMessage[]> {
-  return request<ChatMessage[]>('GET', `/chat/history?project_id=${projectId}&limit=${limit}&offset=${offset}`);
-}
-
-export async function sendChatMessage(
-  projectId: string,
-  message: ChatMessageCreate
-): Promise<SendChatMessageResponse> {
-  return request<SendChatMessageResponse>(
+export async function sendMessage(body: ChannelMessageSend): Promise<ChannelMessage> {
+  return request<ChannelMessage>(
     'POST',
-    `/chat/send?project_id=${projectId}`,
-    message,
-    CHAT_SEND_TIMEOUT_MS
+    '/messages/send',
+    body,
+    REQUEST_TIMEOUT_MS
   );
 }
 
-export async function getChatMessage(messageId: string): Promise<ChatMessage> {
-  return request<ChatMessage>('GET', `/chat/message/${messageId}`);
+export async function getMessages(
+  projectId: string,
+  agentId: string,
+  limit = 100,
+  offset = 0
+): Promise<ChannelMessage[]> {
+  const params = new URLSearchParams({
+    project_id: projectId,
+    agent_id: agentId,
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return request<ChannelMessage[]>(`GET`, `/messages?${params}`);
+}
+
+export async function getAllMessages(
+  projectId: string,
+  limit = 100,
+  offset = 0
+): Promise<ChannelMessage[]> {
+  const params = new URLSearchParams({
+    project_id: projectId,
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return request<ChannelMessage[]>(`GET`, `/messages/all?${params}`);
+}
+
+// ─── Sessions (NEW — agent session history) ───────────────────────────
+
+export async function getSessions(
+  projectId: string,
+  agentId: string,
+  limit = 50,
+  offset = 0
+): Promise<AgentSession[]> {
+  const params = new URLSearchParams({
+    project_id: projectId,
+    agent_id: agentId,
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return request<AgentSession[]>(`GET`, `/sessions?${params}`);
+}
+
+export async function getSession(sessionId: string): Promise<AgentSession> {
+  return request<AgentSession>(`GET`, `/sessions/${sessionId}`);
+}
+
+export async function getSessionMessages(
+  sessionId: string,
+  limit = 100,
+  offset = 0
+): Promise<AgentMessageLog[]> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return request<AgentMessageLog[]>(`GET`, `/sessions/${sessionId}/messages?${params}`);
+}
+
+// ─── Project Settings (NEW) ───────────────────────────────────────────
+
+export async function getProjectSettings(repositoryId: string): Promise<ProjectSettings> {
+  return request<ProjectSettings>(`GET`, `/repositories/${repositoryId}/settings`);
+}
+
+export async function updateProjectSettings(
+  repositoryId: string,
+  data: ProjectSettingsUpdate
+): Promise<ProjectSettings> {
+  return request<ProjectSettings>(`PATCH`, `/repositories/${repositoryId}/settings`, data);
 }
 
 // ─── Tasks ───────────────────────────────────────────────────────────
@@ -351,15 +412,17 @@ export class WebSocketClient {
       return;
     }
 
+    if (!authToken) {
+      return;
+    }
+
     this.isConnecting = true;
     this.shouldReconnect = true;
 
     const url = new URL(WS_BASE, window.location.href);
     url.searchParams.set('project_id', this.projectId);
     url.searchParams.set('channels', 'all');
-    if (authToken) {
-      url.searchParams.set('token', authToken);
-    }
+    url.searchParams.set('token', authToken);
 
     this.ws = new WebSocket(url.toString());
 
@@ -379,7 +442,7 @@ export class WebSocketClient {
     };
 
     this.ws.onclose = (event) => {
-      console.log('[WS] Disconnected:', event.code, event.reason);
+      console.warn('[WS] Closed:', event.code, event.reason);
       this.isConnecting = false;
       this.ws = null;
 

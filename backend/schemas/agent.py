@@ -24,7 +24,7 @@ class AgentResponse(BaseModel):
     current_task_id: UUID | None
     sandbox_id: str | None
     sandbox_persist: bool
-    priority: int
+    memory: dict | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -33,7 +33,7 @@ class AgentResponse(BaseModel):
 
 class AgentStatusWithQueueResponse(AgentResponse):
     queue_size: int = 0
-    open_ticket_count: int = 0
+    pending_message_count: int = 0
     task_queue: list[AgentTaskQueueItem] = Field(default_factory=list)
 
 

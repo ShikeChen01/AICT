@@ -7,12 +7,13 @@ List and retrieve agent information. Spawn engineers (up to max_engineers).
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from pydantic import BaseModel
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.auth import verify_token
 from backend.core.exceptions import AgentNotFoundError
-from backend.db.models import Agent, Task, Ticket
+from backend.db.models import Agent, Task
 from backend.db.session import get_db
 from backend.schemas.agent import (
     AgentContextResponse,
@@ -23,6 +24,7 @@ from backend.schemas.agent import (
     SpawnEngineerCreate,
 )
 from backend.services.agent_service import get_agent_service
+from backend.services.message_service import get_message_service
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -33,11 +35,17 @@ async def list_agents(
     _auth: bool = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all agents for a project."""
+    """List all agents for a project (ordered by role: manager, cto, engineer)."""
+    role_order = case(
+        (Agent.role == "manager", 0),
+        (Agent.role == "cto", 1),
+        (Agent.role == "engineer", 2),
+        else_=3,
+    )
     result = await db.execute(
         select(Agent)
         .where(Agent.project_id == project_id)
-        .order_by(Agent.priority, Agent.display_name)
+        .order_by(role_order, Agent.display_name)
     )
     return list(result.scalars().all())
 
@@ -50,14 +58,18 @@ async def list_agent_status(
 ):
     """
     List agent status and queue details for a project.
-
-    Queue includes non-done tasks currently assigned to each agent and open
-    ticket counts where the agent is the recipient.
+    pending_message_count = unread (status=sent) channel messages for that agent.
     """
+    role_order = case(
+        (Agent.role == "manager", 0),
+        (Agent.role == "cto", 1),
+        (Agent.role == "engineer", 2),
+        else_=3,
+    )
     result = await db.execute(
         select(Agent)
         .where(Agent.project_id == project_id)
-        .order_by(Agent.priority, Agent.display_name)
+        .order_by(role_order, Agent.display_name)
     )
     agents = list(result.scalars().all())
     if not agents:
@@ -90,18 +102,8 @@ async def list_agent_status(
             )
         )
 
-    ticket_counts_result = await db.execute(
-        select(Ticket.to_agent_id, func.count(Ticket.id))
-        .where(
-            Ticket.to_agent_id.in_(agent_ids),
-            Ticket.status == "open",
-        )
-        .group_by(Ticket.to_agent_id)
-    )
-    ticket_counts = {
-        row[0]: int(row[1])
-        for row in ticket_counts_result.all()
-    }
+    msg_service = get_message_service(db)
+    pending_counts = await msg_service.count_unread_by_targets(agent_ids)
 
     return [
         AgentStatusWithQueueResponse(
@@ -114,11 +116,11 @@ async def list_agent_status(
             current_task_id=agent.current_task_id,
             sandbox_id=agent.sandbox_id,
             sandbox_persist=bool(agent.sandbox_persist),
-            priority=agent.priority,
+            memory=agent.memory,
             created_at=agent.created_at,
             updated_at=agent.updated_at,
             queue_size=len(tasks_by_agent.get(agent.id, [])),
-            open_ticket_count=ticket_counts.get(agent.id, 0),
+            pending_message_count=pending_counts.get(agent.id, 0),
             task_queue=tasks_by_agent.get(agent.id, []),
         )
         for agent in agents
@@ -165,36 +167,35 @@ async def spawn_engineer(
 # ── Agent Inspector (Frontend V2) ──────────────────────────────────
 
 
-# System prompts for different roles (used by the graph nodes)
+# System prompts for different roles (used by the graph nodes and inspector)
 _SYSTEM_PROMPTS = {
-    "manager": """You are the Manager agent in an AI software development team.
+    "manager": """You are the Manager (GM) agent in an AI software development team.
 Your responsibilities:
 - Communicate with the user to understand requirements
-- Break down high-level goals into actionable tasks
-- Coordinate with the Operations Manager (OM) to execute work
+- Break down high-level goals into actionable tasks and assign/dispatch to engineers
+- Consult the CTO for architecture and design when needed
 - Review completed work and provide feedback to the user""",
-    "om": """You are the Operations Manager (OM) in an AI software development team.
+    "cto": """You are the CTO (Chief Technology Officer) in an AI software development team.
 Your responsibilities:
-- Receive tasks from the Manager and break them into implementation steps
-- Assign specific coding tasks to Engineers
-- Review Engineer work and approve PRs
-- Report progress back to the Manager""",
+- Provide architectural guidance and design recommendations when consulted
+- Review technical decisions and integration concerns
+- You do NOT assign tasks or dispatch work to engineers; the Manager does that""",
     "engineer": """You are an Engineer in an AI software development team.
 Your responsibilities:
-- Implement specific coding tasks assigned by the OM
+- Implement specific coding tasks assigned by the Manager
 - Write clean, tested code following project conventions
 - Create branches, commits, and pull requests
-- Report completion or issues back to the OM""",
+- Report completion or ask the Manager or CTO for help when stuck""",
 }
 
 
 def _get_tools_for_role(role: str) -> list[AgentTool]:
     """Return the list of tools available to an agent role."""
-    from backend.tools.registry import get_manager_tools, get_om_tools, get_engineer_tools
+    from backend.tools.registry import get_manager_tools, get_cto_tools, get_engineer_tools
 
     tool_map = {
         "manager": get_manager_tools,
-        "om": get_om_tools,
+        "cto": get_cto_tools,
         "engineer": get_engineer_tools,
     }
     getter = tool_map.get(role)
@@ -206,6 +207,70 @@ def _get_tools_for_role(role: str) -> list[AgentTool]:
         AgentTool(name=t.name, description=getattr(t, "description", None))
         for t in tools
     ]
+
+
+class AgentMemoryResponse(BaseModel):
+    """Response for GET agents/{id}/memory."""
+
+    memory: dict | None
+
+
+@router.get("/{agent_id}/memory", response_model=AgentMemoryResponse)
+async def get_agent_memory(
+    agent_id: UUID,
+    _auth: bool = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the agent's Layer 1 memory (self-define block content)."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise AgentNotFoundError(agent_id)
+    return AgentMemoryResponse(memory=agent.memory)
+
+
+class InterruptResponse(BaseModel):
+    message: str = "Agent interrupted."
+
+
+class WakeResponse(BaseModel):
+    message: str = "Agent woken."
+
+
+@router.post("/{agent_id}/interrupt", response_model=InterruptResponse)
+async def interrupt_agent(
+    agent_id: UUID,
+    body: dict | None = None,
+    _auth: bool = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Force-end the agent's current session (user action). Same as interrupt_agent tool."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise AgentNotFoundError(agent_id)
+    from backend.workers.worker_manager import get_worker_manager
+
+    get_worker_manager().interrupt_agent(agent_id)
+    return InterruptResponse()
+
+
+@router.post("/{agent_id}/wake", response_model=WakeResponse)
+async def wake_agent(
+    agent_id: UUID,
+    body: dict | None = None,
+    _auth: bool = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a wake-up notification to a sleeping agent. Optionally include a message."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise AgentNotFoundError(agent_id)
+    from backend.workers.message_router import get_message_router
+
+    get_message_router().notify(agent_id)
+    return WakeResponse()
 
 
 @router.get("/{agent_id}/context", response_model=AgentContextResponse)

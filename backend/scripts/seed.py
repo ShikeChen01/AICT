@@ -3,7 +3,7 @@ Seed the database with initial MVP-0 data.
 
 Creates:
 - 1 Project ("firstproject") with a fixed UUID so the frontend default works
-- 1 Manager agent (combined GM+OM role)
+- 1 Manager agent (GM)
 - 1 Engineer agent (ready to receive tasks)
 
 Uses AgentService for agent creation.
@@ -121,7 +121,6 @@ async def _ensure_agents(session: AsyncSession, project: Project, agent_service)
             model=settings.claude_model or "claude-opus-4-5-20251101",
             status="sleeping",
             sandbox_persist=True,
-            priority=0,
         )
         session.add(manager)
         await session.flush()

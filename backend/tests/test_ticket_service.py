@@ -1,10 +1,17 @@
 """
 Tests for ticket service.
+Tickets deprecated (docs-first): replaced by channel messaging. Module skipped.
 """
 
-import uuid
-
 import pytest
+
+try:
+    from backend.services.ticket_service import TicketService
+    from backend.schemas.ticket import TicketCreate, TicketMessageCreate
+except ImportError:
+    pytest.skip("Ticket service/schemas removed (docs-first deprecation)", allow_module_level=True)
+
+import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.exceptions import (
@@ -13,8 +20,6 @@ from backend.core.exceptions import (
     TicketNotFoundError,
 )
 from backend.db.models import Agent, Project
-from backend.schemas.ticket import TicketCreate, TicketMessageCreate
-from backend.services.ticket_service import TicketService
 
 
 class TestTicketService:

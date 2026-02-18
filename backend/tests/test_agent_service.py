@@ -12,14 +12,14 @@ from backend.services.agent_service import get_agent_service
 async def test_count_by_role_empty(session, sample_project):
     service = get_agent_service(session)
     assert await service.count_by_role(sample_project.id, "engineer") == 0
-    assert await service.count_by_role(sample_project.id, "gm") == 0
+    assert await service.count_by_role(sample_project.id, "manager") == 0
 
 
 @pytest.mark.asyncio
 async def test_count_by_role_after_spawn(session, sample_project, sample_engineer):
     service = get_agent_service(session)
     assert await service.count_by_role(sample_project.id, "engineer") == 1
-    assert await service.count_by_role(sample_project.id, "gm") == 0
+    assert await service.count_by_role(sample_project.id, "manager") == 0
 
 
 @pytest.mark.asyncio
@@ -29,7 +29,6 @@ async def test_spawn_engineer(session, sample_project):
     assert agent.role == "engineer"
     assert agent.display_name == "Engineer-1"
     assert agent.sandbox_persist is False
-    assert agent.priority == 2
     assert agent.status == "sleeping"
 
 
@@ -54,23 +53,23 @@ async def test_spawn_engineer_max_limit(session, sample_project):
 
 
 @pytest.mark.asyncio
-async def test_ensure_project_agents_creates_gm_om(session, sample_project):
+async def test_ensure_project_agents_creates_manager_cto(session, sample_project):
     service = get_agent_service(session)
-    gm, om = await service.ensure_project_agents(sample_project)
-    assert gm.role == "gm"
-    assert gm.display_name == "GM"
-    assert gm.sandbox_persist is True
-    assert om.role == "om"
-    assert om.display_name == "OM-1"
-    assert om.sandbox_persist is True
+    manager, cto = await service.ensure_project_agents(sample_project)
+    assert manager.role == "manager"
+    assert manager.display_name == "GM"
+    assert manager.sandbox_persist is True
+    assert cto.role == "cto"
+    assert cto.display_name == "CTO"
+    assert cto.sandbox_persist is True
 
 
 @pytest.mark.asyncio
 async def test_ensure_project_agents_idempotent(session, sample_project, sample_gm, sample_om):
     service = get_agent_service(session)
-    gm, om = await service.ensure_project_agents(sample_project)
-    assert gm.id == sample_gm.id
-    assert om.id == sample_om.id
+    manager, cto = await service.ensure_project_agents(sample_project)
+    assert manager.id == sample_gm.id
+    assert cto.id == sample_om.id
 
 
 @pytest.mark.asyncio
@@ -85,6 +84,6 @@ async def test_get_or_create_project_agents_raises_if_project_missing(session, s
 @pytest.mark.asyncio
 async def test_get_or_create_project_agents_creates_if_missing(session, sample_project):
     service = get_agent_service(session)
-    gm, om = await service.get_or_create_project_agents(sample_project.id)
-    assert gm.project_id == sample_project.id
-    assert om.project_id == sample_project.id
+    manager, cto = await service.get_or_create_project_agents(sample_project.id)
+    assert manager.project_id == sample_project.id
+    assert cto.project_id == sample_project.id

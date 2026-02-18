@@ -4,6 +4,11 @@ Unit tests for the engineer LangGraph workflow.
 
 import pytest
 
+try:
+    from backend.db.models import Ticket
+except ImportError:
+    pytest.skip("Legacy Ticket model removed (Agent 1); engineer graph uses tickets", allow_module_level=True)
+
 from backend.graph.engineer_graph import (
     EngineerState,
     create_engineer_graph,

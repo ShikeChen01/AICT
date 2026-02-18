@@ -6,8 +6,6 @@ import pytest
 from pydantic import ValidationError
 
 from backend.schemas.task import TaskCreate, TaskUpdate
-from backend.schemas.ticket import TicketCreate
-from backend.schemas.chat import ChatMessageCreate
 from backend.schemas.project import ProjectCreate
 
 
@@ -69,44 +67,7 @@ class TestTaskUpdate:
         assert "title" not in data
 
 
-# ── TicketCreate ────────────────────────────────────────────────────
-
-
-class TestTicketCreate:
-    def test_defaults(self):
-        t = TicketCreate(
-            to_agent_id="00000000-0000-0000-0000-000000000001",
-            header="Help needed",
-            ticket_type="help",
-        )
-        assert t.critical == 5
-        assert t.urgent == 5
-        assert t.initial_message is None
-
-    def test_with_message(self):
-        t = TicketCreate(
-            to_agent_id="00000000-0000-0000-0000-000000000001",
-            header="Question",
-            ticket_type="question",
-            initial_message="What format?",
-        )
-        assert t.initial_message == "What format?"
-
-
-# ── ChatMessageCreate ──────────────────────────────────────────────
-
-
-class TestChatMessageCreate:
-    def test_minimal(self):
-        m = ChatMessageCreate(content="Hello GM")
-        assert m.content == "Hello GM"
-        assert m.attachments is None
-
-    def test_with_attachments(self):
-        m = ChatMessageCreate(
-            content="See attached", attachments=["file1.tex", "file2.tex"]
-        )
-        assert len(m.attachments) == 2
+# TicketCreate removed (tickets deprecated, docs-first)
 
 
 # ── ProjectCreate ──────────────────────────────────────────────────
