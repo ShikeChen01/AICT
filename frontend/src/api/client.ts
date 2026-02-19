@@ -193,6 +193,15 @@ export async function getAllMessages(
   return request<ChannelMessage[]>(`GET`, `/messages/all?${params}`);
 }
 
+export async function markMessagesRead(messageIds: string[]): Promise<{ updated: number }> {
+  return request<{ updated: number }>(
+    'POST',
+    '/messages/mark-read',
+    { message_ids: messageIds },
+    REQUEST_TIMEOUT_MS
+  );
+}
+
 // ─── Sessions (NEW — agent session history) ───────────────────────────
 
 export async function getSessions(

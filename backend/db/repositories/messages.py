@@ -115,6 +115,15 @@ class ChannelMessageRepository(BaseRepository[ChannelMessage]):
         )
         await self.session.flush()
 
+    async def mark_read(self, message_ids: list[UUID]) -> None:
+        """Mark messages as read by the user."""
+        if not message_ids:
+            return
+        await self.session.execute(
+            update(ChannelMessage).where(ChannelMessage.id.in_(message_ids)).values(status="read")
+        )
+        await self.session.flush()
+
     async def get_undelivered_for_replay(self) -> list[ChannelMessage]:
         """All messages with status=sent and non-null target (for replay on startup)."""
         result = await self.session.execute(

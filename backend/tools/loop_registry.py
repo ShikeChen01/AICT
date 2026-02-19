@@ -118,7 +118,7 @@ class LoopTool:
 # ---------------------------------------------------------------------------
 
 
-async def _run_send_message(ctx: RunContext, tool_input: dict) -> str:
+async def _run_notify_user(ctx: RunContext, tool_input: dict) -> str:
     from backend.workers.message_router import get_message_router
 
     target_agent_id = parse_tool_uuid(tool_input, "target_agent_id")
@@ -464,7 +464,7 @@ async def _run_describe_tool(ctx: RunContext, tool_input: dict) -> str:
 
 _TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
     "end": None,
-    "send_message": _run_send_message,
+    "notify_user": _run_notify_user,
     "broadcast_message": _run_broadcast_message,
     "update_memory": _run_update_memory,
     "read_history": _run_read_history,

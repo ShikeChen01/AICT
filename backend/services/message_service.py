@@ -100,6 +100,10 @@ class MessageService:
         """Mark messages as received (consumed by target)."""
         await self._channel_repo.mark_received(message_ids)
 
+    async def mark_read(self, message_ids: list[UUID]) -> None:
+        """Mark messages as read by the user."""
+        await self._channel_repo.mark_read(message_ids)
+
     async def broadcast(
         self,
         from_agent_id: UUID,

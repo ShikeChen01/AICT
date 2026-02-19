@@ -1,9 +1,10 @@
 /**
  * useMessages — load conversation with selected agent, send message (POST messages/send).
+ * Automatically marks incoming agent messages as read when the user views the conversation.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getMessages, sendMessage } from '../api/client';
+import { getMessages, sendMessage, markMessagesRead } from '../api/client';
 import { useOptionalAgentStreamContext } from '../contexts/AgentStreamContext';
 import type { ChannelMessage } from '../types';
 
@@ -30,6 +31,33 @@ function sortByCreatedAtAsc(list: ChannelMessage[]): ChannelMessage[] {
   );
 }
 
+/**
+ * Mark unread messages (status !== 'read') targeted at the user as read,
+ * then update local state to reflect the new status.
+ */
+function markUnreadAsRead(
+  messages: ChannelMessage[],
+  setMessages: React.Dispatch<React.SetStateAction<ChannelMessage[]>>
+): void {
+  const unreadIds = messages
+    .filter(
+      (m) =>
+        m.target_agent_id === USER_AGENT_ID &&
+        m.status !== 'read'
+    )
+    .map((m) => m.id);
+  if (unreadIds.length === 0) return;
+  markMessagesRead(unreadIds).then(() => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        unreadIds.includes(m.id) ? { ...m, status: 'read' as const } : m
+      )
+    );
+  }).catch(() => {
+    // Silently ignore mark-read failures; messages will be retried on next load.
+  });
+}
+
 export function useMessages({
   projectId,
   agentId,
@@ -51,7 +79,10 @@ export function useMessages({
     setError(null);
     try {
       const list = await getMessages(projectId, agentId, limit, offset);
-      setMessages(sortByCreatedAtAsc(list));
+      const sorted = sortByCreatedAtAsc(list);
+      setMessages(sorted);
+      // Mark messages as read when the user opens the conversation.
+      markUnreadAsRead(sorted, setMessages);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load messages');
       setMessages([]);
@@ -84,7 +115,12 @@ export function useMessages({
         broadcast: false,
         created_at: latestActivity.timestamp,
       };
-      setMessages((prev) => sortByCreatedAtAsc([...prev, incomingMessage]));
+      setMessages((prev) => {
+        const updated = sortByCreatedAtAsc([...prev, incomingMessage]);
+        // Mark newly received messages as read since the user is viewing the conversation.
+        markUnreadAsRead([incomingMessage], setMessages);
+        return updated;
+      });
     }
   }, [projectId, agentId, streamContext]);
 

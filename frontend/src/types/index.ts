@@ -163,7 +163,7 @@ export interface ChannelMessage {
   target_agent_id: UUID | null;
   content: string;
   message_type: ChannelMessageType;
-  status: 'sent' | 'received';
+  status: 'sent' | 'received' | 'read';
   broadcast: boolean;
   created_at: string;
 }

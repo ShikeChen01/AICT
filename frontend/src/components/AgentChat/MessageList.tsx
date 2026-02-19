@@ -46,15 +46,21 @@ function MessageBubble({
   agentLabel: string;
   agentColorClass: string;
 }) {
+  const isUnread = !isUser && message.status !== 'read';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       <div className={`flex items-end gap-2 max-w-[80%] ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-        <div
-          className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-medium flex-shrink-0 ${
-            isUser ? 'bg-blue-500' : agentColorClass
-          }`}
-        >
-          {isUser ? 'You' : agentLabel}
+        <div className="relative flex-shrink-0">
+          <div
+            className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-medium ${
+              isUser ? 'bg-blue-500' : agentColorClass
+            }`}
+          >
+            {isUser ? 'You' : agentLabel}
+          </div>
+          {isUnread && (
+            <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-blue-500 rounded-full border border-white" />
+          )}
         </div>
         <div
           className={`rounded-2xl px-4 py-2 ${

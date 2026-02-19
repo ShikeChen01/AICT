@@ -204,7 +204,7 @@ class ChannelMessage(Base):
     target_agent_id = Column(Uuid, nullable=True)  # NULL = broadcast
     content = Column(Text, nullable=False)
     message_type = Column(String(20), default="normal", nullable=False)  # 'normal', 'system'
-    status = Column(String(20), default="sent", nullable=False)  # 'sent', 'received'
+    status = Column(String(20), default="sent", nullable=False)  # 'sent', 'received', 'read'
     broadcast = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 

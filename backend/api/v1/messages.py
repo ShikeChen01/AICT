@@ -1,12 +1,14 @@
 """
 Messages REST API: user-to-agent messaging.
 
-POST /messages/send (202), GET /messages (conversation), GET /messages/all (activity).
+POST /messages/send (202), GET /messages (conversation), GET /messages/all (activity),
+POST /messages/mark-read (200).
 """
 
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -113,3 +115,22 @@ async def list_all_messages(
         project_id=project_id, limit=limit, offset=offset
     )
     return [ChannelMessageResponse.model_validate(m) for m in messages]
+
+
+class MarkReadRequest(BaseModel):
+    """Request body for POST /messages/mark-read."""
+
+    message_ids: list[UUID] = Field(..., min_length=1)
+
+
+@router.post("/mark-read")
+async def mark_messages_read(
+    body: MarkReadRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark messages as read by the user."""
+    service = get_message_service(db)
+    await service.mark_read(body.message_ids)
+    await db.commit()
+    return {"updated": len(body.message_ids)}
