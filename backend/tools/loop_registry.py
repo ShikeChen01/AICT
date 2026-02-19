@@ -10,7 +10,6 @@ Adding a new tool requires only one place: add a LoopTool entry to _TOOLS.
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import subprocess
 from dataclasses import dataclass, field
@@ -30,8 +29,9 @@ from backend.services.e2b_service import E2BService, LOCAL_FALLBACK_SANDBOX_ERRO
 from backend.services.message_service import MessageService
 from backend.services.session_service import SessionService
 from backend.services.task_service import TaskService
+from backend.logging.my_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 try:
     from e2b import AsyncSandbox
@@ -356,18 +356,24 @@ async def _run_interrupt_agent(ctx: RunContext, tool_input: dict) -> str:
 
 
 async def _run_spawn_engineer(ctx: RunContext, tool_input: dict) -> str:
-    if ctx.agent.role != "manager":
-        raise RuntimeError("Only manager can spawn engineers")
+    if ctx.agent.role not in {"manager", "cto"}:
+        raise RuntimeError("Only manager/cto can spawn engineers")
     engineer = await ctx.agent_service.spawn_engineer(
         ctx.project.id,
         display_name=str(tool_input["display_name"]),
-        model=str(tool_input.get("model") or "claude-4.5"),
+        model=str(tool_input["model"]) if tool_input.get("model") else None,
+        tier=str(tool_input["tier"]) if tool_input.get("tier") else None,
     )
     await ctx.db.flush()
     from backend.workers.worker_manager import get_worker_manager
+    from backend.workers.message_router import get_message_router
 
     await get_worker_manager().spawn_worker(engineer.id, engineer.project_id)
-    return f"Engineer spawned: {engineer.id}"
+    get_message_router().notify(engineer.id)
+    return (
+        f"Engineer spawned: {engineer.id}\n"
+        f"The engineer is now awake. Send it a message or assign a task to give it work."
+    )
 
 
 async def _run_list_agents(ctx: RunContext, tool_input: dict) -> str:
@@ -506,7 +512,7 @@ _TOOLS: list[LoopTool] = [
     ),
     # --- Sandbox / execution ---
     LoopTool(
-        name="execute_command E2B",
+        name="execute_command",
         description="Execute shell command in a E2B sandbox.",
         input_schema={
             "type": "object",
@@ -612,10 +618,14 @@ _TOOLS: list[LoopTool] = [
         description="Spawn a new engineer.",
         input_schema={
             "type": "object",
-            "properties": {"display_name": {"type": "string"}, "model": {"type": "string"}},
+            "properties": {
+                "display_name": {"type": "string"},
+                "model": {"type": "string"},
+                "tier": {"type": "string"},
+            },
             "required": ["display_name"],
         },
-        allowed_roles=["manager"],
+        allowed_roles=["manager", "cto"],
         execute=_run_spawn_engineer,
     ),
     LoopTool(

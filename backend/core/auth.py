@@ -6,7 +6,6 @@ Supports Firebase ID tokens with an API token fallback.
 from __future__ import annotations
 
 import hashlib
-import logging
 import os
 from pathlib import Path
 
@@ -19,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.config import settings
 from backend.db.models import User
 from backend.db.session import get_db
+from backend.logging.my_logger import get_logger
 
 try:
     import firebase_admin
@@ -31,7 +31,7 @@ except Exception:  # pragma: no cover - dependency may be absent in local tests
 
 
 _firebase_ready = False
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _token_fingerprint(token: str) -> str:

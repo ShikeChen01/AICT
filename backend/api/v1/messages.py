@@ -14,8 +14,11 @@ from backend.core.auth import get_current_user
 from backend.core.exceptions import ProjectNotFoundError
 from backend.db.models import Repository, User
 from backend.db.session import get_db
+from backend.logging.my_logger import get_logger
 from backend.schemas.message import ChannelMessageResponse, ChannelMessageSend
 from backend.services.message_service import get_message_service
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 
@@ -57,12 +60,23 @@ async def send_message(
         content=body.content,
     )
     await db.commit()
+    logger.info(
+        "send_message: msg_id=%s project=%s target_agent=%s content_len=%d",
+        msg.id,
+        body.project_id,
+        body.target_agent_id,
+        len(body.content),
+    )
     # Notify MessageRouter to wake the agent (if router is available)
     try:
         from backend.workers.message_router import get_message_router
         get_message_router().notify(body.target_agent_id)
-    except Exception:
-        pass  # Router may not be started yet (e.g. tests)
+    except Exception as exc:
+        logger.warning(
+            "send_message: failed to notify router for agent %s: %s",
+            body.target_agent_id,
+            exc,
+        )
     return ChannelMessageResponse.model_validate(msg)
 
 

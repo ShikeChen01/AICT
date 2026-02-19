@@ -7,10 +7,10 @@ Docs contract (backend&API.md):
 - kanban: task_created, task_update
 - agents: agent_status
 - activity: agent_log, sandbox_log
+- backend_logs: backend_log, backend_log_snapshot
 """
 
 import asyncio
-import logging
 from enum import Enum
 from uuid import UUID
 
@@ -30,8 +30,9 @@ from backend.websocket.events import (
     create_task_update_event,
     create_workflow_update_event,
 )
+from backend.logging.my_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class Channel(str, Enum):
@@ -41,6 +42,7 @@ class Channel(str, Enum):
     KANBAN = "kanban"
     AGENTS = "agents"
     ACTIVITY = "activity"
+    BACKEND_LOGS = "backend_logs"
     WORKFLOW = "workflow"
     ALL = "all"
 
@@ -63,6 +65,7 @@ class ConnectionInfo:
                 Channel.KANBAN,
                 Channel.AGENTS,
                 Channel.ACTIVITY,
+                Channel.BACKEND_LOGS,
                 Channel.WORKFLOW,
             ])
 

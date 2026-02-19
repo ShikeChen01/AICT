@@ -35,7 +35,13 @@ function WorkspaceContent({
   project: Project | undefined;
   loading: boolean;
 }) {
-  const { isConnected, getBuffer, clearBuffer, activityLogs } = useAgentStreamContext();
+  const {
+    isConnected,
+    workersReady,
+    getBuffer,
+    clearBuffer,
+    activityLogs,
+  } = useAgentStreamContext();
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [streamRatio, setStreamRatio] = useState(0.38);
   const [agentsRatio, setAgentsRatio] = useState(0.45);
@@ -176,6 +182,21 @@ function WorkspaceContent({
             subtitle="Realtime events across all agents"
             className="min-h-0 flex-1"
             bodyClassName="min-h-0"
+            headerActions={(
+              <button
+                type="button"
+                onClick={() => {
+                  const logsUrl = `/repository/${projectId}/backend-logs`;
+                  const tab = window.open(logsUrl, '_blank', 'noopener,noreferrer');
+                  if (!tab) {
+                    window.location.assign(logsUrl);
+                  }
+                }}
+                className="rounded-md border border-[var(--border-color)] bg-[var(--surface-card)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+              >
+                Backend logs
+              </button>
+            )}
           >
             <ActivityFeed logs={activityLogs} />
           </Panel>
@@ -189,6 +210,7 @@ function WorkspaceContent({
       main={main}
       monitoringPanel={agentsPanel}
       isWsConnected={isConnected}
+      workersReady={workersReady}
     />
   );
 }

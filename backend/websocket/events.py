@@ -36,6 +36,8 @@ class EventType(str, Enum):
     WORKFLOW_UPDATE = "workflow_update"
     AGENT_LOG = "agent_log"
     SANDBOX_LOG = "sandbox_log"
+    BACKEND_LOG = "backend_log"
+    BACKEND_LOG_SNAPSHOT = "backend_log_snapshot"
 
 
 class WebSocketEvent(BaseModel):
@@ -115,6 +117,21 @@ class SandboxLogPayload(BaseModel):
     sandbox_id: str
     stream: str  # 'stdout', 'stderr'
     content: str
+
+
+class BackendLogItemPayload(BaseModel):
+    """Payload for one backend application log entry."""
+    seq: int
+    ts: str
+    level: str
+    logger: str
+    message: str
+
+
+class BackendLogSnapshotPayload(BaseModel):
+    """Payload containing buffered backend logs for initial websocket sync."""
+    items: list[BackendLogItemPayload]
+    latest_seq: int = 0
 
 
 # ── Agent stream payloads (docs) ───────────────────────────────────
@@ -293,6 +310,41 @@ def create_sandbox_log_event(
             sandbox_id=sandbox_id,
             stream=stream,
             content=content,
+        ).model_dump(mode="json"),
+    )
+
+
+def create_backend_log_event(
+    seq: int,
+    ts: str,
+    level: str,
+    logger: str,
+    message: str,
+) -> WebSocketEvent:
+    """Create incremental backend_log event."""
+    return WebSocketEvent(
+        type=EventType.BACKEND_LOG,
+        data=BackendLogItemPayload(
+            seq=seq,
+            ts=ts,
+            level=level,
+            logger=logger,
+            message=message,
+        ).model_dump(mode="json"),
+    )
+
+
+def create_backend_log_snapshot_event(
+    items: list[dict[str, Any]],
+    latest_seq: int,
+) -> WebSocketEvent:
+    """Create backend_log_snapshot event with buffered items."""
+    payload_items = [BackendLogItemPayload(**item) for item in items]
+    return WebSocketEvent(
+        type=EventType.BACKEND_LOG_SNAPSHOT,
+        data=BackendLogSnapshotPayload(
+            items=payload_items,
+            latest_seq=latest_seq,
         ).model_dump(mode="json"),
     )
 

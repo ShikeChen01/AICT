@@ -2,11 +2,12 @@
 Agent management tools for LangGraph agents.
 """
 
-import logging
 import uuid
 from langchain_core.tools import tool
 
-logger = logging.getLogger(__name__)
+from backend.logging.my_logger import get_logger
+
+logger = get_logger(__name__)
 
 from backend.core.exceptions import MaxEngineersReached
 from backend.db.models import Agent
@@ -18,7 +19,8 @@ from backend.services.agent_service import get_agent_service
 async def spawn_engineer(
     project_id: str,
     display_name: str | None = None,
-    model: str = "claude-4.5",
+    model: str | None = None,
+    tier: str | None = None,
 ) -> str:
     """
     Spawn a new engineer agent for the project.
@@ -30,6 +32,7 @@ async def spawn_engineer(
         project_id: The UUID of the project.
         display_name: Optional display name (e.g. Engineer-3). Auto-generated if omitted.
         model: Model to use for the engineer.
+        tier: Optional engineer tier (e.g. junior/senior).
     """
     async with AsyncSessionLocal() as session:
         service = get_agent_service(session)
@@ -38,6 +41,7 @@ async def spawn_engineer(
                 uuid.UUID(project_id),
                 display_name=display_name,
                 model=model,
+                tier=tier,
             )
             await session.commit()
             return (

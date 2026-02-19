@@ -133,7 +133,7 @@ async def sample_manager(session: AsyncSession, sample_project: Repository) -> A
         project_id=sample_project.id,
         role="manager",
         display_name="Manager",
-        model="claude-4.5-opus",
+        model="",
         status="sleeping",
         sandbox_persist=True,
     )
@@ -150,7 +150,7 @@ async def sample_cto(session: AsyncSession, sample_project: Repository) -> Agent
         project_id=sample_project.id,
         role="cto",
         display_name="CTO",
-        model="claude-4-sonnet",
+        model="",
         status="sleeping",
         sandbox_persist=True,
     )
@@ -167,7 +167,7 @@ async def sample_engineer(session: AsyncSession, sample_project: Repository) -> 
         project_id=sample_project.id,
         role="engineer",
         display_name="Engineer-1",
-        model="claude-4.5",
+        model="",
         status="sleeping",
         sandbox_persist=False,
     )

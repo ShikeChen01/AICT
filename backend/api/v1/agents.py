@@ -180,6 +180,7 @@ async def spawn_engineer(
         data.project_id,
         display_name=data.display_name,
         model=data.model,
+        tier=data.tier,
         module_path=data.module_path,
     )
     await db.commit()
@@ -334,6 +335,7 @@ async def get_agent_context(
         id=agent.id,
         role=agent.role,
         display_name=agent.display_name,
+        tier=agent.tier,
         model=agent.model,
         status=agent.status,
         system_prompt=system_prompt,

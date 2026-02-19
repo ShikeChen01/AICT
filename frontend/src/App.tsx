@@ -5,7 +5,16 @@
 
 import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
-import { AuthCallbackPage, LoginPage, ProjectsPage, RegisterPage, SettingsPage, UserSettingsPage, WorkspacePage } from './pages';
+import {
+  AuthCallbackPage,
+  BackendLogsPage,
+  LoginPage,
+  ProjectsPage,
+  RegisterPage,
+  SettingsPage,
+  UserSettingsPage,
+  WorkspacePage,
+} from './pages';
 import { getAuthToken, healthCheck } from './api/client';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProjectProvider, useProjectContext } from './contexts/ProjectContext';
@@ -90,6 +99,7 @@ function AppShell() {
           <Route path="/repository/:projectId/kanban" element={<WorkspacePage view="kanban" />} />
           <Route path="/repository/:projectId/workflow" element={<WorkspacePage view="workflow" />} />
           <Route path="/repository/:projectId/artifacts" element={<WorkspacePage view="artifacts" />} />
+          <Route path="/repository/:projectId/backend-logs" element={<BackendLogsPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

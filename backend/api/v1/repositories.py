@@ -1,6 +1,5 @@
 """Repository REST API endpoints."""
 
-import logging
 import shutil
 import subprocess
 import uuid as uuid_module
@@ -17,6 +16,7 @@ from backend.core.exceptions import ProjectNotFoundError
 from backend.db.models import Agent, Repository, User
 from backend.db.session import get_db
 from backend.db.repositories.project_settings import ProjectSettingsRepository
+from backend.logging.my_logger import get_logger
 from backend.schemas.project_settings import (
     ProjectSettingsResponse,
     ProjectSettingsUpdate,
@@ -29,7 +29,7 @@ from backend.schemas.repository import (
 )
 from backend.services.git_service import GitService
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/repositories", tags=["repositories"])
 
@@ -150,7 +150,7 @@ async def create_repository(
         project_id=repository_id,
         role="manager",
         display_name="Manager",
-        model=settings.claude_model,
+        model=settings.manager_model_default,
         status="sleeping",
         sandbox_persist=True,
     )
@@ -158,7 +158,7 @@ async def create_repository(
         project_id=repository_id,
         role="cto",
         display_name="CTO",
-        model=settings.gemini_model,
+        model=settings.cto_model_default,
         status="sleeping",
         sandbox_persist=True,
     )
@@ -223,7 +223,7 @@ async def import_repository(
         project_id=repository_id,
         role="manager",
         display_name="Manager",
-        model=settings.claude_model,
+        model=settings.manager_model_default,
         status="sleeping",
         sandbox_persist=True,
     )
@@ -231,7 +231,7 @@ async def import_repository(
         project_id=repository_id,
         role="cto",
         display_name="CTO",
-        model=settings.gemini_model,
+        model=settings.cto_model_default,
         status="sleeping",
         sandbox_persist=True,
     )

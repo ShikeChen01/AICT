@@ -7,12 +7,12 @@ their queue via register(agent_id, queue).
 """
 
 import asyncio
-import logging
 from uuid import UUID
 
 from backend.db.models import ChannelMessage
+from backend.logging.my_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _router: "MessageRouter | None" = None
 
@@ -37,10 +37,15 @@ class MessageRouter:
         """Push a wake-up signal to the agent's queue (no payload). Non-blocking put."""
         q = self._queues.get(agent_id)
         if q is None:
-            logger.debug("MessageRouter: no queue for agent %s, skip notify", agent_id)
+            logger.warning(
+                "MessageRouter: no queue registered for agent %s — worker may not have started. "
+                "Agent will not process this wake-up signal.",
+                agent_id,
+            )
             return
         try:
             q.put_nowait(None)  # Sentinel: wake up, no payload
+            logger.debug("MessageRouter: notified agent %s", agent_id)
         except asyncio.QueueFull:
             logger.warning("MessageRouter: queue full for agent %s", agent_id)
 

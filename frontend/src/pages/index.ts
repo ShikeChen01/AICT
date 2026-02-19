@@ -5,3 +5,4 @@ export { RegisterPage } from './Register';
 export { UserSettingsPage } from './UserSettings';
 export { AuthCallbackPage } from './AuthCallback';
 export { WorkspacePage } from './Workspace';
+export { BackendLogsPage } from './BackendLogs';

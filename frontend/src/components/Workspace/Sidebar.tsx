@@ -21,6 +21,7 @@ export function Sidebar({ activeProjectId, onProjectChange }: SidebarProps) {
   const workflowPath = projectId ? `/repository/${projectId}/workflow` : '/';
   const artifactsPath = projectId ? `/repository/${projectId}/artifacts` : '/';
   const settingsPath = projectId ? `/repository/${projectId}/settings` : '/';
+  const backendLogsPath = projectId ? `/repository/${projectId}/backend-logs` : '/';
 
   const handleProjectChange = (nextId: string) => {
     onProjectChange?.(nextId);
@@ -117,6 +118,22 @@ export function Sidebar({ activeProjectId, onProjectChange }: SidebarProps) {
               </span>
               Project Settings
             </NavLink>
+          </li>
+          <li>
+            <a
+              href={backendLogsPath}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:bg-white/7 hover:text-white"
+            >
+              <span className="w-5 h-5 flex items-center justify-center">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4h16v11H4z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 19h8M12 15v4" />
+                </svg>
+              </span>
+              Backend Logs
+            </a>
           </li>
         </ul>
       </nav>

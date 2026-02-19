@@ -143,6 +143,17 @@ export async function healthCheck(): Promise<{ status: string }> {
   return request<{ status: string }>('GET', '/health');
 }
 
+export interface WorkerHealth {
+  started: boolean;
+  shutting_down: boolean;
+  worker_count: number;
+  agent_ids: string[];
+}
+
+export async function workerHealthCheck(): Promise<WorkerHealth> {
+  return request<WorkerHealth>('GET', '/health/workers');
+}
+
 // ─── Messages (NEW — user-to-agent) ────────────────────────────────────
 
 export async function sendMessage(body: ChannelMessageSend): Promise<ChannelMessage> {
@@ -387,11 +398,13 @@ export class WebSocketClient {
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
   private projectId: string;
+  private wsChannels: string;
   private isConnecting = false;
   private shouldReconnect = true;
 
-  constructor(projectId: string) {
+  constructor(projectId: string, wsChannels: string = 'all') {
     this.projectId = projectId;
+    this.wsChannels = wsChannels;
   }
 
   connect(): void {
@@ -408,7 +421,7 @@ export class WebSocketClient {
 
     const url = new URL(WS_BASE, window.location.href);
     url.searchParams.set('project_id', this.projectId);
-    url.searchParams.set('channels', 'all');
+    url.searchParams.set('channels', this.wsChannels);
     url.searchParams.set('token', authToken);
 
     this.ws = new WebSocket(url.toString());
@@ -473,8 +486,8 @@ export class WebSocketClient {
 }
 
 // Factory function for creating WebSocket client
-export function createWebSocketClient(projectId: string): WebSocketClient {
-  return new WebSocketClient(projectId);
+export function createWebSocketClient(projectId: string, channels: string = 'all'): WebSocketClient {
+  return new WebSocketClient(projectId, channels);
 }
 
 // Export error class

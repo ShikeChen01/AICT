@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.config import settings
 from backend.core.exceptions import MaxEngineersReached, ProjectNotFoundError
 from backend.db.models import Agent, Repository, VALID_ROLES
+from backend.llm.model_resolver import normalize_tier, resolve_model
 
 
 class AgentService:
@@ -60,7 +61,8 @@ class AgentService:
         project_id: UUID,
         *,
         display_name: str | None = None,
-        model: str = "claude-4.5",
+        model: str | None = None,
+        tier: str | None = None,
         module_path: str | None = None,
     ) -> Agent:
         """
@@ -76,12 +78,15 @@ class AgentService:
         # Compute display name (Engineer-1, Engineer-2, ...)
         if display_name is None:
             display_name = f"Engineer-{count + 1}"
+        normalized_tier = normalize_tier(tier)
+        effective_model = resolve_model("engineer", tier=normalized_tier, model_override=model)
 
         agent = Agent(
             project_id=project_id,
             role="engineer",
             display_name=display_name,
-            model=model,
+            tier=normalized_tier,
+            model=effective_model,
             status="sleeping",
             sandbox_persist=False,
             current_task_id=None,
@@ -98,8 +103,8 @@ class AgentService:
         self,
         project: Repository,
         *,
-        manager_model: str = "gemini-2.5-pro",
-        cto_model: str = "claude-4-sonnet",
+        manager_model: str | None = None,
+        cto_model: str | None = None,
     ) -> tuple[Agent, Agent]:
         """
         Ensure manager and CTO agents exist for a project. Create them if missing.
@@ -115,13 +120,15 @@ class AgentService:
         existing = {a.role: a for a in result.scalars().all()}
         manager = existing.get("manager")
         cto = existing.get("cto")
+        manager_model_resolved = resolve_model("manager", model_override=manager_model)
+        cto_model_resolved = resolve_model("cto", model_override=cto_model)
 
         if not manager:
             manager = Agent(
                 project_id=project.id,
                 role="manager",
                 display_name="GM",
-                model=manager_model,
+                model=manager_model_resolved,
                 status="sleeping",
                 sandbox_persist=True,
             )
@@ -134,7 +141,7 @@ class AgentService:
                 project_id=project.id,
                 role="cto",
                 display_name="CTO",
-                model=cto_model,
+                model=cto_model_resolved,
                 status="sleeping",
                 sandbox_persist=True,
             )

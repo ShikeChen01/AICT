@@ -6,16 +6,16 @@ Allows engineers to read, write, and list files in their E2B sandbox.
 
 import os
 import uuid
-import logging
 from langchain_core.tools import tool
 from sqlalchemy import select
 
 from backend.db.session import AsyncSessionLocal
 from backend.db.models import Agent
 from backend.config import settings
+from backend.logging.my_logger import get_logger
 from backend.services.e2b_service import E2BService, LOCAL_FALLBACK_SANDBOX_ERROR
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 try:
     from e2b import AsyncSandbox

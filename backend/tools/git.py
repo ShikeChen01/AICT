@@ -8,7 +8,6 @@ see the same files that write_file/execute_in_sandbox use.
 import os
 import shlex
 import uuid
-import logging
 from langchain_core.tools import tool
 from sqlalchemy import select
 
@@ -18,8 +17,9 @@ from backend.config import settings
 from backend.services.git_service import GitService
 from backend.services.e2b_service import E2BService, LOCAL_FALLBACK_SANDBOX_ERROR
 from backend.core.exceptions import GitOperationFailed
+from backend.logging.my_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 try:
     from e2b import AsyncSandbox

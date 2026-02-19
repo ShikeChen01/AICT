@@ -71,6 +71,10 @@ $yamlLines = @(
     "GEMINI_API_KEY: '$($env:GEMINI_API_KEY)'"
     "CLAUDE_MODEL: '$($env:CLAUDE_MODEL)'"
     "GEMINI_MODEL: '$($env:GEMINI_MODEL)'"
+    "MANAGER_MODEL_DEFAULT: '$($env:MANAGER_MODEL_DEFAULT)'"
+    "CTO_MODEL_DEFAULT: '$($env:CTO_MODEL_DEFAULT)'"
+    "ENGINEER_MODEL_DEFAULT: '$($env:ENGINEER_MODEL_DEFAULT)'"
+    "LLM_USE_LEGACY_HTTP: '$($env:LLM_USE_LEGACY_HTTP)'"
     "E2B_API_KEY: '$($env:E2B_API_KEY)'"
     "GITHUB_TOKEN: '$($env:GITHUB_TOKEN)'"
     "PROVISION_REPOS_ON_STARTUP: 'true'"
@@ -87,7 +91,9 @@ try {
         --platform managed `
         --allow-unauthenticated `
         --add-cloudsql-instances $ConnName `
-        --env-vars-file $EnvFile
+        --env-vars-file $EnvFile `
+        --min-instances 1 `
+        --cpu-boost
 }
 finally {
     Remove-Item $EnvFile -Force -ErrorAction SilentlyContinue

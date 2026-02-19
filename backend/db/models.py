@@ -117,6 +117,7 @@ class Agent(Base):
     )
     role = Column(String(50), nullable=False)  # 'manager', 'cto', 'engineer'
     display_name = Column(String(100), nullable=False)
+    tier = Column(String(50), nullable=True)
     model = Column(String(100), nullable=False)
     status = Column(String(20), default="sleeping", nullable=False)
     current_task_id = Column(

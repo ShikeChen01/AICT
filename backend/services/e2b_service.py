@@ -9,7 +9,6 @@ Sandboxes are initialized with project repo cloned for engineers.
 
 from __future__ import annotations
 
-import logging
 import os
 import uuid
 from dataclasses import dataclass
@@ -22,13 +21,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.config import settings
 from backend.core.exceptions import SandboxNotFoundError
 from backend.db.models import Agent, Repository
+from backend.logging.my_logger import get_logger
 
 try:
     from e2b import AsyncSandbox
 except Exception:  # pragma: no cover - optional dependency in local tests
     AsyncSandbox = None
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 LOCAL_FALLBACK_SANDBOX_ERROR = (
     "Error: Local fallback sandbox cannot execute remote E2B operations. "
     "Configure E2B and create a real sandbox."

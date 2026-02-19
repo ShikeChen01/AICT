@@ -28,7 +28,7 @@ async def cto_node(state: AgentState):
         previous_node="manager",
     )
 
-    model = get_model()
+    model = get_model(role="cto")
     tools = get_cto_tools()
     model_with_tools = model.bind_tools(tools)
 

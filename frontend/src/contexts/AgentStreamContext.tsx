@@ -12,7 +12,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { createWebSocketClient, getAuthToken, WebSocketClient } from '../api/client';
+import { createWebSocketClient, getAuthToken, WebSocketClient, workerHealthCheck } from '../api/client';
 import type {
   AgentStreamBuffer,
   AgentTextData,
@@ -23,10 +23,13 @@ import type {
   StreamChunk,
   ActivityLogItem,
   AgentRole,
+  BackendLogItem,
+  BackendLogSnapshotData,
 } from '../types';
 
 const MAX_CHUNKS = 500;
 const MAX_ACTIVITY = 400;
+const MAX_BACKEND_LOGS = 1000;
 
 function createEmptyBuffer(agentId: string): AgentStreamBuffer {
   return {
@@ -41,27 +44,51 @@ function createEmptyBuffer(agentId: string): AgentStreamBuffer {
 interface AgentStreamContextValue {
   buffers: Map<string, AgentStreamBuffer>;
   activityLogs: ActivityLogItem[];
+  backendLogs: BackendLogItem[];
   inspectedAgentId: string | null;
   setInspectedAgent: (agentId: string | null) => void;
   getBuffer: (agentId: string) => AgentStreamBuffer;
   clearBuffer: (agentId: string) => void;
+  clearBackendLogs: () => void;
   isConnected: boolean;
+  workersReady: boolean;
 }
 
 const AgentStreamContext = createContext<AgentStreamContextValue | null>(null);
 
 export function AgentStreamProvider({
   projectId,
+  wsChannels = 'agent_stream,messages,kanban,agents,activity,workflow',
+  backendLogsWsChannels = 'backend_logs',
+  enablePrimaryStream = true,
+  enableBackendLogStream = true,
   children,
 }: {
   projectId: string | null;
+  wsChannels?: string;
+  backendLogsWsChannels?: string;
+  enablePrimaryStream?: boolean;
+  enableBackendLogStream?: boolean;
   children: React.ReactNode;
 }) {
-  const clientRef = useRef<WebSocketClient | null>(null);
+  const primaryClientRef = useRef<WebSocketClient | null>(null);
+  const backendLogClientRef = useRef<WebSocketClient | null>(null);
   const [buffers, setBuffers] = useState<Map<string, AgentStreamBuffer>>(new Map());
   const [activityLogs, setActivityLogs] = useState<ActivityLogItem[]>([]);
+  const [backendLogs, setBackendLogs] = useState<BackendLogItem[]>([]);
   const [inspectedAgentId, setInspectedAgentId] = useState<string | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
+  const [primaryConnected, setPrimaryConnected] = useState(false);
+  const [backendLogConnected, setBackendLogConnected] = useState(false);
+  const [workersReady, setWorkersReady] = useState(false);
+
+  // Ref mirrors inspectedAgentId so the WS handler can read the latest value
+  // without forcing a reconnection every time the user selects a different agent.
+  const inspectedAgentRef = useRef(inspectedAgentId);
+  inspectedAgentRef.current = inspectedAgentId;
+
+  // Track the highest backend-log seq we've seen so we can skip duplicates
+  // that arrive between a snapshot delivery and incremental events.
+  const backendLogSeqRef = useRef(0);
 
   const appendChunk = useCallback((agentId: string, chunk: StreamChunk) => {
     const now = Date.now();
@@ -115,19 +142,19 @@ export function AgentStreamProvider({
   const token = getAuthToken();
 
   useEffect(() => {
-    if (!projectId || !token) {
-      clientRef.current?.disconnect();
-      clientRef.current = null;
+    if (!enablePrimaryStream || !projectId || !token) {
+      primaryClientRef.current?.disconnect();
+      primaryClientRef.current = null;
       setBuffers(new Map());
       setActivityLogs([]);
-      setIsConnected(false);
+      setPrimaryConnected(false);
       return;
     }
 
-    const client = createWebSocketClient(projectId);
-    clientRef.current = client;
+    const client = createWebSocketClient(projectId, wsChannels);
+    primaryClientRef.current = client;
 
-    const checkConnected = () => setIsConnected(client.isConnected);
+    const checkConnected = () => setPrimaryConnected(client.isConnected);
 
     const unsub = client.subscribe((event) => {
       checkConnected();
@@ -233,8 +260,9 @@ export function AgentStreamProvider({
         }
         case 'system_message': {
           const d = data as unknown as SystemMessageData;
-          if (!inspectedAgentId) break;
-          appendChunk(inspectedAgentId, {
+          const currentInspected = inspectedAgentRef.current;
+          if (!currentInspected) break;
+          appendChunk(currentInspected, {
             type: 'message',
             content: d?.content ?? '',
             from: 'system',
@@ -244,12 +272,12 @@ export function AgentStreamProvider({
             id: `system-${Date.now()}`,
             timestamp: ts,
             project_id: projectId,
-            agent_id: inspectedAgentId,
+            agent_id: currentInspected,
             agent_role: 'manager',
             log_type: 'message',
             content: d?.content ?? '',
           });
-          setStreaming(inspectedAgentId, false);
+          setStreaming(currentInspected, false);
           break;
         }
         default:
@@ -264,10 +292,86 @@ export function AgentStreamProvider({
       clearInterval(interval);
       unsub();
       client.disconnect();
-      clientRef.current = null;
-      setIsConnected(false);
+      primaryClientRef.current = null;
+      setPrimaryConnected(false);
     };
-  }, [projectId, token, appendChunk, setStreaming, inspectedAgentId, appendActivity]);
+  }, [projectId, token, wsChannels, enablePrimaryStream, appendChunk, setStreaming, appendActivity]);
+
+  useEffect(() => {
+    if (!enableBackendLogStream || !projectId || !token) {
+      backendLogClientRef.current?.disconnect();
+      backendLogClientRef.current = null;
+      setBackendLogs([]);
+      setBackendLogConnected(false);
+      return;
+    }
+
+    const client = createWebSocketClient(projectId, backendLogsWsChannels);
+    backendLogClientRef.current = client;
+
+    const checkConnected = () => setBackendLogConnected(client.isConnected);
+
+    const unsub = client.subscribe((event) => {
+      checkConnected();
+      const data = event.data as Record<string, unknown>;
+
+      switch (event.type) {
+        case 'backend_log': {
+          const d = data as unknown as BackendLogItem;
+          if (typeof d?.seq === 'number' && d.seq <= backendLogSeqRef.current) break;
+          if (typeof d?.seq === 'number') backendLogSeqRef.current = d.seq;
+          setBackendLogs((prev) => [...prev, d].slice(-MAX_BACKEND_LOGS));
+          break;
+        }
+        case 'backend_log_snapshot': {
+          const d = data as unknown as BackendLogSnapshotData;
+          const items = (d?.items ?? []).slice(-MAX_BACKEND_LOGS);
+          if (typeof d?.latest_seq === 'number') backendLogSeqRef.current = d.latest_seq;
+          setBackendLogs(items);
+          break;
+        }
+        default:
+          break;
+      }
+    });
+
+    client.connect();
+    const interval = setInterval(checkConnected, 500);
+
+    return () => {
+      clearInterval(interval);
+      unsub();
+      client.disconnect();
+      backendLogClientRef.current = null;
+      setBackendLogConnected(false);
+    };
+  }, [projectId, token, backendLogsWsChannels, enableBackendLogStream]);
+
+  // Poll worker health every 10s so the user knows if the backend workers are down
+  useEffect(() => {
+    if (!projectId || !token) {
+      setWorkersReady(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const health = await workerHealthCheck();
+        if (!cancelled) setWorkersReady(health.started && health.worker_count > 0);
+      } catch {
+        if (!cancelled) setWorkersReady(false);
+      }
+    };
+
+    check();
+    const timer = setInterval(check, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [projectId, token]);
 
   const getBuffer = useCallback(
     (agentId: string): AgentStreamBuffer => {
@@ -284,17 +388,47 @@ export function AgentStreamProvider({
     });
   }, []);
 
+  const clearBackendLogs = useCallback(() => {
+    setBackendLogs([]);
+  }, []);
+
+  const isConnected = useMemo(() => {
+    if (enablePrimaryStream && enableBackendLogStream) {
+      return primaryConnected && backendLogConnected;
+    }
+    if (enablePrimaryStream) {
+      return primaryConnected;
+    }
+    if (enableBackendLogStream) {
+      return backendLogConnected;
+    }
+    return false;
+  }, [enablePrimaryStream, enableBackendLogStream, primaryConnected, backendLogConnected]);
+
   const value: AgentStreamContextValue = useMemo(
     () => ({
       buffers,
       activityLogs,
+      backendLogs,
       inspectedAgentId,
       setInspectedAgent: setInspectedAgentId,
       getBuffer,
       clearBuffer,
+      clearBackendLogs,
       isConnected,
+      workersReady,
     }),
-    [buffers, activityLogs, inspectedAgentId, getBuffer, clearBuffer, isConnected]
+    [
+      buffers,
+      activityLogs,
+      backendLogs,
+      inspectedAgentId,
+      getBuffer,
+      clearBuffer,
+      clearBackendLogs,
+      isConnected,
+      workersReady,
+    ]
   );
 
   return (

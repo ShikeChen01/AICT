@@ -4,17 +4,31 @@
 
 import { useMemo } from 'react';
 import { MarkdownContent } from '../MarkdownContent';
-import type { ChannelMessage } from '../../types';
+import type { Agent, AgentRole, ChannelMessage } from '../../types';
 import { Button } from '../ui';
 import { useAutoFollow } from '../../hooks';
 
 const USER_AGENT_ID = '00000000-0000-0000-0000-000000000000';
+
+const ROLE_ABBREVIATION: Record<AgentRole, string> = {
+  manager: 'GM',
+  cto: 'CTO',
+  engineer: 'ENG',
+};
+
+const ROLE_COLOR: Record<AgentRole, string> = {
+  manager: 'bg-purple-500',
+  cto: 'bg-cyan-500',
+  engineer: 'bg-green-500',
+};
 
 interface MessageListProps {
   messages: ChannelMessage[];
   isLoading?: boolean;
   /** Optional: from_agent_id that represents "user" (default USER_AGENT_ID). */
   userAgentId?: string | null;
+  /** Optional: agents list used to show role labels in message bubbles. */
+  agents?: Agent[];
 }
 
 function formatTime(dateString: string): string {
@@ -24,19 +38,23 @@ function formatTime(dateString: string): string {
 function MessageBubble({
   message,
   isUser,
+  agentLabel,
+  agentColorClass,
 }: {
   message: ChannelMessage;
   isUser: boolean;
+  agentLabel: string;
+  agentColorClass: string;
 }) {
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       <div className={`flex items-end gap-2 max-w-[80%] ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
         <div
-          className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium flex-shrink-0 ${
-            isUser ? 'bg-blue-500' : 'bg-purple-500'
+          className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-medium flex-shrink-0 ${
+            isUser ? 'bg-blue-500' : agentColorClass
           }`}
         >
-          {isUser ? 'You' : 'A'}
+          {isUser ? 'You' : agentLabel}
         </div>
         <div
           className={`rounded-2xl px-4 py-2 ${
@@ -59,8 +77,17 @@ function MessageBubble({
   );
 }
 
-export function MessageList({ messages, isLoading, userAgentId }: MessageListProps) {
+export function MessageList({ messages, isLoading, userAgentId, agents }: MessageListProps) {
   const uid = userAgentId ?? USER_AGENT_ID;
+
+  const agentMap = useMemo(() => {
+    const map = new Map<string, Agent>();
+    for (const agent of agents ?? []) {
+      map.set(agent.id, agent);
+    }
+    return map;
+  }, [agents]);
+
   const messageKey = useMemo(
     () => `${messages.length}:${messages[messages.length - 1]?.id ?? 'none'}`,
     [messages]
@@ -82,8 +109,8 @@ export function MessageList({ messages, isLoading, userAgentId }: MessageListPro
         {isLoading && (
           <div className="flex justify-start mb-4">
             <div className="flex items-end gap-2">
-              <div className="w-8 h-8 rounded-full bg-purple-500 flex items-center justify-center text-white text-sm">
-                A
+              <div className="w-8 h-8 rounded-full bg-purple-500 flex items-center justify-center text-white text-xs">
+                ...
               </div>
               <div className="bg-gray-100 rounded-2xl rounded-bl-sm px-4 py-3">
                 <div className="flex gap-1">
@@ -95,13 +122,21 @@ export function MessageList({ messages, isLoading, userAgentId }: MessageListPro
             </div>
           </div>
         )}
-        {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            isUser={msg.from_agent_id === null || msg.from_agent_id === uid}
-          />
-        ))}
+        {messages.map((msg) => {
+          const isUser = msg.from_agent_id === null || msg.from_agent_id === uid;
+          const agent = msg.from_agent_id ? agentMap.get(msg.from_agent_id) : undefined;
+          const agentLabel = agent ? ROLE_ABBREVIATION[agent.role] : 'A';
+          const agentColorClass = agent ? ROLE_COLOR[agent.role] : 'bg-purple-500';
+          return (
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              isUser={isUser}
+              agentLabel={agentLabel}
+              agentColorClass={agentColorClass}
+            />
+          );
+        })}
       </div>
     </div>
   );

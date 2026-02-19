@@ -1,7 +1,7 @@
 """
 WebSocket endpoint for real-time updates.
 
-Docs contract: /ws?token=<TOKEN>&project_id=<UUID>&channels=agent_stream,messages,kanban,agents,activity,workflow,all
+Docs contract: /ws?token=<TOKEN>&project_id=<UUID>&channels=agent_stream,messages,kanban,agents,activity,backend_logs,workflow,all
 """
 
 from uuid import UUID
@@ -9,6 +9,8 @@ from uuid import UUID
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from backend.core.auth import verify_ws_token
+from backend.core.ws_backend_log_stream import ws_backend_log_stream
+from backend.websocket.events import create_backend_log_snapshot_event
 from backend.websocket.manager import Channel, ws_manager
 
 router = APIRouter()
@@ -19,6 +21,7 @@ _CHANNEL_MAP = {
     "kanban": Channel.KANBAN,
     "agents": Channel.AGENTS,
     "activity": Channel.ACTIVITY,
+    "backend_logs": Channel.BACKEND_LOGS,
     "workflow": Channel.WORKFLOW,
     "all": Channel.ALL,
 }
@@ -31,7 +34,7 @@ async def websocket_endpoint(
     project_id: UUID = Query(..., description="Project ID to subscribe to"),
     channels: str = Query(
         "all",
-        description="Comma-separated: agent_stream,messages,kanban,agents,activity,workflow,all",
+        description="Comma-separated: agent_stream,messages,kanban,agents,activity,backend_logs,workflow,all",
     ),
 ):
     """
@@ -54,6 +57,10 @@ async def websocket_endpoint(
         channel_list.append(Channel.ALL)
 
     await ws_manager.connect(websocket, project_id, channel_list)
+    if Channel.BACKEND_LOGS in channel_list or Channel.ALL in channel_list:
+        items, latest_seq = ws_backend_log_stream.snapshot()
+        snapshot_event = create_backend_log_snapshot_event(items, latest_seq)
+        await websocket.send_json(snapshot_event.model_dump(mode="json"))
 
     try:
         while True:
@@ -64,6 +71,10 @@ async def websocket_endpoint(
                 channel = data.get("channel", "").strip().lower()
                 if channel in _CHANNEL_MAP:
                     await ws_manager.subscribe(websocket, _CHANNEL_MAP[channel])
+                    if _CHANNEL_MAP[channel] in {Channel.BACKEND_LOGS, Channel.ALL}:
+                        items, latest_seq = ws_backend_log_stream.snapshot()
+                        snapshot_event = create_backend_log_snapshot_event(items, latest_seq)
+                        await websocket.send_json(snapshot_event.model_dump(mode="json"))
             elif data.get("type") == "unsubscribe":
                 channel = data.get("channel", "").strip().lower()
                 if channel in _CHANNEL_MAP:

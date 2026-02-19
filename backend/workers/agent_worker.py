@@ -8,7 +8,6 @@ On wake: load agent/project, create session, run_inner_loop, end session, set st
 from __future__ import annotations
 
 import asyncio
-import logging
 from uuid import UUID
 
 from sqlalchemy import select
@@ -21,8 +20,9 @@ from backend.workers.loop import run_inner_loop
 from backend.workers.message_router import get_message_router
 from backend.services.session_service import SessionService
 from backend.websocket.manager import ws_manager
+from backend.logging.my_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AgentWorker:
@@ -34,6 +34,7 @@ class AgentWorker:
         self._queue: asyncio.Queue = asyncio.Queue()
         self._interrupt = False
         self._task: asyncio.Task | None = None
+        self._ready = asyncio.Event()
 
     def interrupt(self) -> None:
         """Signal the worker to break the inner loop at next iteration."""
@@ -42,10 +43,15 @@ class AgentWorker:
     def _interrupt_flag(self) -> bool:
         return self._interrupt
 
+    async def wait_ready(self, timeout: float = 5.0) -> None:
+        """Block until the worker has registered its queue with MessageRouter."""
+        await asyncio.wait_for(self._ready.wait(), timeout=timeout)
+
     async def run(self) -> None:
         """Run the outer loop. Registers queue with MessageRouter."""
         router = get_message_router()
         router.register(self.agent_id, self._queue)
+        self._ready.set()
 
         try:
             while True:

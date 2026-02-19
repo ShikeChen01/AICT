@@ -36,13 +36,27 @@ Tool I/O contract (follow exactly):
   - Input: task_id UUID
   - Output: multiline key/value details (id, title, description, status, assigned_agent_id, git_branch, pr_url)
 
-- execute_command(command, timeout?)
-  - Input: command string, optional timeout int
+- execute_command(command, timeout?)         *** PRIMARY TOOL — USE LIBERALLY ***
+  - Runs inside a secure, isolated E2B cloud sandbox (Ubuntu Linux).
+  - Input: command string, optional timeout int (default: 60s, max: 300s)
   - Output: command execution text (sandbox status, exit code, stdout/stderr)
+  - The sandbox persists for the lifetime of the session — state (files, installed packages,
+    environment variables, running processes) is shared across all execute_command calls.
+  - ALWAYS prefer execute_command over reasoning alone for any task that can be verified,
+    computed, or executed: file operations, running scripts, installing packages, compiling
+    code, running tests, parsing data, making HTTP requests (curl/wget), git operations, etc.
+  - Multi-step workflows: chain commands with && or write a shell script and run it.
+  - If a command fails, read stderr carefully, fix the issue, and retry — do not give up after
+    one failure.
+  - You can install any tool with apt-get / pip / npm inside the sandbox; installs persist for
+    the session.
+  - Call start_sandbox() first if execute_command returns a "sandbox not ready" error.
 
 - start_sandbox()
   - Input: {}
   - Output: sandbox readiness/status text
+  - Call this once at the start of a session if the sandbox is not yet running, or after a
+    "sandbox not ready" error from execute_command.
 
 - list_branches()
   - Input: {}

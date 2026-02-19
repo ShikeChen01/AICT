@@ -250,6 +250,8 @@ export type WSEventType =
   | 'workflow_update'
   | 'agent_log'
   | 'sandbox_log'
+  | 'backend_log'
+  | 'backend_log_snapshot'
   // New stream events (Agent 2)
   | 'agent_text'
   | 'agent_tool_call'
@@ -332,6 +334,19 @@ export interface SandboxLogData {
 export interface WSSandboxLogEvent {
   type: 'sandbox_log';
   data: SandboxLogData;
+}
+
+export interface BackendLogItem {
+  seq: number;
+  ts: string;
+  level: string;
+  logger: string;
+  message: string;
+}
+
+export interface BackendLogSnapshotData {
+  items: BackendLogItem[];
+  latest_seq: number;
 }
 
 // ─── Agent Stream Events (NEW) ────────────────────────────────────────

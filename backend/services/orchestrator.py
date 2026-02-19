@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import logging
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,9 +18,10 @@ from backend.db.models import Agent
 from backend.graph.events import emit_agent_log
 from backend.graph.utils import extract_text_content
 from backend.graph.workflow import create_graph
+from backend.logging.my_logger import get_logger
 from backend.services.e2b_service import E2BService, SandboxMetadata
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _graph_init_lock = asyncio.Lock()
 _graph_app: Any | None = None
@@ -174,9 +174,12 @@ class OrchestratorService:
             from backend.workers.message_router import get_message_router
 
             get_message_router().notify(agent.id)
-        except Exception:
-            # Router may not be initialized yet in some tests/boot phases.
-            pass
+        except Exception as exc:
+            logger.warning(
+                "wake_agent: could not notify router for agent %s: %s",
+                agent.id,
+                exc,
+            )
         return await self.ensure_sandbox_for_agent(session, agent)
 
     async def run_manager_graph(

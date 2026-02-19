@@ -37,7 +37,7 @@ async def engineer_node(state: dict):
         metadata={"task_id": task_id, "task_title": task_title},
     )
     
-    model = get_model()
+    model = get_model(role="engineer")
     
     # Bind tools available to the Engineer
     tools = get_engineer_tools()

@@ -22,6 +22,7 @@ class SpawnEngineerRequest(BaseModel):
     agent_id: UUID
     display_name: str
     model: str | None = None
+    tier: str | None = None
 
 
 @router.post("/spawn-engineer")
@@ -37,14 +38,15 @@ async def spawn_engineer(
     actor = result.scalar_one_or_none()
     if not actor:
         raise HTTPException(status_code=404, detail="Agent not found")
-    if actor.role != "manager":
-        raise HTTPException(status_code=403, detail="Only manager can spawn engineers")
+    if actor.role not in {"manager", "cto"}:
+        raise HTTPException(status_code=403, detail="Only manager/cto can spawn engineers")
 
     service = get_agent_service(db)
     agent = await service.spawn_engineer(
         actor.project_id,
         display_name=body.display_name,
-        model=body.model or "claude-4.5",
+        model=body.model,
+        tier=body.tier,
     )
     await db.commit()
     await db.refresh(agent)

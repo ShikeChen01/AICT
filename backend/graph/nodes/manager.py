@@ -30,7 +30,7 @@ async def manager_node(state: AgentState):
         node_status="started",
     )
     
-    model = get_model()
+    model = get_model(role="manager")
     
     # Bind Manager tools to the model
     tools = get_manager_tools()

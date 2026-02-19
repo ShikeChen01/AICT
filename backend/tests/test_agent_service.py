@@ -4,6 +4,7 @@ Tests for AgentService.
 
 import pytest
 
+from backend.config import settings
 from backend.core.exceptions import MaxEngineersReached, ProjectNotFoundError
 from backend.services.agent_service import get_agent_service
 
@@ -40,6 +41,41 @@ async def test_spawn_engineer_with_display_name(session, sample_project):
         display_name="Backend-Engineer",
     )
     assert agent.display_name == "Backend-Engineer"
+
+
+@pytest.mark.asyncio
+async def test_spawn_engineer_resolves_tier_model(session, sample_project, monkeypatch):
+    service = get_agent_service(session)
+    monkeypatch.setattr(
+        settings,
+        "agent_tier_models",
+        {"engineer:senior": "claude-4-6-sonnet-latest"},
+    )
+    agent = await service.spawn_engineer(
+        sample_project.id,
+        display_name="Engineer-Senior",
+        tier=" Senior ",
+    )
+    assert agent.tier == "senior"
+    assert agent.model == "claude-4-6-sonnet-latest"
+
+
+@pytest.mark.asyncio
+async def test_spawn_engineer_model_override_wins_over_tier(session, sample_project, monkeypatch):
+    service = get_agent_service(session)
+    monkeypatch.setattr(
+        settings,
+        "agent_tier_models",
+        {"engineer:junior": "gemini-2.0-flash-lite"},
+    )
+    agent = await service.spawn_engineer(
+        sample_project.id,
+        display_name="Engineer-Override",
+        tier="junior",
+        model="claude-4-6-sonnet-latest",
+    )
+    assert agent.tier == "junior"
+    assert agent.model == "claude-4-6-sonnet-latest"
 
 
 @pytest.mark.asyncio

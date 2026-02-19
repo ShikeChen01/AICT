@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from backend.config import settings
 from backend.services.e2b_service import LOCAL_FALLBACK_SANDBOX_ERROR, SandboxMetadata
 from backend.tools.loop_registry import (
     RunContext,
@@ -18,6 +19,18 @@ from backend.workers.loop import (
     run_inner_loop,
 )
 from backend.services.session_service import SessionService
+from backend.core.constants import USER_AGENT_ID
+
+
+def _make_unread_msg(from_id, project_id, target_id, content="hi"):
+    """Build a minimal mock ChannelMessage object."""
+    m = MagicMock()
+    m.id = uuid4()
+    m.from_agent_id = from_id
+    m.target_agent_id = target_id
+    m.content = content
+    m.message_type = "normal"
+    return m
 
 
 def _make_ctx(session, agent) -> RunContext:
@@ -68,6 +81,15 @@ def test_tool_defs_include_start_sandbox_for_all_roles() -> None:
     for role in ("manager", "cto", "engineer"):
         tool_names = {tool["name"] for tool in get_tool_defs_for_role(role)}
         assert "start_sandbox" in tool_names
+
+
+def test_tool_defs_include_spawn_engineer_for_manager_and_cto() -> None:
+    manager_tools = {tool["name"] for tool in get_tool_defs_for_role("manager")}
+    cto_tools = {tool["name"] for tool in get_tool_defs_for_role("cto")}
+    engineer_tools = {tool["name"] for tool in get_tool_defs_for_role("engineer")}
+    assert "spawn_engineer" in manager_tools
+    assert "spawn_engineer" in cto_tools
+    assert "spawn_engineer" not in engineer_tools
 
 
 @pytest.mark.asyncio
@@ -185,3 +207,261 @@ async def test_run_inner_loop_uses_assignment_context_without_unread_messages(
 
     assert result == "normal_end"
     assert llm_call.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_run_inner_loop_resolves_model_from_role_and_tier(
+    sample_engineer, sample_project, session, monkeypatch
+) -> None:
+    sample_engineer.model = ""
+    sample_engineer.tier = "senior"
+    monkeypatch.setattr(
+        settings,
+        "agent_tier_models",
+        {"engineer:senior": "claude-4-6-sonnet-latest"},
+    )
+
+    sess = await SessionService(session).create_session(
+        sample_engineer.id, sample_project.id, trigger_message_id=None
+    )
+
+    monkeypatch.setattr(
+        "backend.services.prompt_service.build_system_prompt",
+        lambda *_args, **_kwargs: "test prompt",
+    )
+    unread = [_make_unread_msg(USER_AGENT_ID, sample_project.id, sample_engineer.id, "hello")]
+    monkeypatch.setattr(
+        "backend.db.repositories.messages.ChannelMessageRepository.list_by_target_and_status",
+        AsyncMock(return_value=unread),
+    )
+    monkeypatch.setattr(
+        "backend.db.repositories.messages.ChannelMessageRepository.mark_received",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "backend.db.repositories.messages.AgentMessageRepository.list_by_session",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "backend.db.repositories.messages.AgentMessageRepository.create_message",
+        AsyncMock(),
+    )
+
+    llm_mock = AsyncMock(return_value=("", [{"name": "end", "input": {}, "id": "end-1"}]))
+    monkeypatch.setattr(
+        "backend.services.llm_service.LLMService.chat_completion_with_tools",
+        llm_mock,
+    )
+
+    result = await run_inner_loop(
+        sample_engineer,
+        sample_project,
+        sess.id,
+        trigger_message_id=None,
+        db=session,
+        interrupt_flag=lambda: False,
+    )
+
+    assert result == "normal_end"
+    assert llm_mock.await_count == 1
+    assert llm_mock.await_args.kwargs["model"] == "claude-4-6-sonnet-latest"
+
+
+@pytest.mark.asyncio
+async def test_run_inner_loop_normalizes_legacy_tool_name_in_history(
+    sample_engineer, sample_project, session, monkeypatch
+) -> None:
+    """Legacy saved tool name 'execute_command E2B' is normalized before replay."""
+    sess = await SessionService(session).create_session(
+        sample_engineer.id, sample_project.id, trigger_message_id=None
+    )
+
+    monkeypatch.setattr(
+        "backend.services.prompt_service.build_system_prompt",
+        lambda *_args, **_kwargs: "test prompt",
+    )
+    unread = [_make_unread_msg(USER_AGENT_ID, sample_project.id, sample_engineer.id, "hello")]
+    monkeypatch.setattr(
+        "backend.db.repositories.messages.ChannelMessageRepository.list_by_target_and_status",
+        AsyncMock(return_value=unread),
+    )
+    monkeypatch.setattr(
+        "backend.db.repositories.messages.ChannelMessageRepository.mark_received",
+        AsyncMock(),
+    )
+
+    history_row = MagicMock()
+    history_row.role = "assistant"
+    history_row.content = ""
+    history_row.tool_input = {
+        "__tool_calls__": [
+            {"id": "tc-legacy-1", "name": "execute_command E2B", "input": {"command": "pwd"}}
+        ]
+    }
+    monkeypatch.setattr(
+        "backend.db.repositories.messages.AgentMessageRepository.list_by_session",
+        AsyncMock(return_value=[history_row]),
+    )
+    monkeypatch.setattr(
+        "backend.db.repositories.messages.AgentMessageRepository.create_message",
+        AsyncMock(),
+    )
+
+    llm_mock = AsyncMock(return_value=("", [{"name": "end", "input": {}, "id": "end-1"}]))
+    monkeypatch.setattr(
+        "backend.services.llm_service.LLMService.chat_completion_with_tools",
+        llm_mock,
+    )
+
+    result = await run_inner_loop(
+        sample_engineer,
+        sample_project,
+        sess.id,
+        trigger_message_id=None,
+        db=session,
+        interrupt_flag=lambda: False,
+    )
+
+    assert result == "normal_end"
+    assert llm_mock.await_count == 1
+    captured_messages = llm_mock.await_args.kwargs["messages"]
+    assistant_messages = [m for m in captured_messages if m.get("role") == "assistant"]
+    assert assistant_messages
+    replayed_calls = assistant_messages[0].get("tool_calls") or []
+    assert replayed_calls
+    assert replayed_calls[0]["name"] == "execute_command"
+
+
+# ---------------------------------------------------------------------------
+# New tests: silent-turn prevention (fallback messages on error/loopbacks)
+# ---------------------------------------------------------------------------
+
+
+def _patch_loop_basics(monkeypatch, unread_msgs, llm_side_effect=None, llm_return=None):
+    """Patch the standard inner-loop dependencies used by multiple tests."""
+    monkeypatch.setattr(
+        "backend.services.prompt_service.build_system_prompt",
+        lambda *_args, **_kwargs: "test prompt",
+    )
+    monkeypatch.setattr(
+        "backend.db.repositories.messages.ChannelMessageRepository.list_by_target_and_status",
+        AsyncMock(return_value=unread_msgs),
+    )
+    monkeypatch.setattr(
+        "backend.db.repositories.messages.ChannelMessageRepository.mark_received",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "backend.db.repositories.messages.AgentMessageRepository.list_by_session",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "backend.db.repositories.messages.AgentMessageRepository.create_message",
+        AsyncMock(),
+    )
+    llm_mock = AsyncMock(side_effect=llm_side_effect, return_value=llm_return)
+    monkeypatch.setattr(
+        "backend.services.llm_service.LLMService.chat_completion_with_tools",
+        llm_mock,
+    )
+    return llm_mock
+
+
+@pytest.mark.asyncio
+async def test_llm_error_emits_fallback_message(
+    sample_manager, sample_project, session, monkeypatch
+) -> None:
+    """When LLM raises, loop returns 'error' and emits a fallback channel message to user."""
+    unread = [_make_unread_msg(USER_AGENT_ID, sample_project.id, sample_manager.id, "hello")]
+    _patch_loop_basics(monkeypatch, unread, llm_side_effect=RuntimeError("API timeout"))
+
+    sess = await SessionService(session).create_session(
+        sample_manager.id, sample_project.id, trigger_message_id=None
+    )
+
+    emitted_messages = []
+
+    def capture_emit(msg):
+        emitted_messages.append(msg)
+
+    result = await run_inner_loop(
+        sample_manager,
+        sample_project,
+        sess.id,
+        trigger_message_id=None,
+        db=session,
+        interrupt_flag=lambda: False,
+        emit_agent_message=capture_emit,
+    )
+
+    assert result == "error"
+    assert len(emitted_messages) == 1
+    assert "error" in emitted_messages[0].content.lower() or "API timeout" in emitted_messages[0].content
+    assert emitted_messages[0].target_agent_id == USER_AGENT_ID
+
+
+@pytest.mark.asyncio
+async def test_max_loopbacks_emits_fallback_message(
+    sample_manager, sample_project, session, monkeypatch
+) -> None:
+    """When agent repeatedly produces text without tools, loop emits a fallback after MAX_LOOPBACKS."""
+    unread = [_make_unread_msg(USER_AGENT_ID, sample_project.id, sample_manager.id, "hello")]
+    # Always return text content with no tool calls → triggers loopback every iteration
+    _patch_loop_basics(monkeypatch, unread, llm_return=("some thinking text", []))
+
+    sess = await SessionService(session).create_session(
+        sample_manager.id, sample_project.id, trigger_message_id=None
+    )
+
+    emitted_messages = []
+
+    def capture_emit(msg):
+        emitted_messages.append(msg)
+
+    result = await run_inner_loop(
+        sample_manager,
+        sample_project,
+        sess.id,
+        trigger_message_id=None,
+        db=session,
+        interrupt_flag=lambda: False,
+        emit_agent_message=capture_emit,
+    )
+
+    assert result == "max_loopbacks"
+    assert len(emitted_messages) == 1
+    assert "unable" in emitted_messages[0].content.lower() or "rephrase" in emitted_messages[0].content.lower()
+    assert emitted_messages[0].target_agent_id == USER_AGENT_ID
+
+
+# ---------------------------------------------------------------------------
+# New tests: WorkerManager diagnostics
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_worker_manager_get_status_before_start() -> None:
+    """WorkerManager reports started=False and worker_count=0 before start()."""
+    from backend.workers.worker_manager import WorkerManager
+
+    wm = WorkerManager()
+    status = wm.get_status()
+    assert status["started"] is False
+    assert status["worker_count"] == 0
+    assert status["agent_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_notify_unregistered_agent_logs_warning(caplog) -> None:
+    """MessageRouter.notify warns when no queue is registered for agent."""
+    import logging
+    from backend.workers.message_router import MessageRouter
+
+    router = MessageRouter()
+    agent_id = uuid4()
+
+    with caplog.at_level(logging.WARNING, logger="backend.workers.message_router"):
+        router.notify(agent_id)
+
+    assert any(str(agent_id) in r.message for r in caplog.records)
+    assert any("no queue" in r.message.lower() for r in caplog.records)

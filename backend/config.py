@@ -30,12 +30,20 @@ class Settings(BaseSettings):
     # LLM
     claude_api_key: str = ""
     gemini_api_key: str = ""
-    claude_model: str = "claude-3-5-sonnet-latest"
+    claude_model: str = "claude-4-6-sonnet-latest"
     gemini_model: str = "gemini-2.0-flash"
+    manager_model_default: str = "gemini-2.0-flash"
+    cto_model_default: str = "claude-4-6-sonnet-latest"
+    engineer_model_default: str = "gemini-2.0-flash-lite"
+    agent_tier_models: dict[str, str] = Field(
+        default_factory=dict,
+        description="Optional role+tier model mapping (e.g. engineer:senior -> claude-4-6-sonnet-latest).",
+    )
     llm_request_timeout_seconds: int = Field(default=60, ge=5, le=300)
     llm_max_tokens: int = Field(default=1024, ge=128, le=8192)
     llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     llm_fallback_enabled: bool = True
+    llm_use_legacy_http: bool = False
 
     # Git
     github_token: str = ""

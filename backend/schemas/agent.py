@@ -19,6 +19,7 @@ class AgentResponse(BaseModel):
     project_id: UUID
     role: str
     display_name: str
+    tier: str | None = None
     model: str
     status: str
     current_task_id: UUID | None
@@ -42,7 +43,8 @@ class SpawnEngineerCreate(BaseModel):
 
     project_id: UUID
     display_name: str | None = None
-    model: str = "claude-4.5"
+    model: str | None = None
+    tier: str | None = None
     module_path: str | None = None
 
 
@@ -61,6 +63,7 @@ class AgentContextResponse(BaseModel):
     id: UUID
     role: str
     display_name: str
+    tier: str | None = None
     model: str
     status: str
     system_prompt: str | None = None

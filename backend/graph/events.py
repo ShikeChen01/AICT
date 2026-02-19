@@ -8,11 +8,12 @@ from within graph node execution.
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import Any
 from uuid import UUID
 
-logger = logging.getLogger(__name__)
+from backend.logging.my_logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def _get_ws_manager():

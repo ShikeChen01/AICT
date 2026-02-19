@@ -7,7 +7,6 @@ when configured.
 
 from __future__ import annotations
 
-import logging
 import subprocess
 from pathlib import Path
 
@@ -16,8 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.db.models import Project
+from backend.logging.my_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _is_real_repo_url(repo_url: str) -> bool:

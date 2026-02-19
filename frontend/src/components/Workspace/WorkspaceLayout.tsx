@@ -12,6 +12,7 @@ interface WorkspaceLayoutProps {
   main: React.ReactNode;
   monitoringPanel?: React.ReactNode;
   isWsConnected?: boolean;
+  workersReady?: boolean;
 }
 
 export function WorkspaceLayout({
@@ -20,6 +21,7 @@ export function WorkspaceLayout({
   main,
   monitoringPanel,
   isWsConnected = false,
+  workersReady = true,
 }: WorkspaceLayoutProps) {
   const [monitoringWidth, setMonitoringWidth] = useState(384);
   const [isResizingMonitoring, setIsResizingMonitoring] = useState(false);
@@ -78,7 +80,7 @@ export function WorkspaceLayout({
         )}
       </main>
       <div className="pointer-events-none">
-        <ConnectionStatus isConnected={isWsConnected} />
+        <ConnectionStatus isConnected={isWsConnected} workersReady={workersReady} />
       </div>
     </div>
   );

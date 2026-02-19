@@ -19,6 +19,13 @@ async def health_check():
     return {"status": "ok"}
 
 
+@api_router.get("/health/workers", tags=["health"])
+async def worker_health():
+    """Diagnostic: returns WorkerManager runtime status (started, worker_count, agent_ids)."""
+    from backend.workers.worker_manager import get_worker_manager
+    return get_worker_manager().get_status()
+
+
 # Include feature routers
 api_router.include_router(agents_router)
 api_router.include_router(auth_router)
