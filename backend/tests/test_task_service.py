@@ -7,7 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.exceptions import InvalidTaskStatus, TaskNotFoundError, AgentNotFoundError
 from backend.db.models import Agent, Project, Task
+from backend.core.constants import USER_AGENT_ID
 from backend.schemas.task import TaskCreate, TaskUpdate
+from backend.services.message_service import MessageService
 from backend.services.task_service import (
     TaskService,
     validate_status,
@@ -164,12 +166,23 @@ class TestTaskService:
             await service.update_status(task.id, "done")
 
     async def test_assign_task(
-        self, service: TaskService, sample_task: Task, sample_engineer: Agent
+        self,
+        service: TaskService,
+        sample_task: Task,
+        sample_engineer: Agent,
+        session: AsyncSession,
     ):
         assigned = await service.assign(sample_task.id, sample_engineer.id)
 
         assert assigned.assigned_agent_id == sample_engineer.id
         assert assigned.status == "assigned"  # Auto-transition
+        unread = await MessageService(session).get_unread_for_agent(sample_engineer.id)
+        assert any(
+            msg.from_agent_id == USER_AGENT_ID
+            and msg.message_type == "system"
+            and "Task assigned:" in msg.content
+            for msg in unread
+        )
 
     async def test_assign_task_invalid_agent(
         self, service: TaskService, sample_task: Task

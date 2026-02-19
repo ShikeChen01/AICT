@@ -10,6 +10,7 @@ import { Column } from './Column';
 import { TaskModal } from './TaskModal';
 import { CreateTaskModal } from './CreateTaskModal';
 import { TaskCard } from './TaskCard';
+import { Button, Card } from '../ui';
 
 interface KanbanBoardProps {
   projectId: string;
@@ -128,9 +129,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   }
 
   return (
-    <div className="flex flex-col h-full bg-gray-100">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)]">
+      <header className="flex items-center justify-between border-b border-[var(--border-color)] bg-[var(--surface-muted)] px-6 py-4">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Kanban Board</h1>
           <p className="text-sm text-gray-500">Manage project tasks</p>
@@ -157,26 +157,21 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
             </button>
           </div>
 
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors"
-          >
+          <Button onClick={() => setShowCreateModal(true)}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
             New Task
-          </button>
+          </Button>
         </div>
       </header>
 
-      {/* Error banner */}
       {error && (
-        <div className="bg-red-50 border-b border-red-200 px-6 py-3 text-red-700 text-sm">
+        <div className="border-b border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700">
           <strong>Error:</strong> {error.message}
         </div>
       )}
 
-      {/* Board */}
       <div className="flex-1 overflow-x-auto p-6">
         {viewMode === 'status' ? (
           <div className="flex gap-4 h-full">
@@ -193,9 +188,9 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         ) : (
           <div className="flex gap-4 h-full">
             {swimlaneColumns.map((lane) => (
-              <section
+              <Card
                 key={lane.id}
-                className="flex flex-col bg-gray-50 rounded-xl min-w-[320px] max-w-[320px]"
+                className="flex min-w-[320px] max-w-[320px] flex-col bg-gray-50"
               >
                 <div className="p-4 border-b border-gray-200">
                   <p className="text-sm font-semibold text-gray-900">{lane.display_name}</p>
@@ -221,7 +216,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     ))
                   )}
                 </div>
-              </section>
+              </Card>
             ))}
           </div>
         )}

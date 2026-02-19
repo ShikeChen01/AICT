@@ -21,12 +21,6 @@ class AgentNotFoundError(AICTException):
         super().__init__(f"Agent {agent_id} not found")
 
 
-class TicketNotFoundError(AICTException):
-    def __init__(self, ticket_id):
-        self.ticket_id = ticket_id
-        super().__init__(f"Ticket {ticket_id} not found")
-
-
 class ProjectNotFoundError(AICTException):
     def __init__(self, project_id):
         self.project_id = project_id
@@ -63,12 +57,6 @@ class MaxEngineersReached(AICTException):
     def __init__(self, limit: int = 5):
         self.limit = limit
         super().__init__(f"Maximum number of engineers ({limit}) reached")
-
-
-class TicketCloseNotAllowed(AICTException):
-    """Raised when a lower-priority agent tries to close a ticket."""
-
-    pass
 
 
 class InvalidAgentRole(AICTException):

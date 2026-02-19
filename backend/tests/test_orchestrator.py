@@ -14,8 +14,6 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 def test_sandbox_policy_by_role():
     """Test sandbox persistence policy for different roles."""
-    assert sandbox_should_persist("gm") is True
-    assert sandbox_should_persist("om") is True
     assert sandbox_should_persist("manager") is True
     assert sandbox_should_persist("engineer") is False
 
@@ -24,15 +22,6 @@ def test_sandbox_policy_invalid_role():
     """Test that invalid roles raise an exception."""
     with pytest.raises(InvalidAgentRole):
         sandbox_should_persist("invalid")
-
-
-@pytest.mark.asyncio
-async def test_orchestrator_creates_persistent_sandbox_for_gm(session, sample_gm):
-    """Test GM gets persistent sandbox."""
-    orchestrator = OrchestratorService()
-    sandbox = await orchestrator.ensure_sandbox_for_agent(session, sample_gm)
-    assert sandbox.persistent is True
-    assert sample_gm.sandbox_id is not None
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,7 @@ workflow.py and node implementations.
 """
 
 from backend.tools.git import create_branch, commit_changes, push_changes, create_pull_request
-from backend.tools.e2b import execute_in_sandbox
+from backend.tools.e2b import execute_in_sandbox, start_sandbox
 from backend.tools.tasks import create_kanban_task, list_tasks, assign_task, update_task_status, get_task_details
 from backend.tools.agents import spawn_engineer, list_engineers
 
@@ -19,6 +19,7 @@ def get_manager_tools():
         assign_task,
         update_task_status,
         get_task_details,
+        start_sandbox,
         spawn_engineer,
         list_engineers,
     ]
@@ -32,6 +33,7 @@ def get_cto_tools():
     return [
         list_tasks,
         get_task_details,
+        start_sandbox,
     ]
 
 
@@ -45,6 +47,7 @@ def get_engineer_tools():
         commit_changes,
         push_changes,
         create_pull_request,
+        start_sandbox,
         execute_in_sandbox,
         update_task_status,
         get_task_details,

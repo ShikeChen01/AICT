@@ -16,7 +16,7 @@ async def engineer_node(state: dict):
     It receives a task, writes code, tests, and creates PRs.
 
     State (EngineerState) must include: project_id, agent_id, task_id, current_task, messages.
-    Has access to git, sandbox, file, task, and ticket tools.
+    Has access to git, sandbox, file, task, and context tools.
     """
     # Import inside function to avoid circular import
     from backend.tools.registry import get_engineer_tools
@@ -33,7 +33,7 @@ async def engineer_node(state: dict):
         project_id=project_id,
         current_node="engineer",
         node_status="started",
-        previous_node="om",
+        previous_node="cto",
         metadata={"task_id": task_id, "task_title": task_title},
     )
     

@@ -16,8 +16,6 @@ from backend.core.exceptions import (
     SandboxNotFoundError,
     ScopeViolationError,
     TaskNotFoundError,
-    TicketCloseNotAllowed,
-    TicketNotFoundError,
 )
 
 
@@ -34,10 +32,6 @@ class TestExceptionMessages:
         exc = AgentNotFoundError("agent-456")
         assert "agent-456" in str(exc)
         assert exc.agent_id == "agent-456"
-
-    def test_ticket_not_found(self):
-        exc = TicketNotFoundError("ticket-789")
-        assert "ticket-789" in str(exc)
 
     def test_project_not_found(self):
         exc = ProjectNotFoundError("proj-000")
@@ -68,10 +62,6 @@ class TestExceptionMessages:
         exc = MaxEngineersReached(limit=3)
         assert "3" in str(exc)
         assert exc.limit == 3
-
-    def test_ticket_close_not_allowed(self):
-        exc = TicketCloseNotAllowed("lower priority cannot close")
-        assert "lower priority" in str(exc)
 
     def test_invalid_agent_role(self):
         exc = InvalidAgentRole("hacker")

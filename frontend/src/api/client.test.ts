@@ -3,7 +3,6 @@ import {
   healthCheck,
   getTasks,
   createTask,
-  replyToTicketAsUser,
   sendMessage,
   getMessages,
   getAllMessages,
@@ -87,29 +86,6 @@ describe('API Client', () => {
         expect.objectContaining({
           method: 'POST',
           body: expect.any(String),
-        })
-      );
-    });
-  });
-
-  describe('replyToTicketAsUser', () => {
-    it('should POST user reply to ticket', async () => {
-      const ticketId = '55555555-5555-5555-5555-555555555555';
-      const content = 'Use env VAR API_KEY';
-      vi.mocked(global.fetch).mockResolvedValueOnce(
-        mockFetchResponse({ id: 'msg-1', ticket_id: ticketId, content }, 201)
-      );
-
-      await replyToTicketAsUser(ticketId, content);
-
-      expect(global.fetch).toHaveBeenCalledWith(
-        `/api/v1/tickets/${ticketId}/user-reply`,
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({ content }),
-          headers: expect.objectContaining({
-            Authorization: 'Bearer test-token',
-          }),
         })
       );
     });

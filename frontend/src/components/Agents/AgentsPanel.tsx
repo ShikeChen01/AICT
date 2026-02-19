@@ -1,17 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAgents } from '../../hooks';
+import { useOptionalAgentStreamContext } from '../../contexts/AgentStreamContext';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { FloatingWindow, TicketChat } from '../TicketChat';
-import type { AgentLogData, AgentStatusWithQueue, JobEventData, TicketEventData } from '../../types';
+import type { AgentLogData } from '../../types';
+import { Badge, Button } from '../ui';
 
 interface AgentsPanelProps {
   projectId: string;
-}
-
-function roleBadgeClass(role: AgentStatusWithQueue['role']): string {
-  if (role === 'gm' || role === 'manager') return 'bg-purple-100 text-purple-700';
-  if (role === 'cto') return 'bg-cyan-100 text-cyan-700';
-  return 'bg-green-100 text-green-700';
+  selectedAgentId?: string | null;
+  onSelectAgent?: (agentId: string) => void;
 }
 
 function statusDotClass(statusLabel: string): string {
@@ -22,33 +19,28 @@ function statusDotClass(statusLabel: string): string {
   return 'bg-green-500';
 }
 
-export function AgentsPanel({ projectId }: AgentsPanelProps) {
+export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: AgentsPanelProps) {
   const { agents, isLoading, error } = useAgents(projectId);
   const { subscribe } = useWebSocket(projectId);
+  const streamContext = useOptionalAgentStreamContext();
+  const getBuffer = streamContext?.getBuffer;
   const [agentBuffers, setAgentBuffers] = useState<Record<string, string[]>>({});
-  const [agentTickets, setAgentTickets] = useState<Record<string, { ticketId: string; header: string }>>({});
-  const [activeTicket, setActiveTicket] = useState<{
-    ticketId: string;
-    agentName: string;
-    header: string;
-  } | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const rows = useMemo(() => {
     return agents.map((agent) => {
-      const statusLabel = agentTickets[agent.id]
-        ? 'waiting'
-        : agent.status === 'active' && agent.queue_size === 0
+      const statusLabel =
+        agent.status === 'active' && agent.queue_size === 0
           ? 'idle'
           : agent.status;
       return { ...agent, statusLabel };
     });
-  }, [agents, agentTickets]);
+  }, [agents]);
+
+  const effectiveExpandedId = selectedAgentId ?? expandedId;
 
   useEffect(() => {
-    setAgentBuffers({});
-  }, [projectId]);
-
-  useEffect(() => {
+    if (streamContext) return;
     const pushLine = (agentId: string, line: string) => {
       const trimmed = line.trim();
       if (!trimmed) return;
@@ -58,67 +50,21 @@ export function AgentsPanel({ projectId }: AgentsPanelProps) {
         return { ...prev, [agentId]: next };
       });
     };
-
     const unsubscribeAgentLog = subscribe<AgentLogData>('agent_log', (data) => {
       let prefix: string = data.log_type;
       if (data.log_type === 'tool_call') prefix = `tool:${data.tool_name || 'call'}`;
       if (data.log_type === 'tool_result') prefix = `result:${data.tool_name || 'tool'}`;
       pushLine(data.agent_id, `[${prefix}] ${data.content}`);
     });
-
-    const unsubscribeJobStarted = subscribe<JobEventData>('job_started', (data) => {
-      pushLine(data.agent_id, `[job] ${data.message || 'started'}`);
-    });
-    const unsubscribeJobProgress = subscribe<JobEventData>('job_progress', (data) => {
-      const prefix = data.tool_name ? `[tool:${data.tool_name}]` : '[job]';
-      pushLine(data.agent_id, `${prefix} ${data.message || 'in progress'}`);
-    });
-    const unsubscribeJobCompleted = subscribe<JobEventData>('job_completed', (data) => {
-      pushLine(data.agent_id, `[done] ${data.result || 'completed'}`);
-    });
-    const unsubscribeJobFailed = subscribe<JobEventData>('job_failed', (data) => {
-      pushLine(data.agent_id, `[error] ${data.error || 'failed'}`);
-    });
-
-    const unsubTicketCreated = subscribe<TicketEventData>('ticket_created', (data) => {
-      if (data.from_agent_id) {
-        setAgentTickets((prev) => ({
-          ...prev,
-          [data.from_agent_id!]: { ticketId: data.ticket_id, header: data.header },
-        }));
-      }
-    });
-    const unsubTicketClosed = subscribe<TicketEventData>('ticket_closed', (data) => {
-      if (data.from_agent_id) {
-        setAgentTickets((prev) => {
-          const next = { ...prev };
-          delete next[data.from_agent_id!];
-          return next;
-        });
-      }
-    });
-
     return () => {
       unsubscribeAgentLog();
-      unsubscribeJobStarted();
-      unsubscribeJobProgress();
-      unsubscribeJobCompleted();
-      unsubscribeJobFailed();
-      unsubTicketCreated();
-      unsubTicketClosed();
     };
-  }, [subscribe]);
+  }, [streamContext, subscribe]);
 
   return (
-    <>
-    <aside className="w-full min-w-0 border-l border-gray-200 bg-white flex flex-col overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-200">
-        <h2 className="text-base font-semibold text-gray-900">Agents</h2>
-        <p className="text-xs text-gray-500">Status and task queue</p>
-      </div>
-
+    <aside className="h-full min-h-0 w-full min-w-0 bg-transparent flex flex-col overflow-hidden">
       {error && (
-        <div className="m-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+        <div className="m-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
           {error.message}
         </div>
       )}
@@ -128,40 +74,67 @@ export function AgentsPanel({ projectId }: AgentsPanelProps) {
           Loading agents...
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        <div className="min-h-0 flex-1 overflow-y-auto p-2 space-y-2">
           {rows.map((agent) => (
-            <section key={agent.id} className="rounded-lg border border-gray-200 p-3">
+            <section
+              key={agent.id}
+              className={`rounded-lg border p-3 ${
+                agent.id === effectiveExpandedId
+                  ? 'border-[var(--color-primary)]/40 bg-blue-50/40'
+                  : 'border-[var(--border-color)] bg-[var(--surface-card)]'
+              }`}
+            >
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExpandedId((prev) => (prev === agent.id ? null : agent.id));
+                    onSelectAgent?.(agent.id);
+                  }}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                >
                   <span
                     className={`inline-block w-2 h-2 rounded-full ${statusDotClass(agent.statusLabel)}`}
                     aria-hidden
                   />
-                  <p className="text-sm font-medium text-gray-900 truncate">{agent.display_name}</p>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-medium uppercase ${roleBadgeClass(agent.role)}`}
+                  <p className="truncate text-sm font-medium text-gray-900">{agent.display_name}</p>
+                  <Badge
+                    variant={agent.role === 'manager' ? 'manager' : agent.role === 'cto' ? 'cto' : 'engineer'}
                   >
                     {agent.role}
-                  </span>
-                </div>
+                  </Badge>
+                </button>
                 <span className="text-[11px] text-gray-500 uppercase">{agent.statusLabel}</span>
               </div>
 
               <div className="mt-2 flex items-center gap-3 text-xs text-gray-600">
                 <span>Queue: {agent.queue_size}</span>
-                <span>Open tickets: {agent.open_ticket_count}</span>
+                <span>Pending messages: {agent.pending_message_count ?? 0}</span>
               </div>
 
               <div className="mt-2">
                 <p className="text-[10px] uppercase tracking-wide text-gray-500">Latest activity</p>
                 <div className="mt-1 rounded border border-gray-100 bg-gray-50 px-2 py-1 text-[11px] text-gray-700 leading-4 max-h-32 overflow-y-auto">
-                  {(agentBuffers[agent.id] ?? []).length > 0 ? (
+                  {(getBuffer?.(agent.id).chunks.length ?? 0) > 0 ? (
+                    <ul className="space-y-1">
+                      {(getBuffer?.(agent.id).chunks ?? [])
+                        .slice(-10)
+                        .reverse()
+                        .map((chunk, idx) => (
+                          <li key={`${agent.id}-buffer-${idx}`} className="truncate">
+                            {chunk.type === 'text' || chunk.type === 'message'
+                              ? chunk.content
+                              : `${chunk.toolName} ${chunk.type === 'tool_result' ? (chunk.success ? 'OK' : 'Error') : 'call'}`}
+                          </li>
+                        ))}
+                    </ul>
+                  ) : (agentBuffers[agent.id] ?? []).length > 0 ? (
                     <ul className="space-y-1">
                       {(agentBuffers[agent.id] ?? [])
                         .slice(-10)
                         .reverse()
                         .map((line, idx) => (
-                          <li key={`${agent.id}-buffer-${idx}`} className="truncate">
+                          <li key={`${agent.id}-fallback-buffer-${idx}`} className="truncate">
                             {line}
                           </li>
                         ))}
@@ -172,23 +145,7 @@ export function AgentsPanel({ projectId }: AgentsPanelProps) {
                 </div>
               </div>
 
-              {agentTickets[agent.id] && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActiveTicket({
-                      ticketId: agentTickets[agent.id].ticketId,
-                      agentName: agent.display_name,
-                      header: agentTickets[agent.id].header,
-                    })
-                  }
-                  className="mt-2 w-full text-xs bg-orange-50 border border-orange-200 text-orange-700 rounded px-2 py-1.5 hover:bg-orange-100 transition-colors"
-                >
-                  Engineer needs input — click to respond
-                </button>
-              )}
-
-              {agent.task_queue.length > 0 ? (
+              {effectiveExpandedId === agent.id && agent.task_queue.length > 0 ? (
                 <ul className="mt-3 space-y-2">
                   {agent.task_queue.map((task) => (
                     <li key={task.id} className="rounded border border-gray-100 bg-gray-50 px-2 py-1.5">
@@ -203,8 +160,14 @@ export function AgentsPanel({ projectId }: AgentsPanelProps) {
                     </li>
                   ))}
                 </ul>
-              ) : (
+              ) : effectiveExpandedId === agent.id ? (
                 <p className="mt-3 text-xs text-gray-400">No queued tasks.</p>
+              ) : (
+                <div className="mt-3">
+                  <Button size="sm" variant="ghost" onClick={() => setExpandedId(agent.id)}>
+                    Show queue
+                  </Button>
+                </div>
               )}
             </section>
           ))}
@@ -214,24 +177,7 @@ export function AgentsPanel({ projectId }: AgentsPanelProps) {
           )}
         </div>
       )}
-
     </aside>
-    {activeTicket != null && (
-      <FloatingWindow
-        title={`${activeTicket.agentName} — ${activeTicket.header}`}
-        isOpen
-        onClose={() => setActiveTicket(null)}
-      >
-        <TicketChat
-          ticketId={activeTicket.ticketId}
-          projectId={projectId}
-          agentName={activeTicket.agentName}
-          taskTitle={activeTicket.header}
-          onClose={() => setActiveTicket(null)}
-        />
-      </FloatingWindow>
-    )}
-    </>
   );
 }
 

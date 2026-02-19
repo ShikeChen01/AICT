@@ -4,7 +4,7 @@
 
 All agents share the same prompt block architecture. Each prompt is assembled from modular blocks concatenated in a fixed order. Block content differs per role; the structure is universal.
 
-Canonical prompt block content lives here. Agent hierarchy, lifecycle, and communication rules live in `agents.md`.
+Canonical prompt block content lives in `backend/prompts/blocks/` (one `.md` file per block). Assembly logic lives in `backend/prompts/builder.py`. This document describes the design and contract; the block files are the authoritative source for content. Agent hierarchy, lifecycle, and communication rules live in `agents.md`.
 
 ---
 

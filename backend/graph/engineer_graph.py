@@ -20,7 +20,7 @@ class EngineerState(TypedDict):
     agent_id: str
     task_id: str
     current_task: Dict[str, Any]
-    pending_ticket_id: str  # ticket ID when waiting for user, empty string otherwise
+    pending_message_id: str  # message ID when waiting for user, empty string otherwise
     abort_reason: str  # set when aborting, empty string otherwise
 
 

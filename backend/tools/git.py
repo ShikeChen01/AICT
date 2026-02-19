@@ -16,6 +16,7 @@ from backend.db.session import AsyncSessionLocal
 from backend.db.models import Agent
 from backend.config import settings
 from backend.services.git_service import GitService
+from backend.services.e2b_service import E2BService, LOCAL_FALLBACK_SANDBOX_ERROR
 from backend.core.exceptions import GitOperationFailed
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,8 @@ async def _run_git_in_sandbox(agent_id: str, command: str) -> str:
 
         if not agent.sandbox_id:
             return "Error: Agent has no active sandbox."
+        if E2BService._is_local_fallback_sandbox(agent.sandbox_id):
+            return LOCAL_FALLBACK_SANDBOX_ERROR
 
         try:
             os.environ["E2B_API_KEY"] = settings.e2b_api_key

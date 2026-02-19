@@ -130,11 +130,17 @@ async def shutdown_graph_runtime() -> None:
 
 def sandbox_should_persist(agent_role: str) -> bool:
     """Manager keeps persistent sandboxes; engineers are task-ephemeral."""
-    if agent_role in ("gm", "om", "manager"):
+    if agent_role == "manager":
         return True
     if agent_role == "engineer":
         return False
     raise InvalidAgentRole(agent_role)
+
+
+def _persistent_for_agent(agent: Agent) -> bool:
+    if agent.role in {"manager", "engineer"}:
+        return sandbox_should_persist(agent.role)
+    return bool(agent.sandbox_persist)
 
 
 class OrchestratorService:
@@ -148,12 +154,10 @@ class OrchestratorService:
         session: AsyncSession,
         agent: Agent,
     ) -> SandboxMetadata:
-        if agent.sandbox_id:
-            return await self.e2b_service.get_sandbox(session, agent)
-        return await self.e2b_service.create_sandbox(
+        return await self.e2b_service.ensure_running_sandbox(
             session=session,
             agent=agent,
-            persistent=sandbox_should_persist(agent.role),
+            persistent=_persistent_for_agent(agent),
         )
 
     async def close_if_ephemeral(self, session: AsyncSession, agent: Agent) -> None:
@@ -166,6 +170,13 @@ class OrchestratorService:
         """
         if agent.status == "sleeping":
             agent.status = "active"
+        try:
+            from backend.workers.message_router import get_message_router
+
+            get_message_router().notify(agent.id)
+        except Exception:
+            # Router may not be initialized yet in some tests/boot phases.
+            pass
         return await self.ensure_sandbox_for_agent(session, agent)
 
     async def run_manager_graph(
@@ -226,7 +237,7 @@ class OrchestratorService:
                     content = getattr(msg, "content", "")
                     if role == "user":
                         converted_history.append(HumanMessage(content=content))
-                    elif role in ("gm", "manager"):
+                    elif role == "manager":
                         converted_history.append(AIMessage(content=content))
                 
                 # Append the new user message
@@ -344,9 +355,9 @@ class OrchestratorService:
     async def invoke_gm(
         self,
         session: AsyncSession,
-        gm: Agent,
+        manager: Agent,
         history: list,
         user_message: str,
     ) -> str:
-        """Legacy wrapper for run_manager_graph."""
-        return await self.run_manager_graph(session, gm, user_message, history_from_db=history)
+        """Compatibility wrapper for run_manager_graph."""
+        return await self.run_manager_graph(session, manager, user_message, history_from_db=history)

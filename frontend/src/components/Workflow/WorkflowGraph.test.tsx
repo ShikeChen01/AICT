@@ -43,7 +43,7 @@ describe('WorkflowGraph', () => {
       project_id: 'test-project-id',
       thread_id: 'thread-1',
       previous_node: 'manager',
-      current_node: 'om',
+      current_node: 'cto',
       node_status: 'started' as const,
     };
     render(<WorkflowGraph projectId="test-project-id" workflowUpdate={workflowUpdate} />);

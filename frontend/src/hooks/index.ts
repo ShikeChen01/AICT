@@ -4,3 +4,4 @@ export { useAgents } from './useAgents';
 export { useMessages } from './useMessages';
 export { useAgentStream } from './useAgentStream';
 export { useSessions } from './useSessions';
+export { useAutoFollow } from './useAutoFollow';

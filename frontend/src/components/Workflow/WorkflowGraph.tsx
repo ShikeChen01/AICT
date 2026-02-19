@@ -192,7 +192,7 @@ export function WorkflowGraph({
   );
 
   return (
-    <div className="w-full h-full min-h-[400px]">
+    <div className="h-full min-h-[400px] w-full overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)]">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -203,7 +203,7 @@ export function WorkflowGraph({
         fitView
         attributionPosition="bottom-left"
       >
-        <Background color="#e5e7eb" gap={16} />
+        <Background color="#d7dee9" gap={16} />
         <Controls />
         <MiniMap
           nodeColor={(node) => {

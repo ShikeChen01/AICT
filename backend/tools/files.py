@@ -13,6 +13,7 @@ from sqlalchemy import select
 from backend.db.session import AsyncSessionLocal
 from backend.db.models import Agent
 from backend.config import settings
+from backend.services.e2b_service import E2BService, LOCAL_FALLBACK_SANDBOX_ERROR
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,8 @@ async def read_file(agent_id: str, file_path: str) -> str:
         
         if not agent.sandbox_id:
             return "Error: Agent has no active sandbox."
+        if E2BService._is_local_fallback_sandbox(agent.sandbox_id):
+            return LOCAL_FALLBACK_SANDBOX_ERROR
             
         try:
             os.environ["E2B_API_KEY"] = settings.e2b_api_key
@@ -82,6 +85,8 @@ async def write_file(agent_id: str, file_path: str, content: str) -> str:
         
         if not agent.sandbox_id:
             return "Error: Agent has no active sandbox."
+        if E2BService._is_local_fallback_sandbox(agent.sandbox_id):
+            return LOCAL_FALLBACK_SANDBOX_ERROR
             
         try:
             os.environ["E2B_API_KEY"] = settings.e2b_api_key
@@ -123,6 +128,8 @@ async def list_directory(agent_id: str, dir_path: str = "/home/user") -> str:
         
         if not agent.sandbox_id:
             return "Error: Agent has no active sandbox."
+        if E2BService._is_local_fallback_sandbox(agent.sandbox_id):
+            return LOCAL_FALLBACK_SANDBOX_ERROR
             
         try:
             os.environ["E2B_API_KEY"] = settings.e2b_api_key
@@ -167,6 +174,8 @@ async def delete_file(agent_id: str, file_path: str) -> str:
         
         if not agent.sandbox_id:
             return "Error: Agent has no active sandbox."
+        if E2BService._is_local_fallback_sandbox(agent.sandbox_id):
+            return LOCAL_FALLBACK_SANDBOX_ERROR
             
         try:
             os.environ["E2B_API_KEY"] = settings.e2b_api_key

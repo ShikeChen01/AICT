@@ -10,10 +10,8 @@ import pytest
 from backend.websocket.events import (
     EventType,
     WebSocketEvent,
-    GMStatusPayload,
     TaskPayload,
     AgentStatusPayload,
-    create_gm_status_event,
     create_task_created_event,
     create_task_update_event,
     create_agent_status_event,
@@ -46,26 +44,20 @@ class TestEventTypes:
     """Test WebSocket event types and payloads."""
 
     def test_event_type_values(self):
-        assert EventType.GM_STATUS.value == "gm_status"
+        assert EventType.AGENT_TEXT.value == "agent_text"
+        assert EventType.AGENT_MESSAGE.value == "agent_message"
         assert EventType.TASK_CREATED.value == "task_created"
         assert EventType.TASK_UPDATE.value == "task_update"
         assert EventType.AGENT_STATUS.value == "agent_status"
 
     def test_websocket_event_structure(self):
         event = WebSocketEvent(
-            type=EventType.GM_STATUS,
+            type=EventType.AGENT_STATUS,
             data={"test": "value"},
         )
-        assert event.type == EventType.GM_STATUS
+        assert event.type == EventType.AGENT_STATUS
         assert event.data == {"test": "value"}
         assert event.timestamp is not None
-
-    def test_gm_status_payload(self):
-        payload = GMStatusPayload(
-            project_id=uuid.uuid4(),
-            status="busy",
-        )
-        assert payload.status == "busy"
 
     def test_task_payload(self):
         payload = TaskPayload(
@@ -103,13 +95,6 @@ class TestEventTypes:
 
 class TestEventFactories:
     """Test event factory functions."""
-
-    def test_create_gm_status_event(self):
-        project_id = uuid.uuid4()
-        event = create_gm_status_event(project_id, "busy")
-
-        assert event.type == EventType.GM_STATUS
-        assert event.data["status"] == "busy"
 
     def test_create_task_created_event(self):
         task = type("Task", (), {

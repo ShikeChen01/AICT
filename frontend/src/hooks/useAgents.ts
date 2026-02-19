@@ -27,8 +27,35 @@ export function useAgents(projectId: string | null): UseAgentsReturn {
     setIsLoading(true);
     setError(null);
     try {
-      const nextAgents = await api.getAgentStatuses(projectId);
-      setAgents(nextAgents);
+      const [statusAgents, baseAgents] = await Promise.all([
+        api.getAgentStatuses(projectId).catch(() => [] as AgentStatusWithQueue[]),
+        api.getAgents(projectId).catch(() => []),
+      ]);
+
+      const byId = new Map<string, AgentStatusWithQueue>();
+      for (const statusAgent of statusAgents) {
+        byId.set(statusAgent.id, statusAgent);
+      }
+
+      for (const baseAgent of baseAgents) {
+        if (!byId.has(baseAgent.id)) {
+          byId.set(baseAgent.id, {
+            ...baseAgent,
+            queue_size: 0,
+            pending_message_count: 0,
+            task_queue: [],
+          });
+        }
+      }
+
+      const roleOrder: Record<string, number> = { manager: 0, cto: 1, engineer: 2 };
+      const mergedAgents = Array.from(byId.values()).sort((a, b) => {
+        const roleDiff = (roleOrder[a.role] ?? 99) - (roleOrder[b.role] ?? 99);
+        if (roleDiff !== 0) return roleDiff;
+        return a.display_name.localeCompare(b.display_name);
+      });
+
+      setAgents(mergedAgents);
     } catch (err) {
       setError(err instanceof Error ? err : new Error('Failed to fetch agents'));
     } finally {
@@ -60,27 +87,10 @@ export function useAgents(projectId: string | null): UseAgentsReturn {
     const unsubscribeTaskUpdated = subscribe('task_update', () => {
       void refreshAgents();
     });
-    const unsubJobStarted = subscribe('job_started', () => {
-      void refreshAgents();
-    });
-    const unsubJobCompleted = subscribe('job_completed', () => {
-      void refreshAgents();
-    });
-    const unsubJobFailed = subscribe('job_failed', () => {
-      void refreshAgents();
-    });
-    const unsubTicketCreated = subscribe('ticket_created', () => {
-      void refreshAgents();
-    });
-
     return () => {
       unsubscribeAgent();
       unsubscribeTaskCreated();
       unsubscribeTaskUpdated();
-      unsubJobStarted();
-      unsubJobCompleted();
-      unsubJobFailed();
-      unsubTicketCreated();
     };
   }, [projectId, refreshAgents, subscribe]);
 

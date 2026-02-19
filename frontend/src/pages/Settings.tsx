@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { getProject, updateProject } from '../api/client';
 import type { Project } from '../types';
+import { Button, Card, Input, Textarea } from '../components/ui';
 
 export function SettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -83,7 +84,7 @@ export function SettingsPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[var(--app-bg)] flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
       </div>
     );
@@ -91,7 +92,7 @@ export function SettingsPage() {
 
   if (!project) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[var(--app-bg)] flex items-center justify-center">
         <div className="text-center">
           <AlertCircle className="w-12 h-12 mx-auto text-red-500 mb-4" />
           <h2 className="text-lg font-semibold text-gray-900">Repository not found</h2>
@@ -107,13 +108,12 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200">
+    <div className="min-h-screen bg-[var(--app-bg)]">
+      <header className="bg-[var(--surface-card)] border-b border-[var(--border-color)]">
         <div className="max-w-4xl mx-auto px-6 py-4">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => navigate(`/repository/${projectId}/chat`)}
+              onClick={() => navigate(`/repository/${projectId}/workspace`)}
               className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
             >
               <ArrowLeft className="w-5 h-5" />
@@ -126,42 +126,39 @@ export function SettingsPage() {
         </div>
       </header>
 
-      {/* Content */}
       <main className="max-w-4xl mx-auto px-6 py-8">
         {error && (
-          <div className="mb-6 flex items-center gap-3 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-red-700">
+          <Card className="mb-6 flex items-center gap-3 border-red-200 bg-red-50 px-4 py-3 text-red-700">
             <AlertCircle className="w-5 h-5 flex-shrink-0" />
             <span className="text-sm">{error}</span>
             <button onClick={() => setError(null)} className="ml-auto">
               &times;
             </button>
-          </div>
+          </Card>
         )}
 
         {success && (
-          <div className="mb-6 flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-lg text-green-700">
+          <Card className="mb-6 flex items-center gap-3 border-green-200 bg-green-50 px-4 py-3 text-green-700">
             <CheckCircle className="w-5 h-5 flex-shrink-0" />
             <span className="text-sm">{success}</span>
             <button onClick={() => setSuccess(null)} className="ml-auto">
               &times;
             </button>
-          </div>
+          </Card>
         )}
 
         <form onSubmit={handleSave} className="space-y-8">
-          {/* General Settings */}
-          <section className="bg-white border border-gray-200 rounded-lg p-6">
+          <Card className="p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">General</h2>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Repository Name
                 </label>
-                <input
+                <Input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   required
                 />
               </div>
@@ -170,18 +167,16 @@ export function SettingsPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Description
                 </label>
-                <textarea
+                <Textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   rows={3}
                 />
               </div>
             </div>
-          </section>
+          </Card>
 
-          {/* Git Integration */}
-          <section className="bg-white border border-gray-200 rounded-lg p-6">
+          <Card className="p-6">
             <div className="flex items-center gap-2 mb-4">
               <GitBranch className="w-5 h-5 text-gray-500" />
               <h2 className="text-lg font-semibold text-gray-900">Git Integration</h2>
@@ -192,11 +187,10 @@ export function SettingsPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Repository URL
                 </label>
-                <input
+                <Input
                   type="url"
                   value={repoUrl}
                   onChange={(e) => setRepoUrl(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   placeholder="https://github.com/user/repo"
                 />
               </div>
@@ -205,14 +199,13 @@ export function SettingsPage() {
                 GitHub token is now configured in User Settings.
               </p>
             </div>
-          </section>
+          </Card>
 
-          {/* Save Button */}
           <div className="flex justify-end">
-            <button
+            <Button
               type="submit"
               disabled={isSaving}
-              className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              className="px-6"
             >
               {isSaving ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -220,7 +213,7 @@ export function SettingsPage() {
                 <Save className="w-4 h-4" />
               )}
               Save Changes
-            </button>
+            </Button>
           </div>
         </form>
       </main>

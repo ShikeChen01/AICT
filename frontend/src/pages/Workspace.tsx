@@ -3,7 +3,7 @@
  * Wraps content in AgentStreamProvider so agent chat and stream buffers work.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import { AgentStreamProvider, useAgentStreamContext } from '../contexts/AgentStreamContext';
 import { useProjectContext } from '../contexts/ProjectContext';
@@ -13,6 +13,9 @@ import { KanbanBoard } from '../components/Kanban';
 import { WorkflowGraph } from '../components/Workflow';
 import { ArtifactBrowser } from '../components/Artifacts';
 import { AgentsPanel } from '../components/Agents';
+import { ActivityFeed } from '../components/ActivityFeed';
+import { AgentStream } from '../components/AgentChat/AgentStream';
+import { Panel } from '../components/ui';
 import type { Project } from '../types';
 
 export type WorkspaceView = 'workspace' | 'kanban' | 'workflow' | 'artifacts';
@@ -32,8 +35,58 @@ function WorkspaceContent({
   project: Project | undefined;
   loading: boolean;
 }) {
-  const { isConnected } = useAgentStreamContext();
+  const { isConnected, getBuffer, clearBuffer, activityLogs } = useAgentStreamContext();
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [streamRatio, setStreamRatio] = useState(0.38);
+  const [agentsRatio, setAgentsRatio] = useState(0.45);
+  const [isResizingStream, setIsResizingStream] = useState(false);
+  const [isResizingAgents, setIsResizingAgents] = useState(false);
+  const monitoringRef = useRef<HTMLDivElement | null>(null);
+  const lowerStackRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isResizingStream) return;
+    const onMove = (event: MouseEvent) => {
+      const rect = monitoringRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const next = (event.clientY - rect.top) / rect.height;
+      const clamped = Math.min(Math.max(next, 0.2), 0.8);
+      setStreamRatio(clamped);
+    };
+    const onUp = () => setIsResizingStream(false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'row-resize';
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [isResizingStream]);
+
+  useEffect(() => {
+    if (!isResizingAgents) return;
+    const onMove = (event: MouseEvent) => {
+      const rect = lowerStackRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const next = (event.clientY - rect.top) / rect.height;
+      const clamped = Math.min(Math.max(next, 0.2), 0.8);
+      setAgentsRatio(clamped);
+    };
+    const onUp = () => setIsResizingAgents(false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'row-resize';
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [isResizingAgents]);
 
   let main: React.ReactNode;
   switch (view) {
@@ -74,13 +127,67 @@ function WorkspaceContent({
   }
 
   const agentsPanel =
-    view !== 'workflow' ? <AgentsPanel projectId={projectId} /> : undefined;
+    view === 'workspace' ? (
+      <div ref={monitoringRef} className="flex h-full min-h-0 flex-col">
+        <Panel
+          title="Live stream"
+          subtitle={selectedAgentId ? 'Selected agent output' : 'Select an agent to monitor'}
+          className="min-h-0"
+          bodyClassName="min-h-0"
+          style={{ flex: `0 0 ${Math.round(streamRatio * 100)}%` }}
+        >
+          <AgentStream
+            buffer={selectedAgentId ? getBuffer(selectedAgentId) : getBuffer('')}
+            onClear={selectedAgentId ? () => clearBuffer(selectedAgentId) : undefined}
+          />
+        </Panel>
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize live stream panel"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            setIsResizingStream(true);
+          }}
+          className="my-1 h-1.5 cursor-row-resize rounded bg-transparent hover:bg-[var(--border-color)] active:bg-[var(--color-primary)]/40"
+        />
+        <div ref={lowerStackRef} className="flex min-h-0 flex-1 flex-col">
+          <Panel
+            title="Agents"
+            subtitle="Status, queue, and latest signals"
+            className="min-h-0"
+            bodyClassName="min-h-0"
+            style={{ flex: `0 0 ${Math.round(agentsRatio * 100)}%` }}
+          >
+            <AgentsPanel projectId={projectId} selectedAgentId={selectedAgentId} onSelectAgent={setSelectedAgentId} />
+          </Panel>
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize agents panel"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              setIsResizingAgents(true);
+            }}
+            className="my-1 h-1.5 cursor-row-resize rounded bg-transparent hover:bg-[var(--border-color)] active:bg-[var(--color-primary)]/40"
+          />
+          <Panel
+            title="Activity timeline"
+            subtitle="Realtime events across all agents"
+            className="min-h-0 flex-1"
+            bodyClassName="min-h-0"
+          >
+            <ActivityFeed logs={activityLogs} />
+          </Panel>
+        </div>
+      </div>
+    ) : undefined;
 
   return (
     <WorkspaceLayout
       activeProjectId={projectId}
       main={main}
-      agentsPanel={agentsPanel}
+      monitoringPanel={agentsPanel}
       isWsConnected={isConnected}
     />
   );

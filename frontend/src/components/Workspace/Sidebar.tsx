@@ -4,6 +4,7 @@
 
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 import { useProjectContext } from '../../contexts/ProjectContext';
+import { Select, cn } from '../ui';
 
 interface SidebarProps {
   activeProjectId: string;
@@ -27,41 +28,44 @@ export function Sidebar({ activeProjectId, onProjectChange }: SidebarProps) {
   };
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-      isActive ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-    }`;
+    cn(
+      'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+      isActive
+        ? 'bg-white/12 text-white'
+        : 'text-slate-300 hover:bg-white/7 hover:text-white'
+    );
 
   return (
-    <aside className="w-64 bg-gray-900 text-white flex flex-col">
-      <div className="p-6 border-b border-gray-800">
+    <aside className="w-72 border-r border-slate-800/80 bg-slate-950 text-white flex flex-col">
+      <div className="border-b border-slate-800/80 px-5 py-5">
         <NavLink to="/repositories" className="group block">
-          <h1 className="text-2xl font-bold group-hover:text-blue-300 transition-colors">AICT</h1>
-          <p className="text-sm text-gray-400 group-hover:text-gray-300 transition-colors">
-            Multi-Agent Platform
+          <h1 className="text-2xl font-bold tracking-tight group-hover:text-blue-300 transition-colors">AICT</h1>
+          <p className="mt-1 text-xs text-slate-400 group-hover:text-slate-300 transition-colors">
+            Agent Monitoring Console
           </p>
         </NavLink>
       </div>
 
-      <div className="p-4 border-b border-gray-800">
-        <label htmlFor="project-selector" className="block text-xs uppercase tracking-wide text-gray-400 mb-2">
-          Repository
+      <div className="border-b border-slate-800/80 p-4">
+        <label htmlFor="project-selector" className="mb-2 block text-[11px] uppercase tracking-wide text-slate-400">
+          Active repository
         </label>
-        <select
+        <Select
           id="project-selector"
           value={activeProjectId}
           onChange={(e) => handleProjectChange(e.target.value)}
           disabled={loading}
-          className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="border-slate-700 bg-slate-900 text-slate-100 focus-visible:ring-blue-400/30"
         >
           {projects.map((project) => (
             <option key={project.id} value={project.id}>
               {project.name}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
-      <nav className="flex-1 p-4">
+      <nav className="flex-1 overflow-y-auto p-4">
         <ul className="space-y-2">
           <li>
             <NavLink to={workspacePath} className={linkClass}>
@@ -70,7 +74,7 @@ export function Sidebar({ activeProjectId, onProjectChange }: SidebarProps) {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                 </svg>
               </span>
-              Chat
+              Workspace
             </NavLink>
           </li>
           <li>
@@ -117,8 +121,8 @@ export function Sidebar({ activeProjectId, onProjectChange }: SidebarProps) {
         </ul>
       </nav>
 
-      <div className="p-4 border-t border-gray-800">
-        <NavLink to="/settings" className="mb-3 inline-flex items-center gap-2 text-sm text-gray-300 hover:text-white">
+      <div className="border-t border-slate-800/80 p-4">
+        <NavLink to="/settings" className="inline-flex items-center gap-2 text-sm text-slate-300 hover:text-white">
           User Settings
         </NavLink>
       </div>

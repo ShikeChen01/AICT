@@ -13,10 +13,13 @@ import type {
   AgentStatusWithQueue,
   AgentSession,
   AgentMessageLog,
+  AgentMemoryResponse,
+  AgentInterruptRequest,
+  AgentInterruptResponse,
+  AgentWakeRequest,
+  AgentWakeResponse,
   ProjectSettings,
   ProjectSettingsUpdate,
-  Ticket,
-  TicketCreate,
   Repository,
   UserProfile,
   WSEvent,
@@ -183,16 +186,18 @@ export async function getAllMessages(
 
 export async function getSessions(
   projectId: string,
-  agentId: string,
+  agentId?: string,
   limit = 50,
   offset = 0
 ): Promise<AgentSession[]> {
   const params = new URLSearchParams({
     project_id: projectId,
-    agent_id: agentId,
     limit: String(limit),
     offset: String(offset),
   });
+  if (agentId) {
+    params.set('agent_id', agentId);
+  }
   return request<AgentSession[]>(`GET`, `/sessions?${params}`);
 }
 
@@ -274,40 +279,22 @@ export async function getAgentStatuses(projectId: string): Promise<AgentStatusWi
   return request<AgentStatusWithQueue[]>('GET', `/agents/status?project_id=${projectId}`);
 }
 
-// ─── Tickets ─────────────────────────────────────────────────────────
-
-export async function getTickets(projectId: string, status?: string): Promise<Ticket[]> {
-  let url = `/tickets?project_id=${projectId}`;
-  if (status) url += `&status=${status}`;
-  return request<Ticket[]>('GET', url);
+export async function getAgentMemory(agentId: string): Promise<AgentMemoryResponse> {
+  return request<AgentMemoryResponse>('GET', `/agents/${agentId}/memory`);
 }
 
-export async function getTicket(ticketId: string): Promise<Ticket> {
-  return request<Ticket>('GET', `/tickets/${ticketId}`);
+export async function interruptAgent(
+  agentId: string,
+  body: AgentInterruptRequest
+): Promise<AgentInterruptResponse> {
+  return request<AgentInterruptResponse>('POST', `/agents/${agentId}/interrupt`, body);
 }
 
-export async function createTicket(
-  projectId: string,
-  fromAgentId: string,
-  ticket: TicketCreate
-): Promise<Ticket> {
-  return request<Ticket>('POST', `/tickets?project_id=${projectId}&from_agent_id=${fromAgentId}`, ticket);
-}
-
-export async function replyToTicket(
-  ticketId: string,
-  fromAgentId: string,
-  content: string
-): Promise<unknown> {
-  return request('POST', `/tickets/${ticketId}/reply?from_agent_id=${fromAgentId}`, { content });
-}
-
-export async function closeTicket(ticketId: string, closingAgentId: string): Promise<Ticket> {
-  return request<Ticket>('POST', `/tickets/${ticketId}/close?closing_agent_id=${closingAgentId}`);
-}
-
-export async function replyToTicketAsUser(ticketId: string, content: string): Promise<unknown> {
-  return request('POST', `/tickets/${ticketId}/user-reply`, { content });
+export async function wakeAgent(
+  agentId: string,
+  body: AgentWakeRequest = {}
+): Promise<AgentWakeResponse> {
+  return request<AgentWakeResponse>('POST', `/agents/${agentId}/wake`, body);
 }
 
 // ─── User Settings ───────────────────────────────────────────────────

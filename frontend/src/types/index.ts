@@ -63,7 +63,7 @@ export interface TaskUpdate {
 
 // ─── Agent ───────────────────────────────────────────────────────────
 
-export type AgentRole = 'gm' | 'manager' | 'cto' | 'engineer';
+export type AgentRole = 'manager' | 'cto' | 'engineer';
 export type AgentStatus = 'sleeping' | 'active' | 'busy';
 
 export interface Agent {
@@ -94,7 +94,6 @@ export interface AgentTaskQueueItem {
 export interface AgentStatusWithQueue extends Agent {
   queue_size: number;
   pending_message_count?: number;
-  open_ticket_count?: number;
   task_queue: AgentTaskQueueItem[];
 }
 
@@ -175,45 +174,6 @@ export interface ChannelMessageSend {
   content: string;
 }
 
-// ─── Ticket ──────────────────────────────────────────────────────────
-
-export type TicketType = 'task_assignment' | 'question' | 'help' | 'issue' | 'abort';
-export type TicketStatus = 'open' | 'closed';
-
-export interface TicketMessage {
-  id: UUID;
-  ticket_id: UUID;
-  from_agent_id: UUID | null;
-  from_user_id: UUID | null;
-  content: string;
-  created_at: string;
-}
-
-export interface Ticket {
-  id: UUID;
-  project_id: UUID;
-  from_agent_id: UUID;
-  to_agent_id: UUID;
-  header: string;
-  ticket_type: TicketType;
-  critical: number;
-  urgent: number;
-  status: TicketStatus;
-  created_at: string;
-  closed_at: string | null;
-  closed_by_id: UUID | null;
-  messages: TicketMessage[];
-}
-
-export interface TicketCreate {
-  to_agent_id: UUID;
-  header: string;
-  ticket_type: TicketType;
-  critical?: number;
-  urgent?: number;
-  initial_message?: string | null;
-}
-
 // ─── Repository ──────────────────────────────────────────────────────
 
 export interface Repository {
@@ -284,37 +244,22 @@ export interface AgentContext {
 // ─── WebSocket Events ────────────────────────────────────────────────
 
 export type WSEventType =
-  | 'gm_status'
   | 'task_created'
   | 'task_update'
   | 'agent_status'
   | 'workflow_update'
   | 'agent_log'
   | 'sandbox_log'
-  | 'job_started'
-  | 'job_progress'
-  | 'job_completed'
-  | 'job_failed'
-  | 'ticket_created'
-  | 'ticket_reply'
-  | 'ticket_closed'
-  | 'mission_aborted'
   // New stream events (Agent 2)
   | 'agent_text'
   | 'agent_tool_call'
   | 'agent_tool_result'
-  | 'agent_message';
+  | 'agent_message'
+  | 'system_message';
 
 export interface WSEvent<T = unknown> {
   type: WSEventType;
   data: T;
-}
-
-export interface WSGMStatusEvent {
-  type: 'gm_status';
-  data: {
-    status: 'available' | 'busy';
-  };
 }
 
 export interface WSTaskCreatedEvent {
@@ -371,6 +316,11 @@ export interface WSAgentLogEvent {
   data: AgentLogData;
 }
 
+export interface ActivityLogItem extends AgentLogData {
+  id: string;
+  timestamp: string;
+}
+
 export interface SandboxLogData {
   project_id: UUID;
   agent_id: UUID;
@@ -384,63 +334,66 @@ export interface WSSandboxLogEvent {
   data: SandboxLogData;
 }
 
-export interface JobEventData {
-  job_id: UUID;
-  project_id: UUID;
-  task_id: UUID;
-  agent_id: UUID;
-  status: 'started' | 'progress' | 'completed' | 'failed';
-  message?: string | null;
-  result?: string | null;
-  error?: string | null;
-  pr_url?: string | null;
-  tool_name?: string | null;
-  tool_args?: Record<string, unknown> | null;
-}
-
-export interface TicketEventData {
-  ticket_id: UUID;
-  project_id: UUID;
-  from_agent_id: UUID | null;
-  from_user_id: UUID | null;
-  to_agent_id: UUID;
-  header: string;
-  ticket_type: TicketType;
-  message: string | null;
-}
-
 // ─── Agent Stream Events (NEW) ────────────────────────────────────────
 
 export interface AgentTextData {
-  project_id: UUID;
   agent_id: UUID;
+  agent_role: AgentRole;
   content: string;
-  timestamp?: string;
+  session_id?: UUID | null;
+  iteration?: number;
 }
 
 export interface AgentToolCallData {
-  project_id: UUID;
   agent_id: UUID;
+  agent_role: AgentRole;
   tool_name: string;
   tool_input: Record<string, unknown>;
-  timestamp?: string;
+  session_id?: UUID | null;
+  iteration?: number;
 }
 
 export interface AgentToolResultData {
-  project_id: UUID;
   agent_id: UUID;
   tool_name: string;
   output: string;
   success: boolean;
-  timestamp?: string;
+  session_id?: UUID | null;
+  iteration?: number;
 }
 
 export interface AgentMessageData {
-  project_id: UUID;
-  agent_id: UUID;
+  id: UUID;
   from_agent_id: UUID;
+  target_agent_id: UUID;
   content: string;
-  timestamp?: string;
+  message_type: ChannelMessageType;
+  created_at?: string | null;
+}
+
+export interface SystemMessageData {
+  content: string;
+  created_at?: string | null;
+}
+
+export interface AgentMemoryResponse {
+  memory: Record<string, unknown> | null;
+}
+
+export interface AgentInterruptRequest {
+  reason: string;
+}
+
+export interface AgentInterruptResponse {
+  message: string;
+}
+
+export interface AgentWakeRequest {
+  message?: string | null;
+}
+
+export interface AgentWakeResponse {
+  message: string;
 }
 
 // ─── Stream buffer (frontend) ──────────────────────────────────────────

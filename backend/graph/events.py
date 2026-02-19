@@ -33,7 +33,7 @@ async def emit_workflow_update(
     
     Args:
         project_id: The project UUID (also used as thread_id).
-        current_node: Name of the current node (e.g., "manager", "om", "engineer").
+        current_node: Name of the current node (e.g., "manager", "cto", "engineer").
         node_status: Either "started" or "completed".
         previous_node: Optional name of the previous node.
         metadata: Optional additional metadata.
@@ -67,7 +67,7 @@ async def emit_agent_log(
     
     Args:
         project_id: The project UUID.
-        agent_role: Role of the agent (e.g., "manager", "om", "engineer").
+        agent_role: Role of the agent (e.g., "manager", "cto", "engineer").
         log_type: Type of log entry.
         content: Human-readable description of the activity.
         agent_id: Optional agent UUID (generates a placeholder if not provided).

@@ -68,6 +68,15 @@ async def websocket_endpoint(
                 channel = data.get("channel", "").strip().lower()
                 if channel in _CHANNEL_MAP:
                     await ws_manager.unsubscribe(websocket, _CHANNEL_MAP[channel])
+            elif data.get("type") == "inspect_agent":
+                agent_id = data.get("agent_id")
+                if agent_id:
+                    try:
+                        await ws_manager.set_inspected_agent(websocket, UUID(str(agent_id)))
+                    except ValueError:
+                        await websocket.send_json(
+                            {"type": "error", "message": "Invalid agent_id for inspect_agent"}
+                        )
     except WebSocketDisconnect:
         pass
     finally:

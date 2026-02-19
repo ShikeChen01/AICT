@@ -214,34 +214,6 @@ class TestAgentsAPI:
         assert isinstance(data, list)
 
 
-class TestJobsAPI:
-    """Jobs API removed (docs-first: replaced by sessions). Expect 404."""
-
-    async def test_list_jobs_returns_404(
-        self,
-        api_client: AsyncClient,
-        auth_headers: dict,
-        sample_project: Project,
-    ):
-        response = await api_client.get(
-            f"/api/v1/jobs?project_id={sample_project.id}",
-            headers=auth_headers,
-        )
-        assert response.status_code == 404
-
-    async def test_list_active_jobs_returns_404(
-        self,
-        api_client: AsyncClient,
-        auth_headers: dict,
-        sample_project: Project,
-    ):
-        response = await api_client.get(
-            f"/api/v1/jobs/active?project_id={sample_project.id}",
-            headers=auth_headers,
-        )
-        assert response.status_code == 404
-
-
 class TestSessionsAPI:
     """Docs contract: GET /api/v1/sessions (replaces jobs)."""
 

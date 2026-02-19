@@ -209,6 +209,7 @@ class TaskService:
             task.status = "assigned"
 
         await self._wake_agent_for_assignment(agent)
+        await self._send_assignment_message(task, agent)
         await self.session.flush()
         await self.session.refresh(task)
 
@@ -224,6 +225,30 @@ class TaskService:
         await self.orchestrator.wake_agent(self.session, agent)
         if agent.status != prev_status or agent.sandbox_id != prev_sandbox_id:
             await self.ws_manager.broadcast_agent_status(agent)
+
+    async def _send_assignment_message(self, task: Task, agent: Agent) -> None:
+        """Queue an assignment message so worker loops have actionable input."""
+        from backend.core.constants import USER_AGENT_ID
+        from backend.services.message_service import MessageService
+
+        summary = [
+            f"Task assigned: {task.title}",
+            f"Task ID: {task.id}",
+            f"Status: {task.status}",
+        ]
+        if task.module_path:
+            summary.append(f"Module: {task.module_path}")
+        if task.description:
+            summary.extend(["", task.description])
+
+        message_service = MessageService(self.session)
+        await message_service.send(
+            from_agent_id=USER_AGENT_ID,
+            target_agent_id=agent.id,
+            project_id=task.project_id,
+            content="\n".join(summary),
+            message_type="system",
+        )
 
     async def delete(self, task_id: UUID) -> bool:
         """Delete a task."""

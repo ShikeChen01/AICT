@@ -6,8 +6,8 @@ import { useCallback, useEffect } from 'react';
 import { AgentSelector } from './AgentSelector';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
-import { AgentStream } from './AgentStream';
 import { useMessages, useAgentStream, useAgents } from '../../hooks';
+import { Panel } from '../ui';
 
 interface AgentChatViewProps {
   projectId: string;
@@ -25,7 +25,7 @@ export function AgentChatView({
     projectId,
     agentId: selectedAgentId,
   });
-  const { buffer, isStreaming, clearBuffer } = useAgentStream(selectedAgentId);
+  const { isStreaming } = useAgentStream(selectedAgentId);
 
   useEffect(() => {
     if (!selectedAgentId && agents.length > 0) {
@@ -43,7 +43,12 @@ export function AgentChatView({
   const effectiveAgentId = selectedAgentId ?? (agents[0]?.id ?? null);
 
   return (
-    <div className="flex flex-col h-full bg-white rounded-lg border border-gray-200 overflow-hidden">
+    <Panel
+      title="Conversation"
+      subtitle="Ask, assign, and monitor agent responses in realtime"
+      className="h-full"
+      bodyClassName="flex min-h-0 flex-col"
+    >
       <AgentSelector
         agents={agents}
         selectedAgentId={effectiveAgentId}
@@ -51,22 +56,13 @@ export function AgentChatView({
         disabled={loading}
       />
 
-      <div className="flex-1 flex flex-col min-h-0">
-        {/* Message history (from API) */}
-        <div className="flex-1 min-h-0 flex flex-col border-b border-gray-100">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col border-b border-[var(--border-color)]">
           <MessageList messages={messages} isLoading={loading} />
         </div>
 
-        {/* Live stream buffer */}
-        <div className="flex-shrink-0 border-b border-gray-100" style={{ maxHeight: '40%' }}>
-          <div className="text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-2 bg-gray-50 border-b border-gray-100">
-            Live stream
-          </div>
-          <AgentStream buffer={buffer} onClear={clearBuffer} />
-        </div>
-
         {error && (
-          <div className="px-4 py-2 bg-red-50 text-red-700 text-sm">
+          <div className="px-4 py-2 bg-red-50 text-sm text-red-700">
             {error}
           </div>
         )}
@@ -77,7 +73,7 @@ export function AgentChatView({
           isStreaming={isStreaming}
         />
       </div>
-    </div>
+    </Panel>
   );
 }
 

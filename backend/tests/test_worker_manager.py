@@ -1,9 +1,11 @@
 """Unit tests for WorkerManager (start/stop, interrupt)."""
 
+import asyncio
 import os
 from uuid import uuid4
 
 import pytest
+from unittest.mock import AsyncMock
 
 from backend.workers.worker_manager import WorkerManager, get_worker_manager
 from backend.workers.message_router import reset_message_router
@@ -50,3 +52,53 @@ async def test_start_then_stop_cleans_tasks(manager) -> None:
     await manager.stop()
     assert len(manager._tasks) == 0
     assert len(manager._workers) == 0
+
+
+@pytest.mark.asyncio
+async def test_worker_done_callback_respawns_on_crash(manager) -> None:
+    """Unexpected worker crash schedules a respawn."""
+    agent_id = uuid4()
+    project_id = uuid4()
+    replacement = type(
+        "WorkerStub",
+        (),
+        {"agent_id": agent_id, "project_id": project_id},
+    )()
+
+    respawn = AsyncMock()
+    manager._spawn_tracked_worker = respawn
+
+    async def _crash():
+        raise RuntimeError("boom")
+
+    task = asyncio.create_task(_crash())
+    manager._track_worker(replacement, task)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    respawn.assert_called_once_with(agent_id, project_id)
+
+
+@pytest.mark.asyncio
+async def test_worker_done_callback_does_not_respawn_while_shutting_down(manager) -> None:
+    """Manager shutdown suppresses respawn for completed worker tasks."""
+    manager._shutting_down = True
+    agent_id = uuid4()
+    project_id = uuid4()
+    replacement = type(
+        "WorkerStub",
+        (),
+        {"agent_id": agent_id, "project_id": project_id},
+    )()
+
+    respawn = AsyncMock()
+    manager._spawn_tracked_worker = respawn
+
+    async def _done():
+        return None
+
+    task = asyncio.create_task(_done())
+    manager._track_worker(replacement, task)
+    await asyncio.sleep(0)
+
+    respawn.assert_not_awaited()

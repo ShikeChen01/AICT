@@ -23,6 +23,7 @@ import {
   getAuthToken,
 } from '../api/client';
 import type { Project } from '../types';
+import { Button, Card, Input, Textarea } from '../components/ui';
 
 type ModalType = 'create' | 'import' | null;
 
@@ -76,7 +77,7 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
       setProjects((prev) => [project, ...prev]);
       await onProjectsUpdated?.();
       closeModal();
-      navigate(`/repository/${project.id}/chat`);
+      navigate(`/repository/${project.id}/workspace`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create project');
     } finally {
@@ -98,7 +99,7 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
       setProjects((prev) => [project, ...prev]);
       await onProjectsUpdated?.();
       closeModal();
-      navigate(`/repository/${project.id}/chat`);
+      navigate(`/repository/${project.id}/workspace`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to import project');
     } finally {
@@ -133,94 +134,76 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
   const openImportModal = () => setModal('import');
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-6 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Repositories</h1>
-              <p className="text-sm text-gray-500 mt-1">
-                Manage your AI-assisted software repositories
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <Link
-                to="/settings"
-                className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 transition-colors"
-              >
-                <Settings className="w-4 h-4" />
+    <div className="min-h-screen bg-[var(--app-bg)]">
+      <header className="border-b border-[var(--border-color)] bg-[var(--surface-card)]">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-6">
+          <div>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)]">Repositories</h1>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">
+              Monitor and manage your AI-assisted workspaces.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link to="/settings">
+              <Button variant="secondary">
+                <Settings className="h-4 w-4" />
                 User Settings
-              </Link>
-              <button
-                onClick={openImportModal}
-                className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 transition-colors"
-              >
-                <GitBranch className="w-4 h-4" />
-                Import Repository
-              </button>
-              <button
-                onClick={openCreateModal}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                New Repository
-              </button>
-            </div>
+              </Button>
+            </Link>
+            <Button variant="secondary" onClick={openImportModal}>
+              <GitBranch className="h-4 w-4" />
+              Import Repository
+            </Button>
+            <Button onClick={openCreateModal}>
+              <Plus className="h-4 w-4" />
+              New Repository
+            </Button>
           </div>
         </div>
       </header>
 
-      {/* Content */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main className="mx-auto max-w-7xl px-6 py-8">
         {error && (
-          <div className="mb-6 flex items-center gap-3 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-red-700">
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          <Card className="mb-6 flex items-center gap-3 border-red-200 bg-red-50 px-4 py-3 text-red-700">
+            <AlertCircle className="h-5 w-5 flex-shrink-0" />
             <span className="text-sm">{error}</span>
             <button onClick={() => setError(null)} className="ml-auto text-red-500 hover:text-red-700">
               &times;
             </button>
-          </div>
+          </Card>
         )}
 
         {isLoading ? (
-          <div className="flex items-center justify-center h-64">
-            <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+          <div className="flex h-64 items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
           </div>
         ) : projects.length === 0 ? (
-          <div className="text-center py-16">
-            <FolderOpen className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No repositories yet</h3>
-            <p className="text-gray-500 mb-6">Get started by creating a new repository or importing an existing repository.</p>
+          <Card className="py-16 text-center">
+            <FolderOpen className="mx-auto mb-4 h-16 w-16 text-gray-300" />
+            <h3 className="mb-2 text-lg font-medium text-gray-900">No repositories yet</h3>
+            <p className="mb-6 text-gray-500">
+              Create a new repository or import an existing one to start monitoring agents.
+            </p>
             <div className="flex justify-center gap-3">
-              <button
-                onClick={openImportModal}
-                className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50"
-              >
-                <GitBranch className="w-4 h-4" />
+              <Button variant="secondary" onClick={openImportModal}>
+                <GitBranch className="h-4 w-4" />
                 Import Repository
-              </button>
-              <button
-                onClick={openCreateModal}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                <Plus className="w-4 h-4" />
+              </Button>
+              <Button onClick={openCreateModal}>
+                <Plus className="h-4 w-4" />
                 New Repository
-              </button>
+              </Button>
             </div>
-          </div>
+          </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {projects.map((project) => (
-              <div
-                key={project.id}
-                className="bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow"
-              >
+              <Card key={project.id} className="transition-shadow hover:shadow-md">
                 <div className="p-5">
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
                       <h3
-                        onClick={() => navigate(`/repository/${project.id}/chat`)}
+                        onClick={() => navigate(`/repository/${project.id}/workspace`)}
                         className="text-lg font-semibold text-gray-900 truncate cursor-pointer hover:text-blue-600"
                       >
                         {project.name}
@@ -229,13 +212,15 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                         <p className="text-sm text-gray-500 mt-1 line-clamp-2">{project.description}</p>
                       )}
                     </div>
-                    <button
+                    <Button
                       onClick={() => handleDelete(project.id, project.name)}
+                      variant="ghost"
+                      size="sm"
                       className="ml-2 p-1 text-gray-400 hover:text-red-500 transition-colors"
                       title="Delete repository"
                     >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
 
                   <div className="mt-4 flex items-center gap-3 text-xs text-gray-500">
@@ -260,24 +245,23 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                       Created {format(new Date(project.created_at), 'MMM d, yyyy')}
                     </span>
                     <button
-                      onClick={() => navigate(`/repository/${project.id}/chat`)}
+                      onClick={() => navigate(`/repository/${project.id}/workspace`)}
                       className="text-xs font-medium text-blue-600 hover:text-blue-800"
                     >
                       Open Repository &rarr;
                     </button>
                   </div>
                 </div>
-              </div>
+              </Card>
             ))}
           </div>
         )}
       </main>
 
-      {/* Modal */}
       {modal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={closeModal} />
-          <div className="relative bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
+          <Card className="relative mx-4 w-full max-w-md p-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">
               {modal === 'create' ? 'Create New Repository' : 'Import Repository'}
             </h2>
@@ -288,11 +272,10 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Repository Name *
                   </label>
-                  <input
+                  <Input
                     type="text"
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="my-repository"
                     required
                   />
@@ -302,10 +285,9 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Description
                   </label>
-                  <textarea
+                  <Textarea
                     value={formDescription}
                     onChange={(e) => setFormDescription(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     rows={3}
                     placeholder="Brief description of the repository..."
                   />
@@ -316,11 +298,10 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Repository URL *
                   </label>
-                  <input
+                  <Input
                     type="url"
                     value={formRepoUrl}
                     onChange={(e) => setFormRepoUrl(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="https://github.com/user/repo"
                     required
                   />
@@ -343,25 +324,24 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
               )}
 
               <div className="mt-6 flex gap-3 justify-end">
-                <button
+                <Button
                   type="button"
                   onClick={closeModal}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                  variant="secondary"
                   disabled={isSubmitting}
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
                   disabled={isSubmitting}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                 >
                   {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                   {modal === 'create' ? 'Create Repository' : 'Import Repository'}
-                </button>
+                </Button>
               </div>
             </form>
-          </div>
+          </Card>
         </div>
       )}
     </div>

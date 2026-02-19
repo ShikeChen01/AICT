@@ -6,14 +6,14 @@ List and retrieve agent information. Spawn engineers (up to max_engineers).
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.auth import verify_token
+from backend.core.auth import get_current_user
 from backend.core.exceptions import AgentNotFoundError
-from backend.db.models import Agent, Task
+from backend.db.models import Agent, Repository, Task, User
 from backend.db.session import get_db
 from backend.schemas.agent import (
     AgentContextResponse,
@@ -29,13 +29,35 @@ from backend.services.message_service import get_message_service
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 
+async def _ensure_project_access(db: AsyncSession, project_id: UUID, user_id: UUID) -> None:
+    result = await db.execute(
+        select(Repository).where(
+            Repository.id == project_id,
+            (Repository.owner_id == user_id) | (Repository.owner_id.is_(None)),
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+
+async def _ensure_agent_access(db: AsyncSession, agent_id: UUID, user_id: UUID) -> Agent:
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise AgentNotFoundError(agent_id)
+    await _ensure_project_access(db, agent.project_id, user_id)
+    return agent
+
+
 @router.get("", response_model=list[AgentResponse])
 async def list_agents(
     project_id: UUID = Query(..., description="Project ID to list agents for"),
-    _auth: bool = Depends(verify_token),
+    current_user: User | None = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List all agents for a project (ordered by role: manager, cto, engineer)."""
+    if isinstance(current_user, User):
+        await _ensure_project_access(db, project_id, current_user.id)
     role_order = case(
         (Agent.role == "manager", 0),
         (Agent.role == "cto", 1),
@@ -53,13 +75,16 @@ async def list_agents(
 @router.get("/status", response_model=list[AgentStatusWithQueueResponse])
 async def list_agent_status(
     project_id: UUID = Query(..., description="Project ID to list agent status for"),
-    _auth: bool = Depends(verify_token),
+    current_user: User | None = Depends(get_current_user),
+    _auth: bool | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """
     List agent status and queue details for a project.
     pending_message_count = unread (status=sent) channel messages for that agent.
     """
+    if isinstance(current_user, User):
+        await _ensure_project_access(db, project_id, current_user.id)
     role_order = case(
         (Agent.role == "manager", 0),
         (Agent.role == "cto", 1),
@@ -130,21 +155,18 @@ async def list_agent_status(
 @router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent(
     agent_id: UUID,
-    _auth: bool = Depends(verify_token),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single agent by ID."""
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise AgentNotFoundError(agent_id)
+    agent = await _ensure_agent_access(db, agent_id, current_user.id)
     return agent
 
 
 @router.post("", response_model=AgentResponse)
 async def spawn_engineer(
     data: SpawnEngineerCreate,
-    _auth: bool = Depends(verify_token),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -152,6 +174,7 @@ async def spawn_engineer(
 
     Enforces max_engineers limit (default 5). Raises 400 if limit reached.
     """
+    await _ensure_project_access(db, data.project_id, current_user.id)
     service = get_agent_service(db)
     agent = await service.spawn_engineer(
         data.project_id,
@@ -218,14 +241,11 @@ class AgentMemoryResponse(BaseModel):
 @router.get("/{agent_id}/memory", response_model=AgentMemoryResponse)
 async def get_agent_memory(
     agent_id: UUID,
-    _auth: bool = Depends(verify_token),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Return the agent's Layer 1 memory (self-define block content)."""
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise AgentNotFoundError(agent_id)
+    agent = await _ensure_agent_access(db, agent_id, current_user.id)
     return AgentMemoryResponse(memory=agent.memory)
 
 
@@ -237,18 +257,23 @@ class WakeResponse(BaseModel):
     message: str = "Agent woken."
 
 
+class InterruptRequest(BaseModel):
+    reason: str
+
+
+class WakeRequest(BaseModel):
+    message: str | None = None
+
+
 @router.post("/{agent_id}/interrupt", response_model=InterruptResponse)
 async def interrupt_agent(
     agent_id: UUID,
-    body: dict | None = None,
-    _auth: bool = Depends(verify_token),
+    body: InterruptRequest,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Force-end the agent's current session (user action). Same as interrupt_agent tool."""
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise AgentNotFoundError(agent_id)
+    await _ensure_agent_access(db, agent_id, current_user.id)
     from backend.workers.worker_manager import get_worker_manager
 
     get_worker_manager().interrupt_agent(agent_id)
@@ -258,15 +283,24 @@ async def interrupt_agent(
 @router.post("/{agent_id}/wake", response_model=WakeResponse)
 async def wake_agent(
     agent_id: UUID,
-    body: dict | None = None,
-    _auth: bool = Depends(verify_token),
+    body: WakeRequest,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Send a wake-up notification to a sleeping agent. Optionally include a message."""
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise AgentNotFoundError(agent_id)
+    agent = await _ensure_agent_access(db, agent_id, current_user.id)
+    if body.message:
+        from backend.services.message_service import get_message_service
+        from backend.core.constants import USER_AGENT_ID
+
+        service = get_message_service(db)
+        await service.send(
+            from_agent_id=USER_AGENT_ID,
+            target_agent_id=agent.id,
+            project_id=agent.project_id,
+            content=body.message,
+        )
+        await db.commit()
     from backend.workers.message_router import get_message_router
 
     get_message_router().notify(agent_id)
@@ -276,7 +310,7 @@ async def wake_agent(
 @router.get("/{agent_id}/context", response_model=AgentContextResponse)
 async def get_agent_context(
     agent_id: UUID,
-    _auth: bool = Depends(verify_token),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -284,10 +318,7 @@ async def get_agent_context(
 
     Returns system prompt, available tools, and recent message history.
     """
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise AgentNotFoundError(agent_id)
+    agent = await _ensure_agent_access(db, agent_id, current_user.id)
 
     # Get system prompt for this role
     system_prompt = _SYSTEM_PROMPTS.get(agent.role, "")

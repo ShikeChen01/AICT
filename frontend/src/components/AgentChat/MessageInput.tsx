@@ -3,6 +3,7 @@
  */
 
 import { useState, useCallback, type FormEvent, type KeyboardEvent } from 'react';
+import { Button, Textarea } from '../ui';
 
 interface MessageInputProps {
   onSend: (content: string) => Promise<unknown>;
@@ -45,27 +46,27 @@ export function MessageInput({ onSend, disabled, isStreaming }: MessageInputProp
   const isDisabled = disabled || isSending;
 
   return (
-    <div className="border-t border-gray-200 bg-white p-4">
+    <div className="border-t border-[var(--border-color)] bg-[var(--surface-muted)] p-4">
       {isStreaming && (
-        <div className="flex items-center gap-2 text-sm text-amber-600 mb-2">
+        <div className="mb-2 flex items-center gap-2 text-sm text-amber-700">
           <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
           Agent is responding...
         </div>
       )}
       <form onSubmit={handleSubmit} className="flex gap-2">
-        <textarea
+        <Textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
           disabled={isDisabled}
           rows={1}
-          className="flex-1 px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none resize-none disabled:bg-gray-100 disabled:text-gray-500 transition-colors min-h-[48px] max-h-[120px]"
+          className="min-h-[48px] max-h-[120px] flex-1 resize-none"
         />
-        <button
+        <Button
           type="submit"
           disabled={isDisabled || !content.trim()}
-          className="px-6 py-3 bg-blue-500 text-white rounded-xl font-medium hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+          className="h-12 rounded-xl px-6"
         >
           {isSending ? (
             <>
@@ -83,7 +84,7 @@ export function MessageInput({ onSend, disabled, isStreaming }: MessageInputProp
               Send
             </>
           )}
-        </button>
+        </Button>
       </form>
     </div>
   );

@@ -2,9 +2,11 @@
  * AgentStream — live streaming output display (text, tool_call, tool_result, message).
  */
 
-import { useRef, useEffect } from 'react';
+import { useMemo } from 'react';
 import { MarkdownContent } from '../MarkdownContent';
 import type { AgentStreamBuffer, StreamChunk } from '../../types';
+import { useAutoFollow } from '../../hooks';
+import { Button } from '../ui';
 
 interface AgentStreamProps {
   buffer: AgentStreamBuffer;
@@ -57,15 +59,17 @@ function ChunkRow({ chunk }: { chunk: StreamChunk }) {
 }
 
 export function AgentStream({ buffer, onClear }: AgentStreamProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [buffer.chunks.length]);
+  const streamKey = useMemo(
+    () => `${buffer.chunks.length}:${buffer.chunks[buffer.chunks.length - 1]?.timestamp ?? 'none'}`,
+    [buffer.chunks]
+  );
+  const { attachRef, onScroll, isAutoFollow, jumpToLatest } = useAutoFollow<HTMLDivElement>({
+    dependencyKey: streamKey,
+  });
 
   if (buffer.chunks.length === 0) {
     return (
-      <div className="flex-1 overflow-y-auto p-4 text-sm text-gray-500">
+      <div className="h-full overflow-y-auto p-4 text-sm text-gray-500">
         Live stream will appear here when the agent responds.
         {onClear && (
           <button
@@ -81,7 +85,15 @@ export function AgentStream({ buffer, onClear }: AgentStreamProps) {
   }
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-sm">
+    <div className="relative h-full min-h-0">
+      {!isAutoFollow && (
+        <div className="absolute bottom-3 right-3 z-10">
+          <Button size="sm" onClick={jumpToLatest}>
+            Jump to latest
+          </Button>
+        </div>
+      )}
+      <div ref={attachRef} onScroll={onScroll} className="h-full overflow-y-auto p-4 space-y-2 font-mono text-sm">
       {onClear && (
         <div className="flex justify-end mb-2">
           <button
@@ -96,6 +108,7 @@ export function AgentStream({ buffer, onClear }: AgentStreamProps) {
       {buffer.chunks.map((chunk, i) => (
         <ChunkRow key={`${chunk.timestamp}-${i}`} chunk={chunk} />
       ))}
+      </div>
     </div>
   );
 }

@@ -56,7 +56,7 @@ def test_git_service_pr_cycle(tmp_path: Path):
     assert "feature/test-cycle" in pr.pr_url
 
     merge_sha = service.merge_pr(
-        agent_role="om",
+        agent_role="cto",
         source_branch="feature/test-cycle",
         target_branch="main",
     )

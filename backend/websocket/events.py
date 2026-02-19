@@ -27,9 +27,6 @@ class EventType(str, Enum):
     AGENT_MESSAGE = "agent_message"
     SYSTEM_MESSAGE = "system_message"
 
-    # Legacy / status
-    GM_STATUS = "gm_status"
-
     # Kanban
     TASK_CREATED = "task_created"
     TASK_UPDATE = "task_update"
@@ -51,14 +48,6 @@ class WebSocketEvent(BaseModel):
         if kwargs.get("timestamp") is None:
             kwargs["timestamp"] = datetime.now()
         super().__init__(**kwargs)
-
-
-# ── GM Status ──────────────────────────────────────────────────────
-
-
-class GMStatusPayload(BaseModel):
-    project_id: UUID
-    status: str  # 'busy' or 'available'
 
 
 # ── Task Events ────────────────────────────────────────────────────
@@ -153,6 +142,7 @@ class AgentToolCallPayload(BaseModel):
 class AgentToolResultPayload(BaseModel):
     """Tool result (truncated if large)."""
     agent_id: UUID
+    agent_role: str | None = None
     tool_name: str
     output: str
     success: bool = True
@@ -171,17 +161,6 @@ class AgentMessagePayload(BaseModel):
 
 
 # ── Event Factory Functions ────────────────────────────────────────
-
-
-def create_gm_status_event(project_id: UUID, status: str) -> WebSocketEvent:
-    """Create a GM status WebSocket event."""
-    return WebSocketEvent(
-        type=EventType.GM_STATUS,
-        data=GMStatusPayload(
-            project_id=project_id,
-            status=status,
-        ).model_dump(mode="json"),
-    )
 
 
 def create_task_created_event(task) -> WebSocketEvent:
@@ -370,12 +349,14 @@ def create_agent_tool_result_event(
     success: bool = True,
     session_id: UUID | None = None,
     iteration: int = 0,
+    agent_role: str | None = None,
 ) -> WebSocketEvent:
     """Create agent_tool_result event."""
     return WebSocketEvent(
         type=EventType.AGENT_TOOL_RESULT,
         data=AgentToolResultPayload(
             agent_id=agent_id,
+            agent_role=agent_role,
             tool_name=tool_name,
             output=output,
             success=success,

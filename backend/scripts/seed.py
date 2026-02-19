@@ -3,7 +3,7 @@ Seed the database with initial MVP-0 data.
 
 Creates:
 - 1 Project ("firstproject") with a fixed UUID so the frontend default works
-- 1 Manager agent (GM)
+- 1 Manager agent
 - 1 Engineer agent (ready to receive tasks)
 
 Uses AgentService for agent creation.
@@ -108,7 +108,7 @@ async def _ensure_agents(session: AsyncSession, project: Project, agent_service)
     result = await session.execute(
         select(Agent).where(
             Agent.project_id == project.id,
-            Agent.role.in_(("manager", "gm")),
+            Agent.role == "manager",
         )
     )
     manager = result.scalar_one_or_none()

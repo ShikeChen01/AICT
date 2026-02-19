@@ -40,7 +40,7 @@ describe('AgentsPanel', () => {
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
           queue_size: 0,
-          open_ticket_count: 0,
+          pending_message_count: 0,
           task_queue: [],
         },
       ],

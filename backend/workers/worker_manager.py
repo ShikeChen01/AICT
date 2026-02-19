@@ -30,9 +30,48 @@ class WorkerManager:
     def __init__(self) -> None:
         self._tasks: list[asyncio.Task] = []
         self._workers: list[AgentWorker] = []
+        self._task_meta: dict[asyncio.Task, tuple[UUID, UUID]] = {}
+        self._shutting_down = False
+
+    def _track_worker(self, worker: AgentWorker, task: asyncio.Task) -> None:
+        self._workers.append(worker)
+        self._tasks.append(task)
+        self._task_meta[task] = (worker.agent_id, worker.project_id)
+        task.add_done_callback(self._on_worker_done)
+
+    async def _spawn_tracked_worker(self, agent_id: UUID, project_id: UUID) -> None:
+        worker = AgentWorker(agent_id, project_id)
+        task = asyncio.create_task(worker.run())
+        self._track_worker(worker, task)
+        logger.info("Spawned AgentWorker for agent %s", agent_id)
+
+    def _on_worker_done(self, task: asyncio.Task) -> None:
+        metadata = self._task_meta.pop(task, None)
+        if task in self._tasks:
+            self._tasks.remove(task)
+        if metadata is None:
+            return
+
+        agent_id, project_id = metadata
+        self._workers = [worker for worker in self._workers if worker.agent_id != agent_id]
+
+        if self._shutting_down:
+            return
+
+        if task.cancelled():
+            logger.warning("AgentWorker task for agent %s was cancelled unexpectedly; respawning", agent_id)
+        else:
+            exc = task.exception()
+            if exc is None:
+                logger.warning("AgentWorker task for agent %s exited unexpectedly; respawning", agent_id)
+            else:
+                logger.exception("AgentWorker task for agent %s crashed; respawning", agent_id, exc_info=exc)
+
+        asyncio.create_task(self._spawn_tracked_worker(agent_id, project_id))
 
     async def start(self) -> None:
         """Start MessageRouter, replay undelivered, load agents, spawn workers."""
+        self._shutting_down = False
         router = get_message_router()
 
         async with AsyncSessionLocal() as session:
@@ -48,17 +87,15 @@ class WorkerManager:
             await session.commit()
 
         for agent in agents:
-            worker = AgentWorker(agent.id, agent.project_id)
-            self._workers.append(worker)
-            task = asyncio.create_task(worker.run())
-            self._tasks.append(task)
-            logger.info("Spawned AgentWorker for agent %s (%s)", agent.id, agent.display_name)
+            await self._spawn_tracked_worker(agent.id, agent.project_id)
+            logger.info("Worker ready for agent %s (%s)", agent.id, agent.display_name)
 
         logger.info("WorkerManager started: %d agents", len(self._workers))
 
     async def stop(self) -> None:
         """Cancel all worker tasks, unregister queues, reset router."""
-        for task in self._tasks:
+        self._shutting_down = True
+        for task in list(self._tasks):
             if not task.done():
                 task.cancel()
                 try:
@@ -67,8 +104,16 @@ class WorkerManager:
                     pass
         self._tasks.clear()
         self._workers.clear()
+        self._task_meta.clear()
         reset_message_router()
         logger.info("WorkerManager stopped")
+
+    async def spawn_worker(self, agent_id: UUID, project_id: UUID) -> None:
+        """Spawn a new worker at runtime for a newly created agent."""
+        if any(worker.agent_id == agent_id for worker in self._workers):
+            logger.debug("Worker already exists for agent %s; skipping duplicate spawn", agent_id)
+            return
+        await self._spawn_tracked_worker(agent_id, project_id)
 
     def interrupt_agent(self, agent_id: UUID) -> None:
         """Signal a specific agent's worker to interrupt at next iteration."""

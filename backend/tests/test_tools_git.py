@@ -17,6 +17,7 @@ from backend.tools.git import (
     push_changes,
     REPO_DIR,
 )
+from backend.services.e2b_service import LOCAL_FALLBACK_SANDBOX_ERROR
 
 
 class _SessionContext:
@@ -71,6 +72,18 @@ class TestRunGitInSandbox:
         ):
             result = await _run_git_in_sandbox(str(agent_no_sandbox.id), "git status")
         assert "no active sandbox" in result.lower() or "Error" in result
+
+    @pytest.mark.asyncio
+    async def test_local_fallback_sandbox_returns_clear_error(self, session, sample_engineer):
+        """Local fallback sandbox IDs return a deterministic error."""
+        sample_engineer.sandbox_id = "local-sbox-test"
+        await session.commit()
+        with patch(
+            "backend.tools.git.AsyncSessionLocal",
+            return_value=_SessionContext(session),
+        ):
+            result = await _run_git_in_sandbox(str(sample_engineer.id), "git status")
+        assert result == LOCAL_FALLBACK_SANDBOX_ERROR
 
     @pytest.mark.asyncio
     async def test_sandbox_connect_and_run(self, session, agent_with_sandbox):

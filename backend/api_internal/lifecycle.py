@@ -1,12 +1,10 @@
-"""
-Internal agent lifecycle endpoints.
-"""
+"""Internal lifecycle contract (`/internal/agent/end|sleep|interrupt`)."""
 
 from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,99 +13,75 @@ from backend.core.auth import verify_agent_request
 from backend.core.exceptions import AgentNotFoundError
 from backend.db.models import Agent
 from backend.db.session import get_db
-from backend.services.orchestrator import OrchestratorService
+from backend.workers.worker_manager import get_worker_manager
 
-router = APIRouter(prefix="/lifecycle", tags=["internal-lifecycle"])
-orchestrator = OrchestratorService()
-
-
-class AgentLifecycleRequest(BaseModel):
-    target_agent_id: str
+router = APIRouter(tags=["internal-lifecycle"])
 
 
-class AgentLifecycleResponse(BaseModel):
-    actor_agent_id: str
-    target_agent_id: str
-    status: str
-    sandbox_id: str | None
+class EndRequest(BaseModel):
+    agent_id: uuid.UUID
 
 
-async def _get_agent(session: AsyncSession, agent_id: str) -> Agent:
-    try:
-        agent_uuid = uuid.UUID(agent_id)
-    except ValueError as exc:
-        raise AgentNotFoundError(agent_id) from exc
-    result = await session.execute(select(Agent).where(Agent.id == agent_uuid))
+class SleepRequest(BaseModel):
+    agent_id: uuid.UUID
+    duration_seconds: int = 0
+
+
+class InterruptRequest(BaseModel):
+    agent_id: uuid.UUID
+    target_agent_id: uuid.UUID
+    reason: str
+
+
+async def _get_agent(session: AsyncSession, agent_id: uuid.UUID) -> Agent:
+    result = await session.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
     if agent is None:
-        raise AgentNotFoundError(agent_id)
+        raise AgentNotFoundError(str(agent_id))
     return agent
 
 
-@router.post("/wake", response_model=AgentLifecycleResponse)
-async def wake_agent(
-    req: AgentLifecycleRequest,
+@router.post("/end")
+async def end_agent(
+    body: EndRequest,
     actor_agent_id: str = Depends(verify_agent_request),
-    session: AsyncSession = Depends(get_db),
 ):
-    target = await _get_agent(session, req.target_agent_id)
-    target.status = "active"
-    sandbox = await orchestrator.ensure_sandbox_for_agent(session, target)
-    return AgentLifecycleResponse(
-        actor_agent_id=actor_agent_id,
-        target_agent_id=str(target.id),
-        status=target.status,
-        sandbox_id=sandbox.sandbox_id,
-    )
+    """Documented for completeness; loop handles actual END execution."""
+    if str(body.agent_id) != actor_agent_id:
+        raise HTTPException(status_code=403, detail="agent_id must match authenticated agent")
+    return {"message": "END acknowledged"}
 
 
-@router.post("/sleep", response_model=AgentLifecycleResponse)
+@router.post("/sleep")
 async def sleep_agent(
-    req: AgentLifecycleRequest,
+    body: SleepRequest,
     actor_agent_id: str = Depends(verify_agent_request),
     session: AsyncSession = Depends(get_db),
 ):
-    target = await _get_agent(session, req.target_agent_id)
-    target.status = "sleeping"
-    await orchestrator.close_if_ephemeral(session, target)
-    return AgentLifecycleResponse(
-        actor_agent_id=actor_agent_id,
-        target_agent_id=str(target.id),
-        status=target.status,
-        sandbox_id=target.sandbox_id,
-    )
+    """Set agent status to sleeping."""
+    if str(body.agent_id) != actor_agent_id:
+        raise HTTPException(status_code=403, detail="agent_id must match authenticated agent")
+    agent = await _get_agent(session, body.agent_id)
+    agent.status = "sleeping"
+    await session.commit()
+    return {"agent_id": str(agent.id), "status": agent.status}
 
 
-@router.post("/restart", response_model=AgentLifecycleResponse)
-async def restart_agent(
-    req: AgentLifecycleRequest,
+@router.post("/interrupt")
+async def interrupt_agent(
+    body: InterruptRequest,
     actor_agent_id: str = Depends(verify_agent_request),
     session: AsyncSession = Depends(get_db),
 ):
-    target = await _get_agent(session, req.target_agent_id)
-    if target.sandbox_id:
-        await orchestrator.e2b_service.close_sandbox(session, target)
-    sandbox = await orchestrator.ensure_sandbox_for_agent(session, target)
-    target.status = "active"
-    return AgentLifecycleResponse(
-        actor_agent_id=actor_agent_id,
-        target_agent_id=str(target.id),
-        status=target.status,
-        sandbox_id=sandbox.sandbox_id,
-    )
+    """Interrupt target agent session (manager/cto only)."""
+    if str(body.agent_id) != actor_agent_id:
+        raise HTTPException(status_code=403, detail="agent_id must match authenticated agent")
 
+    actor = await _get_agent(session, body.agent_id)
+    if actor.role not in {"manager", "cto"}:
+        raise HTTPException(status_code=403, detail="Only manager/cto can interrupt")
 
-@router.get("/status/{target_agent_id}", response_model=AgentLifecycleResponse)
-async def get_status(
-    target_agent_id: str,
-    actor_agent_id: str = Depends(verify_agent_request),
-    session: AsyncSession = Depends(get_db),
-):
-    target = await _get_agent(session, target_agent_id)
-    return AgentLifecycleResponse(
-        actor_agent_id=actor_agent_id,
-        target_agent_id=str(target.id),
-        status=target.status,
-        sandbox_id=target.sandbox_id,
-    )
+    await _get_agent(session, body.target_agent_id)
+    get_worker_manager().interrupt_agent(body.target_agent_id)
+    return {"message": "Agent interrupted."}
 

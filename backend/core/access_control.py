@@ -12,11 +12,6 @@ from backend.core.exceptions import ScopeViolationError
 # ── Spec file access ────────────────────────────────────────────────
 
 AGENT_SPEC_ACCESS: dict[str, list[str]] = {
-    "gm": [
-        "GrandSpecification.tex",
-        "GrandArchitecture.tex",
-        "API&Schema.tex",
-    ],
     "manager": [
         "GrandSpecification.tex",
         "GrandArchitecture.tex",
@@ -45,7 +40,7 @@ def enforce_spec_access(agent_role: str, file_path: str) -> None:
 
 # ── Kanban access ───────────────────────────────────────────────────
 
-KANBAN_WRITE_ROLES = ("gm", "manager", "cto")
+KANBAN_WRITE_ROLES = ("manager", "cto")
 
 
 def can_write_kanban(agent_role: str) -> bool:
@@ -113,7 +108,7 @@ def _is_within(path: str, parent: str) -> bool:
 
 
 def can_read_code(agent_role: str) -> bool:
-    return agent_role in ("gm", "manager", "cto", "engineer")
+    return agent_role in ("manager", "cto", "engineer")
 
 
 def enforce_code_read(agent_role: str, file_path: str, module_path: str | None) -> None:

@@ -73,15 +73,10 @@ class TestExtractTextContent:
 class TestManagerRouterLogic:
     """Tests for manager_router conditional logic."""
 
-    def test_routes_to_om_when_content_mentions_om(self):
-        """Manager routes to OM when content contains 'om'."""
-        content = "Let me hand this off to the OM for planning"
-        assert "om" in extract_text_content(content).lower()
-
-    def test_routes_to_om_with_list_content(self):
-        """Manager handles list content when routing to OM."""
-        content = [{"type": "text", "text": "Passing to OM"}]
-        assert "om" in extract_text_content(content).lower()
+    def test_routes_to_cto_when_content_mentions_cto(self):
+        """Manager can mention CTO for architecture guidance."""
+        content = "Let me ask the CTO for architecture guidance"
+        assert "cto" in extract_text_content(content).lower()
 
     def test_routes_to_engineer_when_assign_and_engineer_in_content(self):
         """Manager routes to engineer when assigning."""
@@ -89,41 +84,41 @@ class TestManagerRouterLogic:
         text = extract_text_content(content).lower()
         assert "assign" in text and "engineer" in text
 
-    def test_routes_to_om_with_operations_manager_mention(self):
-        """Manager routes to OM when 'operations manager' is mentioned."""
-        content = "The operations manager should handle this"
-        assert "operations manager" in extract_text_content(content).lower()
+    def test_routes_to_cto_with_architecture_mention(self):
+        """Manager can route architecture concerns through CTO."""
+        content = "This needs architecture review from the CTO"
+        assert "cto" in extract_text_content(content).lower()
 
 
-class TestOmRouterLogic:
-    """Tests for om_router conditional logic."""
+class TestCtoRouterLogic:
+    """Tests for cto_router conditional logic."""
 
     def test_routes_to_engineer_for_implementation(self):
-        """OM routes to engineer for implementation work."""
+        """CTO routes to engineer for implementation work."""
         content = "The engineer should implement this feature"
         text = extract_text_content(content).lower()
         assert "engineer" in text and "implement" in text
 
     def test_routes_to_engineer_for_code_work(self):
-        """OM routes to engineer for code work."""
+        """CTO routes to engineer for code work."""
         content = "Engineer needs to code this module"
         text = extract_text_content(content).lower()
         assert "engineer" in text and "code" in text
 
     def test_routes_to_engineer_for_build_work(self):
-        """OM routes to engineer for build work."""
+        """CTO routes to engineer for build work."""
         content = "Have the engineer build the API"
         text = extract_text_content(content).lower()
         assert "engineer" in text and "build" in text
 
     def test_routes_to_engineer_for_fix_work(self):
-        """OM routes to engineer for fix work."""
+        """CTO routes to engineer for fix work."""
         content = "Engineer should fix this bug"
         text = extract_text_content(content).lower()
         assert "engineer" in text and "fix" in text
 
     def test_handles_list_content_for_engineer_routing(self):
-        """OM handles list content when routing to engineer."""
+        """CTO handles list content when routing to engineer."""
         content = [
             {"type": "text", "text": "The engineer should"},
             {"type": "text", "text": "implement this feature"},
@@ -132,7 +127,7 @@ class TestOmRouterLogic:
         assert "engineer" in text and "implement" in text
 
     def test_does_not_route_to_engineer_without_action_keyword(self):
-        """OM doesn't route to engineer without implementation keywords."""
+        """CTO doesn't route to engineer without implementation keywords."""
         content = "The engineer is available"
         text = extract_text_content(content).lower()
         # Has "engineer" but not implementation keywords

@@ -11,7 +11,7 @@ from uuid import UUID
 # Used when from_agent_id or target_agent_id refers to the human user.
 USER_AGENT_ID: UUID = UUID("00000000-0000-0000-0000-000000000000")
 
-# Valid agent roles (db.md: manager, cto, engineer; gm/om deprecated)
+# Valid agent roles
 AGENT_ROLES = ("manager", "cto", "engineer")
 
 # Valid agent statuses

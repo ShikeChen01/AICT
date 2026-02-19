@@ -10,23 +10,6 @@ import { getAuthToken, healthCheck } from './api/client';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProjectProvider, useProjectContext } from './contexts/ProjectContext';
 
-function ConnectionStatus({ isConnected }: { isConnected: boolean }) {
-  return (
-    <div
-      className={`fixed bottom-4 right-4 flex items-center gap-2 px-3 py-2 rounded-full text-sm font-medium ${
-        isConnected ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-      }`}
-    >
-      <div
-        className={`w-2 h-2 rounded-full ${
-          isConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'
-        }`}
-      />
-      {isConnected ? 'Connected' : 'Connecting...'}
-    </div>
-  );
-}
-
 function ProtectedRoute() {
   const { firebaseUser, user, loading } = useAuth();
   const hasToken = Boolean(getAuthToken());
@@ -41,7 +24,7 @@ function ProtectedRoute() {
 
 function AppShell() {
   const { firebaseUser, user, loading } = useAuth();
-  const [isBackendConnected, setIsBackendConnected] = useState(false);
+  const [isBackendConnected, setIsBackendConnected] = useState(true);
   const { projects, loading: isProjectsLoading, error: projectsError, refreshProjects } = useProjectContext();
 
   useEffect(() => {
@@ -50,7 +33,6 @@ function AppShell() {
     void refreshProjects();
   }, [firebaseUser, user, loading, refreshProjects]);
 
-  // Check backend connection
   useEffect(() => {
     const checkConnection = async () => {
       try {
@@ -70,8 +52,13 @@ function AppShell() {
   return (
     <BrowserRouter>
       {projectsError && (
-        <div className="fixed top-0 left-0 right-0 z-50 bg-red-50 border-b border-red-200 px-4 py-2 text-sm text-red-700 text-center">
+        <div className="fixed left-0 right-0 top-0 z-50 border-b border-red-200 bg-red-50 px-4 py-2 text-center text-sm text-red-700">
           {projectsError}
+        </div>
+      )}
+      {!isBackendConnected && (
+        <div className="fixed left-0 right-0 top-0 z-50 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm text-amber-800">
+          Backend health check failed. Reconnecting...
         </div>
       )}
 
@@ -108,7 +95,6 @@ function AppShell() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
-      <ConnectionStatus isConnected={isBackendConnected} />
     </BrowserRouter>
   );
 }

@@ -18,7 +18,6 @@ from fastapi import WebSocket
 from starlette.websockets import WebSocketState
 
 from backend.websocket.events import (
-    EventType,
     WebSocketEvent,
     create_agent_log_event,
     create_agent_message_event,
@@ -26,7 +25,6 @@ from backend.websocket.events import (
     create_agent_text_event,
     create_agent_tool_call_event,
     create_agent_tool_result_event,
-    create_gm_status_event,
     create_sandbox_log_event,
     create_task_created_event,
     create_task_update_event,
@@ -54,6 +52,7 @@ class ConnectionInfo:
         self.websocket = websocket
         self.project_id = project_id
         self.channels: set[Channel] = set()
+        self.inspected_agent_id: UUID | None = None
 
     def subscribe(self, channel: Channel) -> None:
         self.channels.add(channel)
@@ -144,6 +143,13 @@ class WebSocketManager:
             if conn_id in self._connections:
                 self._connections[conn_id].unsubscribe(channel)
 
+    async def set_inspected_agent(self, websocket: WebSocket, agent_id: UUID) -> None:
+        """Store currently inspected agent for a connection."""
+        conn_id = self._connection_id(websocket)
+        async with self._lock:
+            if conn_id in self._connections:
+                self._connections[conn_id].inspected_agent_id = agent_id
+
     async def _send_event(self, conn_info: ConnectionInfo, event: WebSocketEvent) -> bool:
         """
         Send event to a single connection.
@@ -198,11 +204,6 @@ class WebSocketManager:
         return sent
 
     # ── Convenience broadcast methods ─────────────────────────────
-
-    async def broadcast_gm_status(self, project_id: UUID, status: str) -> int:
-        """Broadcast GM/manager status change (agents channel)."""
-        event = create_gm_status_event(project_id, status)
-        return await self.broadcast(event, Channel.AGENTS, project_id)
 
     async def broadcast_task_created(self, task) -> int:
         """Broadcast task created event."""
@@ -270,6 +271,7 @@ class WebSocketManager:
         success: bool = True,
         session_id: UUID | None = None,
         iteration: int = 0,
+        agent_role: str | None = None,
     ) -> int:
         """Broadcast agent_tool_result event."""
         event = create_agent_tool_result_event(
@@ -279,6 +281,7 @@ class WebSocketManager:
             success=success,
             session_id=session_id,
             iteration=iteration,
+            agent_role=agent_role,
         )
         return await self.broadcast(event, Channel.AGENT_STREAM, project_id)
 

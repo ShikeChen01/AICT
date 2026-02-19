@@ -8,13 +8,24 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.auth import verify_token
-from backend.db.models import AgentSession
+from backend.core.auth import get_current_user
+from backend.db.models import AgentSession, Repository, User
 from backend.db.session import get_db
 from backend.schemas.session import AgentMessageResponse, AgentSessionResponse
 from backend.services.session_service import get_session_service
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+
+async def _ensure_project_access(db: AsyncSession, project_id: UUID, user_id: UUID) -> None:
+    result = await db.execute(
+        select(Repository).where(
+            Repository.id == project_id,
+            (Repository.owner_id == user_id) | (Repository.owner_id.is_(None)),
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Project not found")
 
 
 @router.get("", response_model=list[AgentSessionResponse])
@@ -23,10 +34,11 @@ async def list_sessions(
     agent_id: UUID | None = Query(None, description="Filter by agent"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _auth: bool = Depends(verify_token),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List sessions for a project, optionally filtered by agent. Most recent first."""
+    await _ensure_project_access(db, project_id, current_user.id)
     service = get_session_service(db)
     sessions = await service.list_by_project(
         project_id=project_id,
@@ -40,7 +52,7 @@ async def list_sessions(
 @router.get("/{session_id}", response_model=AgentSessionResponse)
 async def get_session(
     session_id: UUID,
-    _auth: bool = Depends(verify_token),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single session by ID."""
@@ -48,6 +60,7 @@ async def get_session(
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    await _ensure_project_access(db, session.project_id, current_user.id)
     return AgentSessionResponse.model_validate(session)
 
 
@@ -56,13 +69,15 @@ async def get_session_messages(
     session_id: UUID,
     limit: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    _auth: bool = Depends(verify_token),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get the persistent message log for a session (inspector/debug)."""
     result = await db.execute(select(AgentSession).where(AgentSession.id == session_id))
-    if result.scalar_one_or_none() is None:
+    session = result.scalar_one_or_none()
+    if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    await _ensure_project_access(db, session.project_id, current_user.id)
     service = get_session_service(db)
     messages = await service.get_session_messages(
         session_id=session_id,

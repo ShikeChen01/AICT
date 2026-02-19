@@ -27,13 +27,13 @@ export function ArtifactBrowser({ projectId, project }: ArtifactBrowserProps) {
   }, [recentChanges]);
 
   return (
-    <div className="h-full bg-white border border-gray-200 rounded-lg overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-200">
+    <div className="h-full overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)]">
+      <div className="border-b border-[var(--border-color)] bg-[var(--surface-muted)] px-4 py-3">
         <h2 className="text-lg font-semibold text-gray-900">Artifact & Knowledge Browser</h2>
         <p className="text-sm text-gray-500">Recent changes, branches/PRs, and project context</p>
       </div>
 
-      <div className="h-[calc(100%-68px)] overflow-y-auto p-4 space-y-6">
+      <div className="h-[calc(100%-72px)] overflow-y-auto p-4 space-y-6">
         {isLoading && <p className="text-sm text-gray-500">Loading artifacts...</p>}
         {error && <p className="text-sm text-red-600">{error.message}</p>}
 

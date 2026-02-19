@@ -29,6 +29,10 @@ except Exception:  # pragma: no cover - optional dependency in local tests
     AsyncSandbox = None
 
 logger = logging.getLogger(__name__)
+LOCAL_FALLBACK_SANDBOX_ERROR = (
+    "Error: Local fallback sandbox cannot execute remote E2B operations. "
+    "Configure E2B and create a real sandbox."
+)
 
 
 @dataclass(slots=True)
@@ -37,6 +41,10 @@ class SandboxMetadata:
     agent_id: str
     persistent: bool
     status: str
+    created: bool = False
+    restarted: bool = False
+    previous_sandbox_id: str | None = None
+    message: str = ""
 
 
 class E2BService:
@@ -54,6 +62,11 @@ class E2BService:
     def _apply_sdk_api_key() -> None:
         # SDK reads from env var.
         os.environ["E2B_API_KEY"] = settings.e2b_api_key
+
+    @staticmethod
+    def _is_not_found_error(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return "not found" in text or "404" in text
 
     async def _get_project(self, session: AsyncSession, project_id) -> Optional[Repository]:
         """Get repository by ID for sandbox initialization."""
@@ -183,6 +196,8 @@ class E2BService:
             agent_id=str(agent.id),
             persistent=persistent,
             status="running",
+            created=True,
+            message=f"Sandbox created: {sandbox_id}",
         )
 
     async def get_sandbox(self, session: AsyncSession, agent: Agent) -> SandboxMetadata:
@@ -217,6 +232,84 @@ class E2BService:
             persistent=bool(agent.sandbox_persist),
             status=status,
         )
+
+    async def ensure_running_sandbox(
+        self,
+        session: AsyncSession,
+        agent: Agent,
+        *,
+        persistent: bool | None = None,
+    ) -> SandboxMetadata:
+        """
+        Ensure an agent has a runnable sandbox.
+
+        Creates a sandbox when missing. Recreates it when an existing remote
+        sandbox is stale, not found, or stopped.
+        """
+        target_persistent = bool(agent.sandbox_persist) if persistent is None else persistent
+
+        if not agent.sandbox_id:
+            return await self.create_sandbox(session, agent, persistent=target_persistent)
+
+        if self._is_local_fallback_sandbox(agent.sandbox_id):
+            return SandboxMetadata(
+                sandbox_id=agent.sandbox_id,
+                agent_id=str(agent.id),
+                persistent=bool(agent.sandbox_persist),
+                status="running",
+                message=f"Sandbox available: {agent.sandbox_id}",
+            )
+
+        if not self._should_use_real_provider():
+            return SandboxMetadata(
+                sandbox_id=agent.sandbox_id,
+                agent_id=str(agent.id),
+                persistent=bool(agent.sandbox_persist),
+                status="unknown",
+                message=f"Sandbox reference retained: {agent.sandbox_id}",
+            )
+
+        previous_sandbox_id = agent.sandbox_id
+        try:
+            self._apply_sdk_api_key()
+            sandbox = await AsyncSandbox.connect(
+                previous_sandbox_id,
+                timeout=settings.e2b_timeout_seconds,
+            )
+            running = await sandbox.is_running()
+            if running:
+                return SandboxMetadata(
+                    sandbox_id=previous_sandbox_id,
+                    agent_id=str(agent.id),
+                    persistent=bool(agent.sandbox_persist),
+                    status="running",
+                    message=f"Sandbox already running: {previous_sandbox_id}",
+                )
+            logger.warning(
+                "Sandbox %s for agent %s is not running; recreating.",
+                previous_sandbox_id,
+                agent.id,
+            )
+        except Exception as exc:  # pragma: no cover - network/provider path
+            if not self._is_not_found_error(exc):
+                raise
+            logger.warning(
+                "Sandbox %s for agent %s not found; recreating: %s",
+                previous_sandbox_id,
+                agent.id,
+                exc,
+            )
+
+        # Reset stale sandbox reference and recreate.
+        agent.sandbox_id = None
+        await session.flush()
+        recreated = await self.create_sandbox(session, agent, persistent=target_persistent)
+        recreated.restarted = True
+        recreated.previous_sandbox_id = previous_sandbox_id
+        recreated.message = (
+            f"Sandbox restarted: {previous_sandbox_id} -> {recreated.sandbox_id}"
+        )
+        return recreated
 
     async def close_sandbox(self, session: AsyncSession, agent: Agent) -> None:
         if not agent.sandbox_id:

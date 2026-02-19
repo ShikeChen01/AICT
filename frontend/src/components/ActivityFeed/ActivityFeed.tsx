@@ -3,18 +3,13 @@
  * Displays agent activity logs (thoughts, tool calls, results)
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { Bot, Wrench, MessageSquare, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { MarkdownContent } from '../MarkdownContent';
-import type { AgentLogData, AgentRole } from '../../types';
-
-interface ActivityLogItem extends AgentLogData {
-  timestamp: string;
-  id: string;
-}
+import type { ActivityLogItem, AgentRole } from '../../types';
 
 interface ActivityFeedProps {
   logs: ActivityLogItem[];
@@ -33,8 +28,7 @@ const logTypeIcons: Record<string, React.ReactNode> = {
 
 const roleColors: Record<AgentRole, string> = {
   manager: 'bg-purple-100 text-purple-700 border-purple-200',
-  gm: 'bg-purple-100 text-purple-700 border-purple-200',
-  om: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+  cto: 'bg-cyan-100 text-cyan-700 border-cyan-200',
   engineer: 'bg-green-100 text-green-700 border-green-200',
 };
 
@@ -123,13 +117,13 @@ export function ActivityFeed({
   onFilterChange,
   autoScroll = true,
 }: ActivityFeedProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const expandedIds = useRef<Set<string>>(new Set());
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Auto-scroll to bottom on new logs
   useEffect(() => {
-    if (autoScroll && containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    const el = containerRef.current;
+    if (autoScroll && el) {
+      el.scrollTop = el.scrollHeight;
     }
   }, [logs.length, autoScroll]);
 
@@ -138,17 +132,20 @@ export function ActivityFeed({
     : logs.filter((log) => log.agent_role === filter);
 
   const toggleExpanded = (id: string) => {
-    if (expandedIds.current.has(id)) {
-      expandedIds.current.delete(id);
-    } else {
-      expandedIds.current.add(id);
-    }
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   };
 
   return (
-    <div className="flex flex-col h-full bg-white rounded-lg border border-gray-200 overflow-hidden">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="border-b border-[var(--border-color)] bg-[var(--surface-muted)] px-4 py-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-gray-900">Activity Feed</h3>
           {onFilterChange && (
@@ -166,7 +163,6 @@ export function ActivityFeed({
         </div>
       </div>
 
-      {/* Log entries */}
       <div ref={containerRef} className="flex-1 overflow-y-auto">
         {filteredLogs.length === 0 ? (
           <div className="flex items-center justify-center h-32 text-sm text-gray-400">
@@ -177,7 +173,7 @@ export function ActivityFeed({
             <LogEntry
               key={log.id}
               log={log}
-              expanded={expandedIds.current.has(log.id)}
+              expanded={expandedIds.has(log.id)}
               onToggle={() => toggleExpanded(log.id)}
             />
           ))

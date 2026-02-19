@@ -10,6 +10,8 @@ import logging
 import os
 from pathlib import Path
 
+import uuid
+
 from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -270,15 +272,50 @@ def verify_ws_token(token: str | None) -> bool:
     return _verify_firebase_token(token) is not None
 
 
-async def verify_agent_request(x_agent_id: str = Header(...)) -> str:
+async def verify_internal_api_token(
+    request: Request,
+    authorization: str = Header(...),
+) -> bool:
+    """Verify internal API Bearer token (shared API token only)."""
+    request_context = _request_context(request)
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authorization header format. Expected 'Bearer <token>'",
+        )
+
+    token = authorization.removeprefix("Bearer ").strip()
+    if token != settings.api_token:
+        logger.warning(
+            "Internal auth rejected (%s, token=%s)",
+            request_context,
+            _token_fingerprint(token),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid internal API token",
+        )
+    return True
+
+
+async def verify_agent_request(
+    _internal_auth: bool = Depends(verify_internal_api_token),
+    x_agent_id: str = Header(...),
+) -> str:
     """
-    Verify request is from a valid agent (internal API).
-    The X-Agent-ID header must be present.
-    Actual agent existence validated at service layer.
+    Verify request is from an authenticated internal caller and includes a valid X-Agent-ID.
+    Agent existence is validated at service layer.
     """
     if not x_agent_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing X-Agent-ID header",
         )
-    return x_agent_id
+    try:
+        parsed = uuid.UUID(x_agent_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid X-Agent-ID header",
+        ) from exc
+    return str(parsed)

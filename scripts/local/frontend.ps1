@@ -1,5 +1,5 @@
 # Run frontend locally.
-# Connects to backend at localhost:8000
+# Uses Vite proxy backend from VITE_BACKEND_URL or frontend/vite.config.ts default.
 
 param(
     [int]$Port = 3000

@@ -1,5 +1,5 @@
 """
-LLM service for GM responses.
+LLM service for manager responses.
 
 Supports Anthropic and Google Gemini with provider auto-selection.
 """
@@ -30,7 +30,7 @@ class LLMService:
         user_message: str,
         project_context: dict[str, Any] | None = None,
     ) -> str:
-        """Generate a GM response from history and the latest user message."""
+        """Generate a manager response from history and the latest user message."""
         provider = self._select_provider(model)
         system_prompt = self._build_system_prompt(project_context or {})
         messages = self._build_messages(history, user_message)
@@ -67,7 +67,7 @@ class LLMService:
             content = getattr(msg, "content", "")
             if role == "user":
                 messages.append({"role": "user", "content": content})
-            elif role == "gm":
+            elif role == "manager":
                 messages.append({"role": "assistant", "content": content})
         messages.append({"role": "user", "content": user_message})
         return messages[-40:]
@@ -75,16 +75,16 @@ class LLMService:
     @staticmethod
     def _build_system_prompt(project_context: dict[str, Any]) -> str:
         open_tasks = project_context.get("open_tasks", 0)
-        open_tickets = project_context.get("open_tickets", 0)
+        pending_messages = project_context.get("pending_messages", 0)
         active_agents = project_context.get("active_agents", 0)
 
         return (
-            "You are the General Manager (GM) agent for AICT.\n"
+            "You are the Manager agent for AICT.\n"
             "Respond concisely, with concrete next steps.\n"
-            "When useful, mention task planning, ticket delegation, and repo actions.\n"
+            "When useful, mention task planning, agent coordination, and repo actions.\n"
             "Do not fabricate tool outputs. If action requires tools, say what you would do.\n\n"
             f"Project context: open_tasks={open_tasks}, "
-            f"open_tickets={open_tickets}, active_agents={active_agents}."
+            f"pending_messages={pending_messages}, active_agents={active_agents}."
         )
 
     async def _call_anthropic(
