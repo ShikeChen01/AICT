@@ -32,7 +32,7 @@ class ChannelMessageResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# Internal API (tools): notify_user, broadcast_message request bodies
+# Internal API (tools): send_message, broadcast_message request bodies
 class InternalSendMessage(BaseModel):
     """Internal: send message from agent to target."""
 

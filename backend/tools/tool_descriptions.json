@@ -16,15 +16,14 @@
     ]
   },
   {
-    "name": "notify_user",
-    "description": "Leave a message in the user's inbox or notify another agent. target_agent_id must be a UUID.",
+    "name": "send_message",
+    "description": "Send message to agent or user. target_agent_id must be a UUID, not a display name.",
     "detailed_description": [
-      "Send a notification message to the user's inbox or another agent. Use for",
-      "delivering results, status updates, questions, or task assignments.",
-      "The target_agent_id must be a valid UUID — use list_agents to discover",
+      "Send a direct message to another agent or the user. Use for 1-on-1",
+      "communication: task assignments, status updates, questions, or delivering",
+      "results. The target_agent_id must be a valid UUID — use list_agents to discover",
       "agent IDs. To message the human user, use the user's agent UUID (provided in",
-      "your context). The user will see the message in their inbox and can mark it",
-      "as read."
+      "your context)."
     ],
     "input_schema": {
       "type": "object",
@@ -52,7 +51,7 @@
     "detailed_description": [
       "Send a message visible to all agents in the project. Use for announcements,",
       "status broadcasts, or information that every team member needs to see. Prefer",
-      "notify_user for targeted communication to avoid noise."
+      "send_message for targeted communication to avoid noise."
     ],
     "input_schema": {
       "type": "object",

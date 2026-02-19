@@ -8,7 +8,7 @@ Tool I/O contract (follow exactly):
   - Input: {}
   - Output: Session ended.
 
-- notify_user(target_agent_id, content)
+- send_message(target_agent_id, content)
   - Input: target_agent_id=recipient UUID, content=message text
   - Output: Message sent to <target_uuid>
 

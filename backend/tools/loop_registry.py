@@ -118,7 +118,7 @@ class LoopTool:
 # ---------------------------------------------------------------------------
 
 
-async def _run_notify_user(ctx: RunContext, tool_input: dict) -> str:
+async def _run_send_message(ctx: RunContext, tool_input: dict) -> str:
     from backend.workers.message_router import get_message_router
 
     target_agent_id = parse_tool_uuid(tool_input, "target_agent_id")
@@ -130,11 +130,14 @@ async def _run_notify_user(ctx: RunContext, tool_input: dict) -> str:
     )
     await ctx.db.flush()
     if target_agent_id == USER_AGENT_ID:
+        # User-targeted message: deliver to inbox via WebSocket.
+        # Frontend marks the message as read when the user opens the conversation.
         if ctx.emit_agent_message:
             ctx.emit_agent_message(msg)
+        return "Message delivered to user inbox."
     else:
         get_message_router().notify(target_agent_id)
-    return f"Message sent to {target_agent_id}"
+        return f"Message sent to {target_agent_id}"
 
 
 async def _run_broadcast_message(ctx: RunContext, tool_input: dict) -> str:
@@ -464,7 +467,7 @@ async def _run_describe_tool(ctx: RunContext, tool_input: dict) -> str:
 
 _TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
     "end": None,
-    "notify_user": _run_notify_user,
+    "send_message": _run_send_message,
     "broadcast_message": _run_broadcast_message,
     "update_memory": _run_update_memory,
     "read_history": _run_read_history,
