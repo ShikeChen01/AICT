@@ -1,15 +1,13 @@
-"""Unit tests for PromptService (block assembly)."""
+"""Unit tests for prompt assembly (blocks + PromptAssembly)."""
 
 from pathlib import Path
 
 import pytest
 
 from backend.services.prompt_service import (
-    build_system_prompt,
+    PromptAssembly,
     get_identity_block,
     get_memory_block,
-    get_loopback_block,
-    get_summarization_block,
 )
 
 
@@ -42,40 +40,100 @@ def test_get_memory_block_content() -> None:
     assert "Key decisions" in block
 
 
-def test_get_loopback_block() -> None:
-    block = get_loopback_block()
-    assert "END" in block
-    assert "without calling any tools" in block
+def test_loopback_block() -> None:
+    pa = PromptAssembly.__new__(PromptAssembly)
+    pa.messages = []
+    pa.append_loopback()
+    assert len(pa.messages) == 1
+    msg = pa.messages[0]
+    assert msg["role"] == "user"
+    assert "END" in msg["content"]
+    assert "without calling any tools" in msg["content"]
 
 
-def test_get_summarization_block() -> None:
-    block = get_summarization_block()
+def test_summarization_block() -> None:
+    block = PromptAssembly.get_summarization_block()
     assert "update_memory" in block
     assert "read_history" in block
 
 
-def test_build_system_prompt(sample_manager, sample_project) -> None:
-    prompt = build_system_prompt(sample_manager, sample_project, None)
-    assert sample_project.name in prompt
-    assert "END" in prompt
-    assert "update_memory" in prompt
-    assert "No memory recorded yet" in prompt
+def test_system_prompt_manager(sample_manager, sample_project) -> None:
+    pa = PromptAssembly(sample_manager, sample_project, None)
+    assert sample_project.name in pa.system_prompt
+    assert "END" in pa.system_prompt
+    assert "update_memory" in pa.system_prompt
+    assert "No memory recorded yet" in pa.system_prompt
 
 
-def test_build_system_prompt_cto(sample_cto, sample_project) -> None:
-    prompt = build_system_prompt(sample_cto, sample_project, None)
-    assert sample_project.name in prompt
-    assert "CTO" in prompt or "Chief Technology" in prompt
-    assert "END" in prompt
-    assert "No memory recorded yet" in prompt
+def test_system_prompt_cto(sample_cto, sample_project) -> None:
+    pa = PromptAssembly(sample_cto, sample_project, None)
+    assert sample_project.name in pa.system_prompt
+    assert "CTO" in pa.system_prompt or "Chief Technology" in pa.system_prompt
+    assert "END" in pa.system_prompt
+    assert "No memory recorded yet" in pa.system_prompt
 
 
-def test_build_system_prompt_engineer(sample_engineer, sample_project) -> None:
-    prompt = build_system_prompt(sample_engineer, sample_project, "active task: fix tests")
-    assert sample_project.name in prompt
-    assert "Engineer" in prompt
-    assert sample_engineer.display_name in prompt
-    assert "active task: fix tests" in prompt
+def test_system_prompt_engineer(sample_engineer, sample_project) -> None:
+    pa = PromptAssembly(sample_engineer, sample_project, "active task: fix tests")
+    assert sample_project.name in pa.system_prompt
+    assert "Engineer" in pa.system_prompt
+    assert sample_engineer.display_name in pa.system_prompt
+    assert "active task: fix tests" in pa.system_prompt
+
+
+def test_system_prompt_block_order(sample_manager, sample_project) -> None:
+    """Identity and Tool IO should appear after Memory, Rules, Thinking."""
+    pa = PromptAssembly(sample_manager, sample_project, None)
+    prompt = pa.system_prompt
+    memory_pos = prompt.find("No memory recorded yet")
+    identity_pos = prompt.find("General Manager")
+    if identity_pos == -1:
+        identity_pos = prompt.find("GM")
+    assert memory_pos < identity_pos, "Memory should come before Identity"
+
+
+def test_append_tool_result() -> None:
+    pa = PromptAssembly.__new__(PromptAssembly)
+    pa.messages = []
+    pa.append_tool_result("test_tool", "success output", "tid-1")
+    assert len(pa.messages) == 1
+    msg = pa.messages[0]
+    assert msg["role"] == "tool"
+    assert msg["content"] == "success output"
+    assert msg["tool_use_id"] == "tid-1"
+
+
+def test_append_tool_error() -> None:
+    pa = PromptAssembly.__new__(PromptAssembly)
+    pa.messages = []
+    pa.append_tool_error("bad_tool", RuntimeError("boom"), "tid-2")
+    assert len(pa.messages) == 1
+    msg = pa.messages[0]
+    assert msg["role"] == "tool"
+    assert "Tool 'bad_tool' failed:" in msg["content"]
+    assert "boom" in msg["content"]
+
+
+def test_append_end_solo_warning() -> None:
+    pa = PromptAssembly.__new__(PromptAssembly)
+    pa.messages = []
+    pa.append_end_solo_warning()
+    assert len(pa.messages) == 1
+    msg = pa.messages[0]
+    assert msg["role"] == "tool"
+    assert "END was called with other tools" in msg["content"]
+    assert msg["tool_use_id"] == "end-solo-rule"
+
+
+def test_append_assistant() -> None:
+    pa = PromptAssembly.__new__(PromptAssembly)
+    pa.messages = []
+    pa.append_assistant("hello", [{"id": "tc1", "name": "end", "input": {}}])
+    assert len(pa.messages) == 1
+    msg = pa.messages[0]
+    assert msg["role"] == "assistant"
+    assert msg["content"] == "hello"
+    assert msg["tool_calls"] == [{"id": "tc1", "name": "end", "input": {}}]
 
 
 def test_all_block_files_loadable_and_non_empty() -> None:

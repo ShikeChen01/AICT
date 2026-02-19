@@ -1,24 +1,20 @@
 """
-Prompt block assembly for the universal agent loop.
+Internal helpers for individual prompt blocks.
 
-Assembles system prompt from Identity, Rules, Thinking, Memory blocks per docs/backend/agents.md.
-Token budgets and truncation apply to conversation only; blocks are never truncated.
+Each function formats a single block from loaded .md templates.
+Orchestration (block ordering, message list management) lives in assembly.py.
 """
 
 from __future__ import annotations
 
 import json
 
-from backend.db.models import Agent, Repository
+from backend.db.models import Agent
 from backend.prompts.loader import (
     IDENTITY_CTO_TEMPLATE,
     IDENTITY_ENGINEER_TEMPLATE,
     IDENTITY_GM_TEMPLATE,
-    LOOPBACK_BLOCK,
     MEMORY_BLOCK_TEMPLATE,
-    RULES_BLOCK,
-    SUMMARIZATION_BLOCK,
-    THINKING_BLOCK,
     TOOL_IO_BASE_BLOCK,
     TOOL_IO_CTO_BLOCK,
     TOOL_IO_ENGINEER_BLOCK,
@@ -62,25 +58,3 @@ def get_tool_io_block(role: str) -> str:
     if role == "engineer":
         return TOOL_IO_BASE_BLOCK + "\n" + TOOL_IO_ENGINEER_BLOCK
     return TOOL_IO_BASE_BLOCK
-
-
-def build_system_prompt(agent: Agent, project: Repository, memory_content: str | None) -> str:
-    """
-    Build the full system prompt: Identity + Rules + Thinking + Memory.
-    Conversation and tool results are injected by the loop as user/assistant/tool messages.
-    """
-    project_name = project.name or "Project"
-    identity = get_identity_block(agent, project_name)
-    tool_io = get_tool_io_block(agent.role)
-    memory = get_memory_block(memory_content)
-    return f"{identity}\n\n{RULES_BLOCK}\n\n{THINKING_BLOCK}\n\n{tool_io}\n\n{memory}"
-
-
-def get_loopback_block() -> str:
-    """Return Loopback block (injected when agent responds without tool calls)."""
-    return LOOPBACK_BLOCK
-
-
-def get_summarization_block() -> str:
-    """Return Summarization block (injected at ~70% context capacity)."""
-    return SUMMARIZATION_BLOCK

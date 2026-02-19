@@ -174,10 +174,6 @@ async def test_run_inner_loop_uses_assignment_context_without_unread_messages(
     )
 
     monkeypatch.setattr(
-        "backend.services.prompt_service.build_system_prompt",
-        lambda *_args, **_kwargs: "test prompt",
-    )
-    monkeypatch.setattr(
         "backend.db.repositories.messages.ChannelMessageRepository.list_by_target_and_status",
         AsyncMock(return_value=[]),
     )
@@ -225,10 +221,6 @@ async def test_run_inner_loop_resolves_model_from_role_and_tier(
         sample_engineer.id, sample_project.id, trigger_message_id=None
     )
 
-    monkeypatch.setattr(
-        "backend.services.prompt_service.build_system_prompt",
-        lambda *_args, **_kwargs: "test prompt",
-    )
     unread = [_make_unread_msg(USER_AGENT_ID, sample_project.id, sample_engineer.id, "hello")]
     monkeypatch.setattr(
         "backend.db.repositories.messages.ChannelMessageRepository.list_by_target_and_status",
@@ -276,10 +268,6 @@ async def test_run_inner_loop_normalizes_legacy_tool_name_in_history(
         sample_engineer.id, sample_project.id, trigger_message_id=None
     )
 
-    monkeypatch.setattr(
-        "backend.services.prompt_service.build_system_prompt",
-        lambda *_args, **_kwargs: "test prompt",
-    )
     unread = [_make_unread_msg(USER_AGENT_ID, sample_project.id, sample_engineer.id, "hello")]
     monkeypatch.setattr(
         "backend.db.repositories.messages.ChannelMessageRepository.list_by_target_and_status",
@@ -339,10 +327,6 @@ async def test_run_inner_loop_normalizes_legacy_tool_name_in_history(
 
 def _patch_loop_basics(monkeypatch, unread_msgs, llm_side_effect=None, llm_return=None):
     """Patch the standard inner-loop dependencies used by multiple tests."""
-    monkeypatch.setattr(
-        "backend.services.prompt_service.build_system_prompt",
-        lambda *_args, **_kwargs: "test prompt",
-    )
     monkeypatch.setattr(
         "backend.db.repositories.messages.ChannelMessageRepository.list_by_target_and_status",
         AsyncMock(return_value=unread_msgs),

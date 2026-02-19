@@ -503,8 +503,16 @@ _TOOLS: list[LoopTool] = [
     for t in _RAW_TOOLS
 ]
 
+def _normalize_detailed_description(raw: str | list[str]) -> str:
+    """Join list of lines into one string; leave string as-is (e.g. from older JSON)."""
+    if isinstance(raw, list):
+        return "\n".join(raw)
+    return raw
+
+
 _TOOL_DETAILS: dict[str, str] = {
-    t["name"]: t["detailed_description"] for t in _RAW_TOOLS
+    t["name"]: _normalize_detailed_description(t["detailed_description"])
+    for t in _RAW_TOOLS
 }
 
 
