@@ -50,7 +50,7 @@ async def manager_node(state: AgentState):
         "- create_kanban_task(title, description, project_id, critical, urgent): Create a new task\n"
         "- list_tasks(project_id, status): List tasks, optionally filtered by status\n"
         "- assign_task(task_id, agent_id): Assign a task to an engineer\n"
-        "- spawn_engineer(project_id, display_name, model): Create a new engineer agent\n\n"
+        "- spawn_engineer(project_id, display_name, seniority): Create a new engineer agent\n\n"
         f"Current Project ID: {project_id}\n"
         "Respond concisely and helpfully. Use tools when the user asks you to create tasks, "
         "assign work, or manage the project."

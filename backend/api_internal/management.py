@@ -21,8 +21,7 @@ router = APIRouter(tags=["internal-management"])
 class SpawnEngineerRequest(BaseModel):
     agent_id: UUID
     display_name: str
-    model: str | None = None
-    tier: str | None = None
+    seniority: str | None = None
 
 
 @router.post("/spawn-engineer")
@@ -45,8 +44,7 @@ async def spawn_engineer(
     agent = await service.spawn_engineer(
         actor.project_id,
         display_name=body.display_name,
-        model=body.model,
-        tier=body.tier,
+        seniority=body.seniority,
     )
     await db.commit()
     await db.refresh(agent)

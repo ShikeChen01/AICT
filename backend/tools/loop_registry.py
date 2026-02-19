@@ -364,8 +364,7 @@ async def _run_spawn_engineer(ctx: RunContext, tool_input: dict) -> str:
     engineer = await ctx.agent_service.spawn_engineer(
         ctx.project.id,
         display_name=str(tool_input["display_name"]),
-        model=str(tool_input["model"]) if tool_input.get("model") else None,
-        tier=str(tool_input["tier"]) if tool_input.get("tier") else None,
+        seniority=str(tool_input["seniority"]) if tool_input.get("seniority") else None,
     )
     await ctx.db.flush()
     from backend.workers.worker_manager import get_worker_manager

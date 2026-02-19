@@ -43,8 +43,7 @@ class SpawnEngineerCreate(BaseModel):
 
     project_id: UUID
     display_name: str | None = None
-    model: str | None = None
-    tier: str | None = None
+    seniority: str | None = None
     module_path: str | None = None
 
 

@@ -169,7 +169,7 @@ async def run_inner_loop(
     )
     resolved_model = resolve_model(
         agent.role,
-        tier=getattr(agent, "tier", None),
+        seniority=getattr(agent, "tier", None),
         model_override=agent.model,
     )
 

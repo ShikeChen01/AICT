@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.config import settings
 from backend.core.exceptions import MaxEngineersReached, ProjectNotFoundError
 from backend.db.models import Agent, Repository, VALID_ROLES
-from backend.llm.model_resolver import normalize_tier, resolve_model
+from backend.llm.model_resolver import normalize_seniority, resolve_model
 
 
 class AgentService:
@@ -61,8 +61,7 @@ class AgentService:
         project_id: UUID,
         *,
         display_name: str | None = None,
-        model: str | None = None,
-        tier: str | None = None,
+        seniority: str | None = None,
         module_path: str | None = None,
     ) -> Agent:
         """
@@ -78,14 +77,14 @@ class AgentService:
         # Compute display name (Engineer-1, Engineer-2, ...)
         if display_name is None:
             display_name = f"Engineer-{count + 1}"
-        normalized_tier = normalize_tier(tier)
-        effective_model = resolve_model("engineer", tier=normalized_tier, model_override=model)
+        normalized_seniority = normalize_seniority(seniority)
+        effective_model = resolve_model("engineer", seniority=normalized_seniority)
 
         agent = Agent(
             project_id=project_id,
             role="engineer",
             display_name=display_name,
-            tier=normalized_tier,
+            tier=normalized_seniority,
             model=effective_model,
             status="sleeping",
             sandbox_persist=False,

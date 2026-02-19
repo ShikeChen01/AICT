@@ -44,38 +44,29 @@ async def test_spawn_engineer_with_display_name(session, sample_project):
 
 
 @pytest.mark.asyncio
-async def test_spawn_engineer_resolves_tier_model(session, sample_project, monkeypatch):
+async def test_spawn_engineer_resolves_seniority_model(session, sample_project, monkeypatch):
     service = get_agent_service(session)
-    monkeypatch.setattr(
-        settings,
-        "agent_tier_models",
-        {"engineer:senior": "claude-4-6-sonnet-latest"},
-    )
+    monkeypatch.setattr(settings, "engineer_senior_model", "claude-4-6-sonnet-latest")
     agent = await service.spawn_engineer(
         sample_project.id,
         display_name="Engineer-Senior",
-        tier=" Senior ",
+        seniority=" Senior ",
     )
     assert agent.tier == "senior"
     assert agent.model == "claude-4-6-sonnet-latest"
 
 
 @pytest.mark.asyncio
-async def test_spawn_engineer_model_override_wins_over_tier(session, sample_project, monkeypatch):
+async def test_spawn_engineer_invalid_seniority_defaults_to_junior(session, sample_project, monkeypatch):
     service = get_agent_service(session)
-    monkeypatch.setattr(
-        settings,
-        "agent_tier_models",
-        {"engineer:junior": "gemini-2.0-flash-lite"},
-    )
+    monkeypatch.setattr(settings, "engineer_junior_model", "gemini-2.0-flash-lite")
     agent = await service.spawn_engineer(
         sample_project.id,
-        display_name="Engineer-Override",
-        tier="junior",
-        model="claude-4-6-sonnet-latest",
+        display_name="Engineer-Junior-Defaulted",
+        seniority="staff-plus",
     )
     assert agent.tier == "junior"
-    assert agent.model == "claude-4-6-sonnet-latest"
+    assert agent.model == "gemini-2.0-flash-lite"
 
 
 @pytest.mark.asyncio

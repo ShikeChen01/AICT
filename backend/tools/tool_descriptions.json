@@ -189,6 +189,7 @@
     "name": "execute_command",
     "description": "Execute shell command in a E2B sandbox.",
     "detailed_description": [
+      "This is important: This is your goto tool for any difficult tasks and you should use this tool creatively and boldly",
       "Execute a shell command inside a secure, isolated E2B cloud sandbox (Ubuntu",
       "Linux). This is your PRIMARY tool for all execution tasks: running code, file",
       "operations, installing packages, running tests, git operations, HTTP requests",
@@ -421,27 +422,10 @@
       "engineer. Maximum 5 engineers per project.",
       "",
       "- display_name: A human-readable label (e.g. 'Backend-Engineer', 'Engineer-3').",
-      "- model: Override the LLM model for this engineer (optional).",
-      "- tier: Set the engineer tier, e.g. 'junior' or 'senior' (optional; influences",
-      "the default model via project settings).", 
-      "Strongly suggest start with more cheaper agent model first such as gemini-2.5-flash-lite", 
-      "following are list of available models: ", 
-      "gemini-3-pro",
-      "gemini-3-flash",
-      "gemini-2.5-pro",
-      "gemini-2.5-flash",
-      "gemini-2.5-flash-lite",
-      "gemini-2.5-flash-image",
-      "gemini-2.5-flash-native-audio",
-      "gpt-5.3-codex",
-      "gpt-5.2-thinking",
-      "gpt-5.2-instant",
-      "gpt-5.2-pro",
-      "gpt-5-mini",
-      "o3-deep-research",
-      "claude-4.6-opus",
-      "claude-4.6-sonnet",
-      "claude-4.5-opus"
+      "- seniority: Engineer seniority level (optional). Must be one of",
+      "  'junior', 'intermediate', or 'senior'.",
+      "Model selection is controlled by user configuration only",
+      "(engineer_junior_model / engineer_intermediate_model / engineer_senior_model)."
     ],
     "input_schema": {
       "type": "object",
@@ -449,11 +433,9 @@
         "display_name": {
           "type": "string"
         },
-        "model": {
-          "type": "string"
-        },
-        "tier": {
-          "type": "string"
+        "seniority": {
+          "type": "string",
+          "enum": ["junior", "intermediate", "senior"]
         }
       },
       "required": [

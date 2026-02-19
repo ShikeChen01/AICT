@@ -19,8 +19,7 @@ from backend.services.agent_service import get_agent_service
 async def spawn_engineer(
     project_id: str,
     display_name: str | None = None,
-    model: str | None = None,
-    tier: str | None = None,
+    seniority: str | None = None,
 ) -> str:
     """
     Spawn a new engineer agent for the project.
@@ -31,8 +30,7 @@ async def spawn_engineer(
     Args:
         project_id: The UUID of the project.
         display_name: Optional display name (e.g. Engineer-3). Auto-generated if omitted.
-        model: Model to use for the engineer.
-        tier: Optional engineer tier (e.g. junior/senior).
+        seniority: Optional engineer seniority (junior/intermediate/senior).
     """
     async with AsyncSessionLocal() as session:
         service = get_agent_service(session)
@@ -40,8 +38,7 @@ async def spawn_engineer(
             agent = await service.spawn_engineer(
                 uuid.UUID(project_id),
                 display_name=display_name,
-                model=model,
-                tier=tier,
+                seniority=seniority,
             )
             await session.commit()
             return (

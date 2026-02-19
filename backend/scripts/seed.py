@@ -136,7 +136,7 @@ async def _ensure_agents(session: AsyncSession, project: Project, agent_service)
         engineer = await agent_service.spawn_engineer(
             project.id,
             display_name="Engineer-1",
-            model=settings.gemini_model or "gemini-3-pro-preview",
+            seniority="junior",
         )
         print(f"Created agent: {engineer.display_name} (role={engineer.role}, id={engineer.id})")
     else:

@@ -30,13 +30,12 @@ class Settings(BaseSettings):
     # LLM
     claude_api_key: str = ""
     gemini_api_key: str = ""
-    manager_model_default: str = "	claude-opus-4-5-20251101"
-    cto_model_default: str = "	claude-opus-4-5-20251101"
-    engineer_model_default: str = "	claude-opus-4-5-20251101"
-    agent_tier_models: dict[str, str] = Field(
-        default_factory=dict,
-        description="Optional role+tier model mapping (e.g. engineer:senior -> claude-4-6-sonnet-latest).",
-    )
+    openai_api_key: str = ""
+    manager_model_default: str = "claude-sonnet-4-6"
+    cto_model_default: str = "claude-opus-4-6"
+    engineer_junior_model: str = "gpt-5.2-2025-12-11"
+    engineer_intermediate_model: str = "claude-sonnet-4-6"
+    engineer_senior_model: str = "claude-opus-4-6"
     llm_request_timeout_seconds: int = Field(default=60, ge=5, le=300)
     llm_max_tokens: int = Field(default=1024, ge=128, le=8192)
     llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0)

@@ -179,8 +179,7 @@ async def spawn_engineer(
     agent = await service.spawn_engineer(
         data.project_id,
         display_name=data.display_name,
-        model=data.model,
-        tier=data.tier,
+        seniority=data.seniority,
         module_path=data.module_path,
     )
     await db.commit()

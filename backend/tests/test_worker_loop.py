@@ -206,16 +206,12 @@ async def test_run_inner_loop_uses_assignment_context_without_unread_messages(
 
 
 @pytest.mark.asyncio
-async def test_run_inner_loop_resolves_model_from_role_and_tier(
+async def test_run_inner_loop_resolves_model_from_role_and_seniority(
     sample_engineer, sample_project, session, monkeypatch
 ) -> None:
     sample_engineer.model = ""
     sample_engineer.tier = "senior"
-    monkeypatch.setattr(
-        settings,
-        "agent_tier_models",
-        {"engineer:senior": "claude-4-6-sonnet-latest"},
-    )
+    monkeypatch.setattr(settings, "engineer_senior_model", "claude-4-6-sonnet-latest")
 
     sess = await SessionService(session).create_session(
         sample_engineer.id, sample_project.id, trigger_message_id=None

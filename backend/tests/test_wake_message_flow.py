@@ -206,18 +206,18 @@ class TestModelResolution:
         assert default_model_for_role("cto") == settings.cto_model_default
 
     def test_engineer_default_model(self):
-        assert default_model_for_role("engineer") == settings.engineer_model_default
+        assert default_model_for_role("engineer") == settings.engineer_junior_model
 
     def test_manager_default_model(self):
         assert default_model_for_role("manager") == settings.manager_model_default
 
-    def test_resolve_prefers_override(self):
-        resolved = resolve_model("engineer", model_override="claude-4-6-sonnet-latest")
-        assert resolved == "claude-4-6-sonnet-latest"
+    def test_resolve_engineer_model_by_seniority(self):
+        resolved = resolve_model("engineer", seniority="senior")
+        assert resolved == settings.engineer_senior_model
 
-    def test_resolve_falls_back_to_default_when_override_empty(self):
-        resolved = resolve_model("engineer", model_override="")
-        assert resolved == settings.engineer_model_default
+    def test_resolve_engineer_defaults_to_junior_when_seniority_invalid(self):
+        resolved = resolve_model("engineer", seniority="staff")
+        assert resolved == settings.engineer_junior_model
 
     def test_resolve_falls_back_to_default_when_override_none(self):
         resolved = resolve_model("cto", model_override=None)
@@ -238,7 +238,7 @@ class TestModelResolution:
         )
 
     @pytest.mark.asyncio
-    async def test_agent_model_override_takes_priority(
+    async def test_cto_model_override_takes_priority(
         self, sample_project, session, monkeypatch,
     ):
         """When agent.model is set explicitly, it takes priority over defaults."""
@@ -265,13 +265,14 @@ class TestModelResolution:
     async def test_engineer_with_empty_model_uses_config_default(
         self, sample_project, session, monkeypatch,
     ):
-        """An engineer with model='' should fall back to engineer_model_default."""
+        """An engineer with model='' should resolve from seniority config."""
         engineer = Agent(
             id=uuid4(),
             project_id=sample_project.id,
             role="engineer",
             display_name="Eng-EmptyModel",
             model="",
+            tier="intermediate",
             status="sleeping",
             sandbox_persist=False,
         )
@@ -283,8 +284,8 @@ class TestModelResolution:
             user_message="hello",
         )
         resolved = llm_mock.await_args.kwargs["model"]
-        assert resolved == settings.engineer_model_default, (
-            f"Expected default '{settings.engineer_model_default}', got '{resolved}'"
+        assert resolved == settings.engineer_intermediate_model, (
+            f"Expected default '{settings.engineer_intermediate_model}', got '{resolved}'"
         )
 
     @pytest.mark.asyncio
