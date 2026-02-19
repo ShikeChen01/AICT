@@ -53,8 +53,9 @@ function markUnreadAsRead(
         unreadIds.includes(m.id) ? { ...m, status: 'read' as const } : m
       )
     );
-  }).catch(() => {
-    // Silently ignore mark-read failures; messages will be retried on next load.
+  }).catch((err) => {
+    // Mark-read failures are non-critical; messages will be retried on next load.
+    console.warn('Failed to mark messages as read:', err);
   });
 }
 
@@ -115,12 +116,9 @@ export function useMessages({
         broadcast: false,
         created_at: latestActivity.timestamp,
       };
-      setMessages((prev) => {
-        const updated = sortByCreatedAtAsc([...prev, incomingMessage]);
-        // Mark newly received messages as read since the user is viewing the conversation.
-        markUnreadAsRead([incomingMessage], setMessages);
-        return updated;
-      });
+      setMessages((prev) => sortByCreatedAtAsc([...prev, incomingMessage]));
+      // Mark newly received message as read since the user is viewing the conversation.
+      markUnreadAsRead([incomingMessage], setMessages);
     }
   }, [projectId, agentId, streamContext]);
 
