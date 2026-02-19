@@ -4,15 +4,18 @@ Defines RunContext (injected into every tool executor), LoopTool (wrapper
 carrying name, schema, allowed roles, and executor), all executor functions,
 and helpers to derive tool defs / handler maps by agent role.
 
-Adding a new tool requires only one place: add a LoopTool entry to _TOOLS.
+Tool metadata (name, description, schema, roles) lives in tool_descriptions.json.
+Adding a new tool: add an entry there, write an executor here, map it in _TOOL_EXECUTORS.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Awaitable, Callable
 from uuid import UUID
 
@@ -409,265 +412,105 @@ async def _run_create_pull_request(ctx: RunContext, tool_input: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Tool registry — single source of truth
-# ---------------------------------------------------------------------------
-
-_TOOLS: list[LoopTool] = [
-    # --- Session control (handled specially by the loop; execute is None) ---
-    LoopTool(
-        name="end",
-        description="End current session.",
-        input_schema={"type": "object", "properties": {}},
-        allowed_roles=["*"],
-        execute=None,
-    ),
-    # --- Messaging ---
-    LoopTool(
-        name="send_message",
-        description="Send message to agent or user. target_agent_id must be a UUID, not a display name.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "target_agent_id": {
-                    "type": "string",
-                    "description": "Recipient UUID (agent id). Never pass display names here.",
-                },
-                "content": {"type": "string"},
-            },
-            "required": ["target_agent_id", "content"],
-        },
-        allowed_roles=["*"],
-        execute=_run_send_message,
-    ),
-    LoopTool(
-        name="broadcast_message",
-        description="Broadcast informational message.",
-        input_schema={
-            "type": "object",
-            "properties": {"content": {"type": "string"}},
-            "required": ["content"],
-        },
-        allowed_roles=["*"],
-        execute=_run_broadcast_message,
-    ),
-    # --- Memory / history ---
-    LoopTool(
-        name="update_memory",
-        description="Overwrite working memory.",
-        input_schema={
-            "type": "object",
-            "properties": {"content": {"type": "string"}},
-            "required": ["content"],
-        },
-        allowed_roles=["*"],
-        execute=_run_update_memory,
-    ),
-    LoopTool(
-        name="read_history",
-        description="Read persistent history.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "limit": {"type": "integer"},
-                "offset": {"type": "integer"},
-                "session_id": {"type": "string"},
-            },
-        },
-        allowed_roles=["*"],
-        execute=_run_read_history,
-    ),
-    # --- Utility ---
-    LoopTool(
-        name="sleep",
-        description="Sleep briefly and continue.",
-        input_schema={
-            "type": "object",
-            "properties": {"duration_seconds": {"type": "integer"}},
-            "required": ["duration_seconds"],
-        },
-        allowed_roles=["*"],
-        execute=_run_sleep,
-    ),
-    # --- Tasks (read — all roles) ---
-    LoopTool(
-        name="list_tasks",
-        description="List project tasks.",
-        input_schema={
-            "type": "object",
-            "properties": {"status": {"type": "string"}},
-        },
-        allowed_roles=["*"],
-        execute=_run_list_tasks,
-    ),
-    LoopTool(
-        name="get_task_details",
-        description="Get task details by id.",
-        input_schema={
-            "type": "object",
-            "properties": {"task_id": {"type": "string"}},
-            "required": ["task_id"],
-        },
-        allowed_roles=["*"],
-        execute=_run_get_task_details,
-    ),
-    # --- Sandbox / execution ---
-    LoopTool(
-        name="execute_command",
-        description="Execute shell command in a E2B sandbox.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "command": {"type": "string"},
-                "timeout": {"type": "integer"},
-            },
-            "required": ["command"],
-        },
-        allowed_roles=["*"],
-        execute=_run_execute_command,
-    ),
-    LoopTool(
-        name="start_sandbox",
-        description="Start or refresh sandbox for this agent.",
-        input_schema={"type": "object", "properties": {}},
-        allowed_roles=["*"],
-        execute=_run_start_sandbox,
-    ),
-    # --- Git (read — all roles) ---
-    LoopTool(
-        name="list_branches",
-        description="List git branches.",
-        input_schema={"type": "object", "properties": {}},
-        allowed_roles=["*"],
-        execute=_run_list_branches,
-    ),
-    LoopTool(
-        name="view_diff",
-        description="Show git diff base..head.",
-        input_schema={
-            "type": "object",
-            "properties": {"base": {"type": "string"}, "head": {"type": "string"}},
-        },
-        allowed_roles=["*"],
-        execute=_run_view_diff,
-    ),
-    # --- Tasks (write — manager) ---
-    LoopTool(
-        name="create_task",
-        description="Create a kanban task.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "title": {"type": "string"},
-                "description": {"type": "string"},
-                "critical": {"type": "integer"},
-                "urgent": {"type": "integer"},
-            },
-            "required": ["title"],
-        },
-        allowed_roles=["manager"],
-        execute=_run_create_task,
-    ),
-    LoopTool(
-        name="assign_task",
-        description="Assign a task to agent.",
-        input_schema={
-            "type": "object",
-            "properties": {"task_id": {"type": "string"}, "agent_id": {"type": "string"}},
-            "required": ["task_id", "agent_id"],
-        },
-        allowed_roles=["manager"],
-        execute=_run_assign_task,
-    ),
-    LoopTool(
-        name="update_task_status",
-        description="Update task status.",
-        input_schema={
-            "type": "object",
-            "properties": {"task_id": {"type": "string"}, "status": {"type": "string"}},
-            "required": ["task_id", "status"],
-        },
-        allowed_roles=["manager", "engineer"],
-        execute=_run_update_task_status,
-    ),
-    # --- Tasks (engineer-specific) ---
-    LoopTool(
-        name="abort_task",
-        description="Abort current task.",
-        input_schema={
-            "type": "object",
-            "properties": {"reason": {"type": "string"}},
-            "required": ["reason"],
-        },
-        allowed_roles=["engineer"],
-        execute=_run_abort_task,
-    ),
-    # --- Agent management (manager + cto) ---
-    LoopTool(
-        name="interrupt_agent",
-        description="Interrupt target agent session.",
-        input_schema={
-            "type": "object",
-            "properties": {"target_agent_id": {"type": "string"}, "reason": {"type": "string"}},
-            "required": ["target_agent_id", "reason"],
-        },
-        allowed_roles=["manager", "cto"],
-        execute=_run_interrupt_agent,
-    ),
-    LoopTool(
-        name="spawn_engineer",
-        description="Spawn a new engineer.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "display_name": {"type": "string"},
-                "model": {"type": "string"},
-                "tier": {"type": "string"},
-            },
-            "required": ["display_name"],
-        },
-        allowed_roles=["manager", "cto"],
-        execute=_run_spawn_engineer,
-    ),
-    LoopTool(
-        name="list_agents",
-        description="List project agents.",
-        input_schema={"type": "object", "properties": {}},
-        allowed_roles=["manager", "cto"],
-        execute=_run_list_agents,
-    ),
-    # --- Git (write — cto + engineer) ---
-    LoopTool(
-        name="create_branch",
-        description="Create git branch from main.",
-        input_schema={
-            "type": "object",
-            "properties": {"branch_name": {"type": "string"}},
-            "required": ["branch_name"],
-        },
-        allowed_roles=["cto", "engineer"],
-        execute=_run_create_branch,
-    ),
-    LoopTool(
-        name="create_pull_request",
-        description="Create pull request from current branch.",
-        input_schema={
-            "type": "object",
-            "properties": {"title": {"type": "string"}, "description": {"type": "string"}},
-            "required": ["title"],
-        },
-        allowed_roles=["cto", "engineer"],
-        execute=_run_create_pull_request,
-    ),
-]
-
-
-# ---------------------------------------------------------------------------
-# Public API for loop.py
+# Tool registry — built from tool_descriptions.json + executor map
+#
+# Adding a new tool:
+#   1. Add the entry to tool_descriptions.json (name, description, schema, roles)
+#   2. Write the executor function above
+#   3. Map name → executor in _TOOL_EXECUTORS below
 # ---------------------------------------------------------------------------
 
 
 def _role_has_tool(tool: LoopTool, role: str) -> bool:
     return "*" in tool.allowed_roles or role in tool.allowed_roles
+
+
+async def _run_describe_tool(ctx: RunContext, tool_input: dict) -> str:
+    tool_name = tool_input.get("tool_name")
+    if not tool_name:
+        available = [t for t in _TOOLS if _role_has_tool(t, ctx.agent.role)]
+        lines = ["Available tools:\n"]
+        for t in available:
+            lines.append(f"  - {t.name}: {t.description}")
+        lines.append("\nCall describe_tool(tool_name) for detailed usage information.")
+        return "\n".join(lines)
+
+    tool = next((t for t in _TOOLS if t.name == tool_name), None)
+    if tool is None:
+        return f"Unknown tool: '{tool_name}'. Call describe_tool() with no arguments to see available tools."
+    if not _role_has_tool(tool, ctx.agent.role):
+        return f"Tool '{tool_name}' exists but is not available to your role ({ctx.agent.role})."
+
+    detail = _TOOL_DETAILS.get(tool_name, "No detailed description available.")
+    props = tool.input_schema.get("properties", {})
+    required = tool.input_schema.get("required", [])
+
+    lines = [f"## {tool_name}\n", detail, ""]
+    if props:
+        lines.append("Parameters:")
+        for pname, pschema in props.items():
+            req_label = "required" if pname in required else "optional"
+            ptype = pschema.get("type", "any")
+            pdesc = pschema.get("description", "")
+            suffix = f" — {pdesc}" if pdesc else ""
+            lines.append(f"  - {pname} ({ptype}, {req_label}){suffix}")
+    else:
+        lines.append("Parameters: none")
+
+    roles = tool.allowed_roles
+    role_text = "all roles" if "*" in roles else ", ".join(roles)
+    lines.append(f"\nAvailable to: {role_text}")
+    return "\n".join(lines)
+
+
+_TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
+    "end": None,
+    "send_message": _run_send_message,
+    "broadcast_message": _run_broadcast_message,
+    "update_memory": _run_update_memory,
+    "read_history": _run_read_history,
+    "sleep": _run_sleep,
+    "list_tasks": _run_list_tasks,
+    "get_task_details": _run_get_task_details,
+    "execute_command": _run_execute_command,
+    "start_sandbox": _run_start_sandbox,
+    "list_branches": _run_list_branches,
+    "view_diff": _run_view_diff,
+    "create_task": _run_create_task,
+    "assign_task": _run_assign_task,
+    "update_task_status": _run_update_task_status,
+    "abort_task": _run_abort_task,
+    "interrupt_agent": _run_interrupt_agent,
+    "spawn_engineer": _run_spawn_engineer,
+    "list_agents": _run_list_agents,
+    "describe_tool": _run_describe_tool,
+    "create_branch": _run_create_branch,
+    "create_pull_request": _run_create_pull_request,
+}
+
+_RAW_TOOLS: list[dict] = json.loads(
+    (Path(__file__).parent / "tool_descriptions.json").read_text(encoding="utf-8")
+)
+
+_TOOLS: list[LoopTool] = [
+    LoopTool(
+        name=t["name"],
+        description=t["description"],
+        input_schema=t["input_schema"],
+        allowed_roles=t["allowed_roles"],
+        execute=_TOOL_EXECUTORS.get(t["name"]),
+    )
+    for t in _RAW_TOOLS
+]
+
+_TOOL_DETAILS: dict[str, str] = {
+    t["name"]: t["detailed_description"] for t in _RAW_TOOLS
+}
+
+
+# ---------------------------------------------------------------------------
+# Public API for loop.py
+# ---------------------------------------------------------------------------
 
 
 def get_tool_defs_for_role(role: str) -> list[dict]:

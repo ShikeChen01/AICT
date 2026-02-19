@@ -28,7 +28,7 @@ Quick reference for all tools. Drop ideas/notes in the right column.
 | 6 | `read_history` | Core | All | Done | |
 | 7 | `interrupt_agent` | Management | GM, CTO | Done | |
 | 8 | `abort_task` | Management | Engineer | Done | |
-| 9 | `spawn_engineer` | Management | GM | Done | |
+| 9 | `spawn_engineer` | Management | GM, CTO | Done | |
 | 10 | `list_agents` | Management | GM, CTO | Done | |
 | 11 | `create_task` | Task | GM | Done | |
 | 12 | `list_tasks` | Task | All (scoped) | Done | |
@@ -40,6 +40,7 @@ Quick reference for all tools. Drop ideas/notes in the right column.
 | 18 | `list_branches` | Git | All | Done | |
 | 19 | `view_diff` | Git | All | Done | |
 | 20 | `execute_command` | Sandbox | All | Done | commit/push and file ops via sandbox |
+| 21 | `describe_tool` | Introspection | All | Done | On-demand tool documentation |
 
 ---
 
@@ -274,21 +275,22 @@ If the agent has no current task, returns an error: "No active task to abort."
 
 ### spawn_engineer
 
-Creates a new engineer agent in the project. The engineer gets its own AgentWorker, sandbox, inbox, and notification queue. It starts in `sleeping` state.
+Creates a new engineer agent in the project. The engineer gets its own AgentWorker, sandbox, inbox, and notification queue. It is started immediately and ready to receive messages or task assignments.
 
 ```
-spawn_engineer(display_name: str, model: str = "claude-4-sonnet")
+spawn_engineer(display_name: str, model?: str, tier?: str)
   Parameters:
     display_name  str  required  Name for the engineer (e.g. "Engineer-3")
-    model         str  optional  LLM model to use (default: claude-4-sonnet)
-  Returns: "Engineer '{display_name}' spawned (id: {uuid}). Status: sleeping."
+    model         str  optional  LLM model override for the engineer
+    tier          str  optional  Engineer tier (e.g. "junior", "senior"); influences default model via project settings
+  Returns: "Engineer spawned: {uuid}\nThe engineer is now awake. Send it a message or assign a task to give it work."
 ```
 
-**Available to**: GM only
+**Available to**: GM, CTO
 
 **Constraints**:
-- Checks `project_settings.max_engineers` before spawning. If at limit, returns error.
-- Engineer starts sleeping. GM must send a message to wake it.
+- Maximum 5 engineers per project (checks `project_settings.max_engineers`). Returns error if at limit.
+- The engineer is spawned and its worker started immediately.
 
 ### list_agents
 
@@ -471,7 +473,7 @@ Complete role-to-tool permission matrix.
 | **Management** | | | |
 | interrupt_agent | yes | yes | -- |
 | abort_task | -- | -- | yes |
-| spawn_engineer | yes | -- | -- |
+| spawn_engineer | yes | yes | -- |
 | list_agents | yes | yes | -- |
 | **Task** | | | |
 | create_task | yes | -- | -- |
@@ -486,6 +488,8 @@ Complete role-to-tool permission matrix.
 | view_diff | yes | yes | yes |
 | **Sandbox** | | | |
 | execute_command | yes | yes | yes |
+| **Introspection** | | | |
+| describe_tool | yes | yes | yes |
 
 **Legend**: `yes` = full access, `read` = read-only variant, `own` = scoped to own resources, `--` = no access
 

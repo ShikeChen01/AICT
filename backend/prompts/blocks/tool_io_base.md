@@ -65,3 +65,7 @@ Tool I/O contract (follow exactly):
 - view_diff(base?, head?)
   - Input: optional base/head refs
   - Output: git diff text, or No diff.
+
+- describe_tool(tool_name?)
+  - Input: optional tool_name string (omit to list all available tools)
+  - Output: detailed description, parameters, and role access for the tool

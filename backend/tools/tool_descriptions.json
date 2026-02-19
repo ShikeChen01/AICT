@@ -1,0 +1,319 @@
+[
+  {
+    "name": "end",
+    "description": "End current session.",
+    "detailed_description": "End the current session. Call this when you have completed all pending work, have no more actions to take, or have been explicitly asked to stop. Must be called alone \u2014 no other tool calls in the same turn.",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "allowed_roles": ["*"]
+  },
+
+  {
+    "name": "send_message",
+    "description": "Send message to agent or user. target_agent_id must be a UUID, not a display name.",
+    "detailed_description": "Send a direct message to another agent or the user. Use for 1-on-1 communication: task assignments, status updates, questions, or delivering results. The target_agent_id must be a valid UUID \u2014 use list_agents to discover agent IDs. To message the human user, use the user's agent UUID (provided in your context).",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "target_agent_id": {
+          "type": "string",
+          "description": "Recipient UUID (agent id). Never pass display names here."
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "required": ["target_agent_id", "content"]
+    },
+    "allowed_roles": ["*"]
+  },
+
+  {
+    "name": "broadcast_message",
+    "description": "Broadcast informational message.",
+    "detailed_description": "Send a message visible to all agents in the project. Use for announcements, status broadcasts, or information that every team member needs to see. Prefer send_message for targeted communication to avoid noise.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string"
+        }
+      },
+      "required": ["content"]
+    },
+    "allowed_roles": ["*"]
+  },
+
+  {
+    "name": "update_memory",
+    "description": "Overwrite working memory.",
+    "detailed_description": "Overwrite your persistent working memory. Memory survives across sessions and context window resets. Store: current goals, progress notes, key decisions, blockers, or any state you need to recall later. The entire memory is replaced on each call, so always include everything you want to keep.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string"
+        }
+      },
+      "required": ["content"]
+    },
+    "allowed_roles": ["*"]
+  },
+
+  {
+    "name": "read_history",
+    "description": "Read persistent history.",
+    "detailed_description": "Read your past messages from previous sessions. Useful for recovering context after a restart, reviewing past decisions, or checking what you've communicated. Results are ordered newest-first. Use limit/offset for pagination and session_id to filter to a specific session.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "limit":      { "type": "integer" },
+        "offset":     { "type": "integer" },
+        "session_id": { "type": "string" }
+      }
+    },
+    "allowed_roles": ["*"]
+  },
+
+  {
+    "name": "sleep",
+    "description": "Sleep briefly and continue.",
+    "detailed_description": "Pause execution for a specified number of seconds (0\u20133600). Use when waiting for an external process to complete, throttling operations, or when a deliberate delay is needed before checking status.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "duration_seconds": { "type": "integer" }
+      },
+      "required": ["duration_seconds"]
+    },
+    "allowed_roles": ["*"]
+  },
+
+  {
+    "name": "list_tasks",
+    "description": "List project tasks.",
+    "detailed_description": "List all tasks on the project kanban board. Optionally filter by status (backlog, in_progress, review, done, aborted). Use to get an overview of project progress, find unassigned work, or check what tasks exist.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string" }
+      }
+    },
+    "allowed_roles": ["*"]
+  },
+
+  {
+    "name": "get_task_details",
+    "description": "Get task details by id.",
+    "detailed_description": "Get full details of a specific task by its UUID, including title, description, status, assigned agent, git branch, and PR URL. Use when you need to understand a task's full scope before starting work, or to check a task's current state.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "task_id": { "type": "string" }
+      },
+      "required": ["task_id"]
+    },
+    "allowed_roles": ["*"]
+  },
+
+  {
+    "name": "execute_command",
+    "description": "Execute shell command in a E2B sandbox.",
+    "detailed_description": "Execute a shell command inside a secure, isolated E2B cloud sandbox (Ubuntu Linux). This is your PRIMARY tool for all execution tasks: running code, file operations, installing packages, running tests, git operations, HTTP requests (curl/wget), and more.\n\nKey behaviors:\n- The sandbox persists for the session \u2014 files, packages, env vars carry over.\n- Chain commands with && or write shell scripts for multi-step workflows.\n- If a command fails, read stderr carefully, fix the issue, and retry.\n- You can install any tool (apt-get / pip / npm); installs persist.\n- Call start_sandbox() first if you get a 'sandbox not ready' error.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "command": { "type": "string" },
+        "timeout": { "type": "integer" }
+      },
+      "required": ["command"]
+    },
+    "allowed_roles": ["*"]
+  },
+
+  {
+    "name": "start_sandbox",
+    "description": "Start or refresh sandbox for this agent.",
+    "detailed_description": "Initialize or refresh your E2B sandbox. Call this if execute_command returns a 'sandbox not ready' error, or proactively at session start to ensure the sandbox is available. Idempotent \u2014 safe to call multiple times.",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "allowed_roles": ["*"]
+  },
+
+  {
+    "name": "list_branches",
+    "description": "List git branches.",
+    "detailed_description": "List all git branches in the project repository. Use to see existing branches before creating a new one, or to find the branch associated with a task.",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "allowed_roles": ["*"]
+  },
+
+  {
+    "name": "view_diff",
+    "description": "Show git diff base..head.",
+    "detailed_description": "Show the git diff between two refs (defaults: base=main, head=HEAD). Use to review changes before creating a PR, verify your own work, or understand what changed on a branch.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "base": { "type": "string" },
+        "head": { "type": "string" }
+      }
+    },
+    "allowed_roles": ["*"]
+  },
+
+  {
+    "name": "create_task",
+    "description": "Create a kanban task.",
+    "detailed_description": "Create a new task on the project kanban board (manager only). Set critical (1\u201310) and urgent (1\u201310) to help prioritize. Tasks start in 'backlog' status. After creation, use assign_task to hand it to an engineer.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "title":       { "type": "string" },
+        "description": { "type": "string" },
+        "critical":    { "type": "integer" },
+        "urgent":      { "type": "integer" }
+      },
+      "required": ["title"]
+    },
+    "allowed_roles": ["manager"]
+  },
+
+  {
+    "name": "assign_task",
+    "description": "Assign a task to agent.",
+    "detailed_description": "Assign an existing task to an agent by their UUID (manager only). The agent will be able to see and work on the task. Use list_agents to find available engineer IDs and list_tasks to find unassigned tasks.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "task_id":  { "type": "string" },
+        "agent_id": { "type": "string" }
+      },
+      "required": ["task_id", "agent_id"]
+    },
+    "allowed_roles": ["manager"]
+  },
+
+  {
+    "name": "update_task_status",
+    "description": "Update task status.",
+    "detailed_description": "Update a task's status (manager or engineer). Valid statuses: backlog, in_progress, review, done, aborted. Engineers can only update tasks assigned to them; managers can update any task.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "task_id": { "type": "string" },
+        "status":  { "type": "string" }
+      },
+      "required": ["task_id", "status"]
+    },
+    "allowed_roles": ["manager", "engineer"]
+  },
+
+  {
+    "name": "abort_task",
+    "description": "Abort current task.",
+    "detailed_description": "Abort your currently assigned task (engineer only). Sends a notification to the task creator explaining the abort. Use when a task is blocked, infeasible, or needs to be re-scoped. Always provide a clear reason.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "reason": { "type": "string" }
+      },
+      "required": ["reason"]
+    },
+    "allowed_roles": ["engineer"]
+  },
+
+  {
+    "name": "interrupt_agent",
+    "description": "Interrupt target agent session.",
+    "detailed_description": "Interrupt another agent's current session, forcing it to stop and re-evaluate (manager/CTO only). Use when an agent is stuck, working on the wrong thing, or when priorities have changed and it needs immediate redirection.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "target_agent_id": { "type": "string" },
+        "reason":          { "type": "string" }
+      },
+      "required": ["target_agent_id", "reason"]
+    },
+    "allowed_roles": ["manager", "cto"]
+  },
+
+  {
+    "name": "spawn_engineer",
+    "description": "Spawn a new engineer.",
+    "detailed_description": "Create a new engineer agent for the project (manager/CTO only). The engineer is started immediately and ready to receive messages or task assignments. Use when more parallelism is needed or when specialized work requires a dedicated engineer. Maximum 5 engineers per project.\n\n- display_name: A human-readable label (e.g. 'Backend-Engineer', 'Engineer-3').\n- model: Override the LLM model for this engineer (optional).\n- tier: Set the engineer tier, e.g. 'junior' or 'senior' (optional; influences the default model via project settings).",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "display_name": { "type": "string" },
+        "model":        { "type": "string" },
+        "tier":         { "type": "string" }
+      },
+      "required": ["display_name"]
+    },
+    "allowed_roles": ["manager", "cto"]
+  },
+
+  {
+    "name": "list_agents",
+    "description": "List project agents.",
+    "detailed_description": "List all agents in the project with their UUIDs, display names, roles, and current status (manager/CTO only). Use to find agent UUIDs for messaging or task assignment, or to review the current team composition.",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "allowed_roles": ["manager", "cto"]
+  },
+
+  {
+    "name": "describe_tool",
+    "description": "Get detailed description and usage guide for a tool.",
+    "detailed_description": "Look up detailed usage information for any tool by name. Returns the tool's purpose, full parameter documentation (types, required/optional), and which roles can use it. Call with no tool_name to list all tools available to you.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "tool_name": {
+          "type": "string",
+          "description": "Name of the tool to describe. Omit to list all available tools."
+        }
+      }
+    },
+    "allowed_roles": ["*"]
+  },
+
+  {
+    "name": "create_branch",
+    "description": "Create git branch from main.",
+    "detailed_description": "Create a new git branch from main (CTO/engineer only). Use before starting work on a task to isolate changes. Branch names should be descriptive (e.g. 'feat/user-auth', 'fix/login-bug').",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "branch_name": { "type": "string" }
+      },
+      "required": ["branch_name"]
+    },
+    "allowed_roles": ["cto", "engineer"]
+  },
+
+  {
+    "name": "create_pull_request",
+    "description": "Create pull request from current branch.",
+    "detailed_description": "Create a pull request from the current branch to main (CTO/engineer only). Call after completing work on a feature branch to request code review. Provide a clear title and description summarizing the changes.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "title":       { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["title"]
+    },
+    "allowed_roles": ["cto", "engineer"]
+  }
+]

@@ -4,6 +4,10 @@ CTO-only tools:
   - Input: target_agent_id UUID, reason text
   - Output: Interrupted agent <target_uuid>
 
+- spawn_engineer(display_name, model?, tier?)
+  - Input: display_name string (required), optional model string, optional tier string (e.g. junior/senior)
+  - Output: Engineer spawned: <engineer_uuid>\n  The engineer is now awake. Send it a message or assign a task to give it work.
+
 - list_agents()
   - Input: {}
   - Output: one line per agent: <agent_uuid> | <display_name> | <role> | <status>
