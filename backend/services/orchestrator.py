@@ -19,7 +19,7 @@ from backend.graph.events import emit_agent_log
 from backend.graph.utils import extract_text_content
 from backend.graph.workflow import create_graph
 from backend.logging.my_logger import get_logger
-from backend.services.e2b_service import E2BService, SandboxMetadata
+from backend.services.sandbox_service import SandboxMetadata, SandboxService
 
 logger = get_logger(__name__)
 
@@ -146,15 +146,15 @@ def _persistent_for_agent(agent: Agent) -> bool:
 class OrchestratorService:
     """Coordinates sandbox behavior and runs the Agent Graph."""
 
-    def __init__(self, e2b_service: E2BService | None = None):
-        self.e2b_service = e2b_service or E2BService()
+    def __init__(self, sandbox_service: SandboxService | None = None):
+        self.sandbox_service = sandbox_service or SandboxService()
 
     async def ensure_sandbox_for_agent(
         self,
         session: AsyncSession,
         agent: Agent,
     ) -> SandboxMetadata:
-        return await self.e2b_service.ensure_running_sandbox(
+        return await self.sandbox_service.ensure_running_sandbox(
             session=session,
             agent=agent,
             persistent=_persistent_for_agent(agent),
@@ -162,7 +162,7 @@ class OrchestratorService:
 
     async def close_if_ephemeral(self, session: AsyncSession, agent: Agent) -> None:
         if not sandbox_should_persist(agent.role) and agent.sandbox_id:
-            await self.e2b_service.close_sandbox(session, agent)
+            await self.sandbox_service.close_sandbox(session, agent)
 
     async def wake_agent(self, session: AsyncSession, agent: Agent) -> SandboxMetadata:
         """

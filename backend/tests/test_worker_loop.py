@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.config import settings
-from backend.services.e2b_service import LOCAL_FALLBACK_SANDBOX_ERROR, SandboxMetadata
+from backend.services.sandbox_service import SandboxMetadata
 from backend.tools.loop_registry import (
     RunContext,
     _run_execute_command,
@@ -70,17 +70,28 @@ def test_parse_tool_uuid_optional_allows_none_or_empty() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_command_tool_handles_local_fallback_sandbox(sample_engineer, session) -> None:
-    sample_engineer.sandbox_id = "local-sbox-test"
+async def test_execute_command_tool_uses_vm_sandbox(sample_engineer, session) -> None:
+    from backend.services.sandbox_client import ShellResult
+
+    sample_engineer.sandbox_id = "vm-sbox-test"
+    shell_result = ShellResult(stdout="/home/user\n", exit_code=0)
     ctx = _make_ctx(session, sample_engineer)
-    result = await _run_execute_command(ctx, {"command": "pwd"})
-    assert result == LOCAL_FALLBACK_SANDBOX_ERROR
+
+    with patch("backend.tools.loop_registry._get_sandbox_service") as mock_f:
+        mock_svc = MagicMock()
+        mock_svc.execute_command = AsyncMock(return_value=shell_result)
+        mock_f.return_value = mock_svc
+
+        result = await _run_execute_command(ctx, {"command": "pwd"})
+
+    assert "/home/user" in result
+    assert "Exit Code: 0" in result
 
 
-def test_tool_defs_include_start_sandbox_for_all_roles() -> None:
+def test_tool_defs_include_sandbox_tools_for_all_roles() -> None:
     for role in ("manager", "cto", "engineer"):
         tool_names = {tool["name"] for tool in get_tool_defs_for_role(role)}
-        assert "start_sandbox" in tool_names
+        assert "sandbox_start_session" in tool_names
 
 
 def test_tool_defs_include_spawn_engineer_for_manager_and_cto() -> None:
@@ -93,39 +104,27 @@ def test_tool_defs_include_spawn_engineer_for_manager_and_cto() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_command_tool_reports_restart_feedback(sample_engineer, session) -> None:
-    metadata = SandboxMetadata(
-        sandbox_id="sandbox-new",
-        agent_id=str(sample_engineer.id),
-        persistent=False,
-        status="running",
-        restarted=True,
-        previous_sandbox_id="sandbox-old",
-        message="Sandbox restarted: sandbox-old -> sandbox-new",
-    )
-    mock_proc = MagicMock()
-    mock_proc.wait = AsyncMock(return_value=None)
-    mock_proc.exit_code = 0
-    mock_proc.stdout = "/home/user/project"
-    mock_proc.stderr = ""
+async def test_execute_command_tool_reports_sandbox_output(sample_engineer, session) -> None:
+    from backend.services.sandbox_client import ShellResult
 
-    mock_sandbox = MagicMock()
-    mock_sandbox.process.start = AsyncMock(return_value=mock_proc)
-
+    sample_engineer.sandbox_id = "sandbox-exec"
+    shell_result = ShellResult(stdout="/home/user/project\n", exit_code=0)
     ctx = _make_ctx(session, sample_engineer)
-    with patch("backend.tools.loop_registry.E2BService.ensure_running_sandbox", AsyncMock(return_value=metadata)):
-        with patch("backend.tools.loop_registry.AsyncSandbox") as mock_async_sandbox:
-            mock_async_sandbox.connect = AsyncMock(return_value=mock_sandbox)
-            result = await _run_execute_command(ctx, {"command": "pwd"})
 
-    assert "Sandbox restarted: sandbox-old -> sandbox-new" in result
+    with patch("backend.tools.loop_registry._get_sandbox_service") as mock_f:
+        mock_svc = MagicMock()
+        mock_svc.execute_command = AsyncMock(return_value=shell_result)
+        mock_f.return_value = mock_svc
+
+        result = await _run_execute_command(ctx, {"command": "pwd"})
+
     assert "Exit Code: 0" in result
     assert "/home/user/project" in result
 
 
 @pytest.mark.asyncio
-async def test_start_or_refresh_sandbox_tool_returns_created_message(sample_engineer, session) -> None:
-    metadata = SandboxMetadata(
+async def test_start_sandbox_tool_returns_ready_message(sample_engineer, session) -> None:
+    meta = SandboxMetadata(
         sandbox_id="sandbox-created",
         agent_id=str(sample_engineer.id),
         persistent=False,
@@ -133,9 +132,13 @@ async def test_start_or_refresh_sandbox_tool_returns_created_message(sample_engi
         created=True,
         message="Sandbox created: sandbox-created",
     )
-
     ctx = _make_ctx(session, sample_engineer)
-    with patch("backend.tools.loop_registry.E2BService.ensure_running_sandbox", AsyncMock(return_value=metadata)):
+
+    with patch("backend.tools.loop_registry._get_sandbox_service") as mock_f:
+        mock_svc = MagicMock()
+        mock_svc.ensure_running_sandbox = AsyncMock(return_value=meta)
+        mock_f.return_value = mock_svc
+
         result = await _run_start_sandbox(ctx, {})
 
     assert result == "Sandbox created: sandbox-created"
