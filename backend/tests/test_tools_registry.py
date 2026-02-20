@@ -42,3 +42,23 @@ def test_no_e2b_tools_in_any_role() -> None:
         names = {tool.name for tool in get_tools()}
         assert "execute_in_sandbox" not in names, "E2B tool found in registry"
         assert "start_sandbox" not in names, "Deprecated start_sandbox found in registry"
+
+
+def test_create_issue_available_to_all_roles() -> None:
+    manager_names = {tool.name for tool in get_manager_tools()}
+    cto_names = {tool.name for tool in get_cto_tools()}
+    engineer_names = {tool.name for tool in get_engineer_tools()}
+
+    assert "create_issue" in manager_names
+    assert "create_issue" in cto_names
+    assert "create_issue" in engineer_names
+
+
+def test_create_github_project_available_to_manager_and_cto() -> None:
+    manager_names = {tool.name for tool in get_manager_tools()}
+    cto_names = {tool.name for tool in get_cto_tools()}
+    engineer_names = {tool.name for tool in get_engineer_tools()}
+
+    assert "create_github_project" in manager_names
+    assert "create_github_project" in cto_names
+    assert "create_github_project" not in engineer_names

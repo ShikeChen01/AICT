@@ -5,6 +5,8 @@ Compatibility module for LangGraph git tools.
 from backend.tools.git import (
     commit_changes,
     create_branch,
+    create_github_project,
+    create_issue,
     create_pull_request,
     push_changes,
 )
@@ -14,4 +16,6 @@ __all__ = [
     "commit_changes",
     "push_changes",
     "create_pull_request",
+    "create_issue",
+    "create_github_project",
 ]

@@ -90,6 +90,46 @@ async def push_changes(agent_id: str, branch_name: str) -> str:
 
 
 @tool
+async def create_issue(agent_id: str, title: str, body: str = "", labels: str = "", assignees: str = "") -> str:
+    """
+    Create a GitHub issue in the project repository.
+
+    Args:
+        agent_id: UUID of the agent.
+        title: Issue title.
+        body: Issue body / description.
+        labels: Comma-separated list of label names to apply (optional).
+        assignees: Comma-separated list of GitHub usernames to assign (optional).
+    """
+    label_list = [l.strip() for l in labels.split(",") if l.strip()] if labels else None
+    assignee_list = [a.strip() for a in assignees.split(",") if a.strip()] if assignees else None
+    try:
+        git = GitService(settings.code_repo_path)
+        result = git.create_issue(title=title, body=body, labels=label_list, assignees=assignee_list)
+        return f"Issue created successfully: {result.get('html_url', result)}"
+    except GitOperationFailed as exc:
+        return f"Issue creation failed: {exc}"
+
+
+@tool
+async def create_github_project(agent_id: str, name: str, body: str = "") -> str:
+    """
+    Create a GitHub project board in the project repository.
+
+    Args:
+        agent_id: UUID of the agent.
+        name: Project board name.
+        body: Optional description for the project board.
+    """
+    try:
+        git = GitService(settings.code_repo_path)
+        result = git.create_github_project(name=name, body=body)
+        return f"GitHub project created successfully: {result.get('html_url', result)}"
+    except GitOperationFailed as exc:
+        return f"GitHub project creation failed: {exc}"
+
+
+@tool
 async def create_pull_request(agent_id: str, source_branch: str) -> str:
     """
     Create a Pull Request from the source branch to main.

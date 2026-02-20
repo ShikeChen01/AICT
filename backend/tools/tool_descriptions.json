@@ -776,6 +776,63 @@
     ]
   },
   {
+    "name": "create_issue",
+    "description": "Create a GitHub issue in the project repository.",
+    "detailed_description": [
+      "Create a new GitHub issue in the project's repository. Use to report bugs,",
+      "request features, or track work that isn't yet a Kanban task. Provide a clear",
+      "title and body. Optionally add labels (comma-separated names) and assignees",
+      "(comma-separated GitHub usernames). Returns the URL of the created issue."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Issue title."
+        },
+        "body": {
+          "type": "string",
+          "description": "Issue body / description."
+        },
+        "labels": {
+          "type": "string",
+          "description": "Comma-separated label names to apply (optional)."
+        },
+        "assignees": {
+          "type": "string",
+          "description": "Comma-separated GitHub usernames to assign (optional)."
+        }
+      },
+      "required": ["title"]
+    },
+    "allowed_roles": ["manager", "cto", "engineer"]
+  },
+  {
+    "name": "create_github_project",
+    "description": "Create a GitHub project board in the project repository.",
+    "detailed_description": [
+      "Create a classic GitHub project board in the project's repository. Use to",
+      "organize work visually on a Kanban-style board on GitHub. Provide a name and",
+      "optional description. Returns the URL of the created project board."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Project board name."
+        },
+        "body": {
+          "type": "string",
+          "description": "Optional description for the project board."
+        }
+      },
+      "required": ["name"]
+    },
+    "allowed_roles": ["manager", "cto"]
+  },
+  {
     "name": "get_project_metadata",
     "description": "Get project and owner metadata for the current project.",
     "detailed_description": [

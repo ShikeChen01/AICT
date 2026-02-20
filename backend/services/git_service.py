@@ -223,6 +223,73 @@ class GitService:
             pr_url=pr_url,
         )
 
+    def create_issue(
+        self,
+        title: str,
+        body: str = "",
+        labels: list[str] | None = None,
+        assignees: list[str] | None = None,
+    ) -> dict:
+        """Create a GitHub issue in the repository.
+
+        Returns the full issue payload from the GitHub API (includes ``html_url``).
+        Raises :exc:`GitOperationFailed` if GitHub is not configured or the API call fails.
+        """
+        if not self.github_token:
+            raise GitOperationFailed("GitHub token is required to create issues")
+
+        _, repo_slug = self._github_ready()
+        if not repo_slug:
+            raise GitOperationFailed("No GitHub remote configured for this repository")
+
+        payload: dict = {"title": title, "body": body}
+        if labels:
+            payload["labels"] = labels
+        if assignees:
+            payload["assignees"] = assignees
+
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                f"{self.github_api_base_url}/repos/{repo_slug}/issues",
+                headers=self._github_headers(),
+                json=payload,
+            )
+            if resp.status_code != 201:
+                raise GitOperationFailed(
+                    f"GitHub issue creation failed: {resp.status_code} {resp.text}"
+                )
+            return resp.json()
+
+    def create_github_project(self, name: str, body: str = "") -> dict:
+        """Create a classic GitHub project board in the repository.
+
+        Returns the full project payload from the GitHub API (includes ``html_url``).
+        Raises :exc:`GitOperationFailed` if GitHub is not configured or the API call fails.
+        """
+        if not self.github_token:
+            raise GitOperationFailed("GitHub token is required to create projects")
+
+        _, repo_slug = self._github_ready()
+        if not repo_slug:
+            raise GitOperationFailed("No GitHub remote configured for this repository")
+
+        payload: dict = {"name": name, "body": body}
+        headers = {
+            **self._github_headers(),
+            "Accept": "application/vnd.github.inertia-preview+json",
+        }
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                f"{self.github_api_base_url}/repos/{repo_slug}/projects",
+                headers=headers,
+                json=payload,
+            )
+            if resp.status_code != 201:
+                raise GitOperationFailed(
+                    f"GitHub project creation failed: {resp.status_code} {resp.text}"
+                )
+            return resp.json()
+
     def merge_pr(
         self,
         agent_role: str,
