@@ -160,7 +160,7 @@ tasks
   updated_at        DateTime(tz) NOT NULL, default utcnow, onupdate utcnow
 ```
 
-Valid statuses: `backlog`, `specifying`, `assigned`, `in_progress`, `in_review`, `done`, `aborted`
+Valid statuses: `backlog`, `specifying`, `assigned`, `in_progress`, `review`, `done`, `aborted`
 
 Notes:
 - **2D priority**: `critical` (importance) and `urgent` (time pressure). Both are 0–10 where 0 = highest priority. The Manager sorts tasks using both dimensions.

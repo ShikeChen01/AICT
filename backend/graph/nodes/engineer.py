@@ -54,7 +54,7 @@ async def engineer_node(state: dict):
         "1. Create a new git branch for the feature (e.g., feat/{task-name}).\n"
         "2. Implement the solution by writing files and running commands in the sandbox.\n"
         "3. Verify your changes (run tests if applicable).\n"
-        "4. Update task status to 'in_review' when implementation is ready.\n"
+        "4. Update task status to 'review' when implementation is ready.\n"
         "5. Commit your changes with a descriptive message.\n"
         "6. Push the branch to remote.\n"
         "7. Create a Pull Request.\n\n"

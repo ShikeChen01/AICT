@@ -19,7 +19,7 @@ const STATUSES: { value: TaskStatus; label: string }[] = [
   { value: 'specifying', label: 'Specifying' },
   { value: 'assigned', label: 'Assigned' },
   { value: 'in_progress', label: 'In Progress' },
-  { value: 'in_review', label: 'In Review' },
+  { value: 'review', label: 'In Review' },
   { value: 'done', label: 'Done' },
   { value: 'aborted', label: 'Aborted' },
 ];
