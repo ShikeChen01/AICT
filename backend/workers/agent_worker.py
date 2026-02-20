@@ -61,9 +61,10 @@ class AgentWorker:
                     break
                 self._interrupt = False
                 async with AsyncSessionLocal() as db:
+                    session_service = SessionService(db)
                     agent = None
                     sess = None
-                    session_service = SessionService(db)
+
                     try:
                         result = await db.execute(
                             select(Agent).where(Agent.id == self.agent_id)
@@ -72,103 +73,129 @@ class AgentWorker:
                         if not agent:
                             logger.warning("Agent %s not found, skip wake", self.agent_id)
                             continue
+
                         proj_result = await db.execute(
                             select(Repository).where(Repository.id == agent.project_id)
                         )
                         project = proj_result.scalar_one_or_none()
                         if not project:
-                            logger.warning("Project %s not found for agent %s", agent.project_id, self.agent_id)
+                            logger.warning(
+                                "Project %s not found for agent %s",
+                                agent.project_id,
+                                self.agent_id,
+                            )
                             continue
 
+                        # Mark active and create session together so we can
+                        # guarantee both are reverted in finally if anything fails.
+                        agent.status = "active"
+                        await db.flush()
                         sess = await session_service.create_session(
                             agent.id,
                             project.id,
                             trigger_message_id=None,
                         )
-                        agent.status = "active"
-                        await db.flush()
 
-                        end_reason = await run_inner_loop(
-                            agent,
-                            project,
-                            sess.id,
-                            trigger_message_id=None,
-                            db=db,
-                            interrupt_flag=self._interrupt_flag,
-                            emit_text=lambda content: asyncio.create_task(
-                                ws_manager.broadcast_agent_text(
-                                    project.id,
-                                    agent.id,
-                                    agent.role,
-                                    content,
-                                    session_id=sess.id,
-                                    iteration=sess.iteration_count or 0,
-                                )
-                            ),
-                            emit_tool_call=lambda name, tool_input: asyncio.create_task(
-                                ws_manager.broadcast_agent_tool_call(
-                                    project.id,
-                                    agent.id,
-                                    agent.role,
-                                    name,
-                                    tool_input,
-                                    session_id=sess.id,
-                                    iteration=sess.iteration_count or 0,
-                                )
-                            ),
-                            emit_tool_result=lambda name, output: asyncio.create_task(
-                                ws_manager.broadcast_agent_tool_result(
-                                    project.id,
-                                    agent.id,
-                                    name,
-                                    output,
-                                    success=not output.startswith("Tool"),
-                                    session_id=sess.id,
-                                    iteration=sess.iteration_count or 0,
-                                    agent_role=agent.role,
-                                )
-                            ),
-                            emit_agent_message=lambda msg: asyncio.create_task(
-                                ws_manager.broadcast_agent_message(
-                                    project.id,
-                                    msg.id,
-                                    msg.from_agent_id or agent.id,
-                                    msg.target_agent_id or USER_AGENT_ID,
-                                    msg.content,
-                                    message_type=msg.message_type,
-                                    created_at=msg.created_at,
-                                )
-                            ),
-                        )
-                        logger.info(
-                            "Agent %s session ended: %s",
-                            self.agent_id,
-                            end_reason,
-                        )
-                    except Exception as e:
-                        logger.exception("Agent worker %s error: %s", self.agent_id, e)
-                        await db.rollback()
                         try:
-                            if sess is not None:
+                            end_reason = await run_inner_loop(
+                                agent,
+                                project,
+                                sess.id,
+                                trigger_message_id=None,
+                                db=db,
+                                interrupt_flag=self._interrupt_flag,
+                                emit_text=lambda content: asyncio.create_task(
+                                    ws_manager.broadcast_agent_text(
+                                        project.id,
+                                        agent.id,
+                                        agent.role,
+                                        content,
+                                        session_id=sess.id,
+                                        iteration=sess.iteration_count or 0,
+                                    )
+                                ),
+                                emit_tool_call=lambda name, tool_input: asyncio.create_task(
+                                    ws_manager.broadcast_agent_tool_call(
+                                        project.id,
+                                        agent.id,
+                                        agent.role,
+                                        name,
+                                        tool_input,
+                                        session_id=sess.id,
+                                        iteration=sess.iteration_count or 0,
+                                    )
+                                ),
+                                emit_tool_result=lambda name, output: asyncio.create_task(
+                                    ws_manager.broadcast_agent_tool_result(
+                                        project.id,
+                                        agent.id,
+                                        name,
+                                        output,
+                                        success=not output.startswith("Tool"),
+                                        session_id=sess.id,
+                                        iteration=sess.iteration_count or 0,
+                                        agent_role=agent.role,
+                                    )
+                                ),
+                                emit_agent_message=lambda msg: asyncio.create_task(
+                                    ws_manager.broadcast_agent_message(
+                                        project.id,
+                                        msg.id,
+                                        msg.from_agent_id or agent.id,
+                                        msg.target_agent_id or USER_AGENT_ID,
+                                        msg.content,
+                                        message_type=msg.message_type,
+                                        created_at=msg.created_at,
+                                    )
+                                ),
+                            )
+                        except Exception as loop_exc:
+                            # run_inner_loop already calls end_session_error
+                            # internally for LLM failures; ensure session ends
+                            # here for any unexpected exception that escaped.
+                            logger.exception(
+                                "Agent worker %s: unhandled exception from run_inner_loop: %s",
+                                self.agent_id,
+                                loop_exc,
+                            )
+                            try:
                                 await session_service.end_session_error(sess.id)
-                            if agent is None:
-                                retry_result = await db.execute(
-                                    select(Agent).where(Agent.id == self.agent_id)
-                                )
-                                agent = retry_result.scalar_one_or_none()
-                            if agent is not None:
-                                agent.status = "sleeping"
-                                await db.commit()
-                        except Exception:
-                            await db.rollback()
-                        logger.warning(
-                            "Agent worker %s recovered from cycle failure; awaiting next wake signal",
+                            except Exception:
+                                pass
+                            raise
+
+                        logger.info("Agent %s session ended: %s", self.agent_id, end_reason)
+
+                    except Exception as cycle_exc:
+                        logger.exception(
+                            "Agent worker %s cycle error: %s",
                             self.agent_id,
+                            cycle_exc,
                         )
-                        continue
-                    else:
-                        agent.status = "sleeping"
-                        await db.commit()
+                        await db.rollback()
+                    finally:
+                        # Guarantee the agent is always returned to sleeping,
+                        # regardless of how the cycle ended.
+                        try:
+                            refresh_result = await db.execute(
+                                select(Agent).where(Agent.id == self.agent_id)
+                            )
+                            live_agent = refresh_result.scalar_one_or_none()
+                            if live_agent is not None:
+                                live_agent.status = "sleeping"
+                            await db.commit()
+                        except Exception as commit_exc:
+                            logger.error(
+                                "Agent worker %s: failed to reset status to sleeping: %s",
+                                self.agent_id,
+                                commit_exc,
+                            )
+                            await db.rollback()
+
+                    logger.debug(
+                        "Agent worker %s cycle complete, awaiting next wake signal",
+                        self.agent_id,
+                    )
         finally:
             router.unregister(self.agent_id)
             logger.debug("Agent worker %s stopped", self.agent_id)

@@ -123,6 +123,26 @@ async def _start_worker_manager() -> None:
     )
 
 
+async def _run_reconciler_forever() -> None:
+    """
+    Keep the reconciler running indefinitely.
+
+    The reconciler heals orphan workers, stuck agents, orphaned sessions, and
+    stuck messages.  It starts after the WorkerManager is fully ready so that
+    it does not race with initial worker registration.
+    """
+    from backend.workers.reconciler import run_reconciler_forever
+
+    while True:
+        try:
+            await run_reconciler_forever()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("Reconciler stopped unexpectedly (%s), restarting in 5s", exc)
+            await asyncio.sleep(5)
+
+
 async def _run_broadcaster_forever() -> None:
     """
     Keep the backend-log broadcaster running indefinitely.
@@ -185,6 +205,7 @@ async def lifespan(app: FastAPI):
             "No agents are in the database for this project yet."
         )
     _background_tasks.append(asyncio.create_task(_run_broadcaster_forever()))
+    _background_tasks.append(asyncio.create_task(_run_reconciler_forever()))
     yield
     # Shutdown
     await _stop_background_tasks()

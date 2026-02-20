@@ -168,6 +168,12 @@ async def create_repository(
     await db.commit()
     await db.refresh(repository)
     logger.info("Created repository: %s (%s)", repository.id, repository.name)
+
+    from backend.workers.worker_manager import get_worker_manager
+    wm = get_worker_manager()
+    await wm.spawn_worker(manager.id, repository.id)
+    await wm.spawn_worker(cto.id, repository.id)
+
     return _repository_to_response(repository)
 
 
@@ -240,6 +246,12 @@ async def import_repository(
 
     await db.commit()
     await db.refresh(repository)
+
+    from backend.workers.worker_manager import get_worker_manager
+    wm = get_worker_manager()
+    await wm.spawn_worker(manager.id, repository.id)
+    await wm.spawn_worker(cto.id, repository.id)
+
     return _repository_to_response(repository)
 
 
@@ -350,6 +362,15 @@ async def delete_repository(
     repository = result.scalar_one_or_none()
     if not repository:
         raise ProjectNotFoundError(repository_id)
+
+    # Remove workers for all agents in the project before deleting them.
+    from backend.workers.worker_manager import get_worker_manager
+    agent_ids_result = await db.execute(
+        select(Agent.id).where(Agent.project_id == repository_id)
+    )
+    wm = get_worker_manager()
+    for (agent_id,) in agent_ids_result.all():
+        await wm.remove_worker(agent_id)
 
     spec_path = Path(repository.spec_repo_path)
     code_path = Path(repository.code_repo_path)

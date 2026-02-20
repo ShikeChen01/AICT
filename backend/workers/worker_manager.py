@@ -92,17 +92,15 @@ class WorkerManager:
         }
 
     async def start(self) -> None:
-        """Start MessageRouter, replay undelivered, load agents, spawn workers."""
+        """Start MessageRouter, spawn all agent workers, then replay undelivered messages.
+
+        Workers are spawned and their queues registered BEFORE replay so that
+        replay notifications actually reach the agents.  Previously, replay fired
+        before any worker was started, causing every undelivered notification to
+        be silently dropped.
+        """
         self._shutting_down = False
         self._started = False
-        router = get_message_router()
-
-        async with AsyncSessionLocal() as session:
-            msg_service = MessageService(session)
-            undelivered = await msg_service.get_undelivered_for_replay()
-            await session.commit()
-
-        await router.replay(undelivered)
 
         async with AsyncSessionLocal() as session:
             result = await session.execute(select(Agent))
@@ -111,7 +109,26 @@ class WorkerManager:
 
         for agent in agents:
             await self._spawn_tracked_worker(agent.id, agent.project_id)
-            logger.info("Worker ready for agent %s (%s)", agent.id, agent.display_name)
+
+        # Wait for all workers to register their queues before replaying.
+        for worker in list(self._workers):
+            try:
+                await worker.wait_ready(timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Worker for agent %s did not become ready in time during startup",
+                    worker.agent_id,
+                )
+
+        logger.info("WorkerManager: %d agent workers ready", len(self._workers))
+
+        async with AsyncSessionLocal() as session:
+            msg_service = MessageService(session)
+            undelivered = await msg_service.get_undelivered_for_replay()
+            await session.commit()
+
+        router = get_message_router()
+        await router.replay(undelivered)
 
         self._started = True
         logger.info("WorkerManager started: %d agents", len(self._workers))
@@ -153,6 +170,30 @@ class WorkerManager:
                 w.interrupt()
                 return
         logger.debug("No worker found for agent %s to interrupt", agent_id)
+
+    async def ensure_workers_for_all_agents(self) -> list[UUID]:
+        """Spawn workers for any agent in the DB that has no registered worker.
+
+        Returns the list of agent IDs that were spawned.  Safe to call at any
+        time (e.g., from the reconciler).
+        """
+        registered_ids = {w.agent_id for w in self._workers}
+        spawned: list[UUID] = []
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(Agent))
+            agents = list(result.scalars().all())
+            await session.commit()
+
+        for agent in agents:
+            if agent.id not in registered_ids:
+                logger.info(
+                    "Reconciler: spawning missing worker for agent %s (%s)",
+                    agent.id,
+                    agent.role,
+                )
+                await self.spawn_worker(agent.id, agent.project_id)
+                spawned.append(agent.id)
+        return spawned
 
     async def remove_worker(self, agent_id: UUID) -> None:
         """Permanently stop a worker and prevent auto-respawn.
