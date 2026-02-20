@@ -21,12 +21,6 @@ class Settings(BaseSettings):
     firebase_credentials_path: str = ""
     firebase_project_id: str = ""
 
-    # E2B
-    e2b_api_key: str = ""
-    e2b_base_url: str = "https://api.e2b.dev"
-    e2b_timeout_seconds: int = Field(default=60, ge=5, le=600)
-    e2b_template_id: str = ""
-
     # LLM
     claude_api_key: str = ""
     gemini_api_key: str = ""
@@ -63,6 +57,11 @@ class Settings(BaseSettings):
     debug: bool = False
     auto_run_migrations_on_startup: bool = True
     startup_step_timeout_seconds: int = Field(default=20, ge=1, le=300)
+
+    # Sandbox VM — self-hosted Docker sandbox on a GCE instance
+    sandbox_vm_host: str = ""          # e.g. "34.9.162.152"
+    sandbox_vm_pool_port: int = 9090
+    sandbox_vm_master_token: str = ""
 
     # Logging — Cloud Logging on Cloud Run (K_SERVICE) or when USE_CLOUD_LOGGING=true
     use_cloud_logging: bool = Field(

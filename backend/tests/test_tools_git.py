@@ -1,7 +1,7 @@
 """
 Unit tests for git tools (sandbox-based).
 
-Tests _run_git_in_sandbox behavior and tool error paths without a real E2B sandbox.
+Tests _run_git_in_sandbox behavior and tool error paths without a real sandbox VM.
 """
 
 import uuid
@@ -17,7 +17,7 @@ from backend.tools.git import (
     push_changes,
     REPO_DIR,
 )
-from backend.services.e2b_service import LOCAL_FALLBACK_SANDBOX_ERROR
+from backend.services.sandbox_client import ShellResult
 
 
 class _SessionContext:
@@ -63,47 +63,31 @@ class TestRunGitInSandbox:
         assert "Agent not found" in result or "Error" in result
 
     @pytest.mark.asyncio
-    async def test_agent_no_sandbox(self, session, agent_no_sandbox):
-        """Agent without sandbox_id returns error."""
+    async def test_agent_no_sandbox_returns_offline_result(self, session, agent_no_sandbox):
+        """Agent without sandbox_id gets an offline sandbox (no VM configured in test env)."""
         await session.commit()
         with patch(
             "backend.tools.git.AsyncSessionLocal",
             return_value=_SessionContext(session),
         ):
             result = await _run_git_in_sandbox(str(agent_no_sandbox.id), "git status")
-        assert "no active sandbox" in result.lower() or "Error" in result
-
-    @pytest.mark.asyncio
-    async def test_local_fallback_sandbox_returns_clear_error(self, session, sample_engineer):
-        """Local fallback sandbox IDs return a deterministic error."""
-        sample_engineer.sandbox_id = "local-sbox-test"
-        await session.commit()
-        with patch(
-            "backend.tools.git.AsyncSessionLocal",
-            return_value=_SessionContext(session),
-        ):
-            result = await _run_git_in_sandbox(str(sample_engineer.id), "git status")
-        assert result == LOCAL_FALLBACK_SANDBOX_ERROR
+        # offline guard fires when sandbox_vm_host is not set
+        assert "offline" in result.lower() or "error" in result.lower()
 
     @pytest.mark.asyncio
     async def test_sandbox_connect_and_run(self, session, agent_with_sandbox):
-        """With mocked AsyncSandbox, command runs and returns stdout."""
+        """With mocked SandboxService, command runs and returns stdout."""
         await session.commit()
-        mock_proc = MagicMock()
-        mock_proc.wait = AsyncMock(return_value=None)
-        mock_proc.exit_code = 0
-        mock_proc.stdout = "On branch main"
-        mock_proc.stderr = ""
-
-        mock_sandbox = MagicMock()
-        mock_sandbox.process.start = AsyncMock(return_value=mock_proc)
+        shell_result = ShellResult(stdout="On branch main\n", exit_code=0)
 
         with patch(
             "backend.tools.git.AsyncSessionLocal",
             return_value=_SessionContext(session),
         ):
-            with patch("backend.tools.git.AsyncSandbox") as MockSandbox:
-                MockSandbox.connect = AsyncMock(return_value=mock_sandbox)
+            with patch("backend.tools.git.SandboxService") as MockSvc:
+                mock_svc = MagicMock()
+                mock_svc.execute_command = AsyncMock(return_value=shell_result)
+                MockSvc.return_value = mock_svc
                 result = await _run_git_in_sandbox(
                     str(agent_with_sandbox.id), f"cd {REPO_DIR} && git status"
                 )
@@ -118,26 +102,21 @@ class TestCreateBranch:
     async def test_create_branch_invokes_sandbox(self, session, agent_with_sandbox):
         """create_branch builds correct command and runs in sandbox."""
         await session.commit()
-        mock_proc = MagicMock()
-        mock_proc.wait = AsyncMock(return_value=None)
-        mock_proc.exit_code = 0
-        mock_proc.stdout = "Switched to a new branch 'feat/test'"
-        mock_proc.stderr = ""
-
-        mock_sandbox = MagicMock()
-        mock_sandbox.process.start = AsyncMock(return_value=mock_proc)
+        shell_result = ShellResult(stdout="Switched to a new branch 'feat/test'\n", exit_code=0)
 
         with patch(
             "backend.tools.git.AsyncSessionLocal",
             return_value=_SessionContext(session),
         ):
-            with patch("backend.tools.git.AsyncSandbox") as MockSandbox:
-                MockSandbox.connect = AsyncMock(return_value=mock_sandbox)
+            with patch("backend.tools.git.SandboxService") as MockSvc:
+                mock_svc = MagicMock()
+                mock_svc.execute_command = AsyncMock(return_value=shell_result)
+                MockSvc.return_value = mock_svc
                 result = await create_branch.ainvoke(
                     {"agent_id": str(agent_with_sandbox.id), "branch_name": "feat/test"}
                 )
         assert "feat/test" in result or "Exit Code" in result
-        call_args = mock_sandbox.process.start.call_args[0][0]
+        call_args = mock_svc.execute_command.call_args[0][2]  # command is 3rd positional arg
         assert "checkout -b" in call_args
         assert "feat/test" in call_args
 
@@ -149,25 +128,20 @@ class TestCommitChanges:
     async def test_commit_changes_invokes_sandbox(self, session, agent_with_sandbox):
         """commit_changes runs git add and commit in sandbox."""
         await session.commit()
-        mock_proc = MagicMock()
-        mock_proc.wait = AsyncMock(return_value=None)
-        mock_proc.exit_code = 0
-        mock_proc.stdout = "[main abc1234] Add feature"
-        mock_proc.stderr = ""
-
-        mock_sandbox = MagicMock()
-        mock_sandbox.process.start = AsyncMock(return_value=mock_proc)
+        shell_result = ShellResult(stdout="[main abc1234] Add feature\n", exit_code=0)
 
         with patch(
             "backend.tools.git.AsyncSessionLocal",
             return_value=_SessionContext(session),
         ):
-            with patch("backend.tools.git.AsyncSandbox") as MockSandbox:
-                MockSandbox.connect = AsyncMock(return_value=mock_sandbox)
-                result = await commit_changes.ainvoke(
+            with patch("backend.tools.git.SandboxService") as MockSvc:
+                mock_svc = MagicMock()
+                mock_svc.execute_command = AsyncMock(return_value=shell_result)
+                MockSvc.return_value = mock_svc
+                await commit_changes.ainvoke(
                     {"agent_id": str(agent_with_sandbox.id), "message": "Add feature"}
                 )
-        call_args = mock_sandbox.process.start.call_args[0][0]
+        call_args = mock_svc.execute_command.call_args[0][2]
         assert "add -A" in call_args or "commit" in call_args
 
 
@@ -178,24 +152,19 @@ class TestPushChanges:
     async def test_push_invokes_sandbox(self, session, agent_with_sandbox):
         """push_changes runs git push in sandbox."""
         await session.commit()
-        mock_proc = MagicMock()
-        mock_proc.wait = AsyncMock(return_value=None)
-        mock_proc.exit_code = 0
-        mock_proc.stdout = "Branch 'feat/test' set up to track..."
-        mock_proc.stderr = ""
-
-        mock_sandbox = MagicMock()
-        mock_sandbox.process.start = AsyncMock(return_value=mock_proc)
+        shell_result = ShellResult(stdout="Branch 'feat/test' set up to track...\n", exit_code=0)
 
         with patch(
             "backend.tools.git.AsyncSessionLocal",
             return_value=_SessionContext(session),
         ):
-            with patch("backend.tools.git.AsyncSandbox") as MockSandbox:
-                MockSandbox.connect = AsyncMock(return_value=mock_sandbox)
-                result = await push_changes.ainvoke(
+            with patch("backend.tools.git.SandboxService") as MockSvc:
+                mock_svc = MagicMock()
+                mock_svc.execute_command = AsyncMock(return_value=shell_result)
+                MockSvc.return_value = mock_svc
+                await push_changes.ainvoke(
                     {"agent_id": str(agent_with_sandbox.id), "branch_name": "feat/test"}
                 )
-        call_args = mock_sandbox.process.start.call_args[0][0]
+        call_args = mock_svc.execute_command.call_args[0][2]
         assert "push" in call_args
         assert "feat/test" in call_args

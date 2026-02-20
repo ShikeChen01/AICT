@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import re
+
 from backend.config import settings
 from backend.llm.providers.anthropic_sdk import AnthropicSDKProvider
 from backend.llm.providers.base import BaseLLMProvider
 from backend.llm.providers.gemini_sdk import GeminiProviderAdapter
 from backend.llm.providers.openai_sdk import OpenAISDKProvider
+from backend.logging.my_logger import get_logger
+
+logger = get_logger(__name__)
+
+# Matches OpenAI o-series models: o1, o3, o4-mini, o1-mini, o3-pro, etc.
+_OPENAI_O_SERIES_RE = re.compile(r"^o\d")
 
 
 class ProviderRouter:
@@ -22,14 +30,29 @@ class ProviderRouter:
             return "anthropic"
         if "gemini" in normalized_model or "google" in normalized_model:
             return "google"
-        if "gpt" in normalized_model or "o3" in normalized_model or "openai" in normalized_model:
+        if (
+            "gpt" in normalized_model
+            or "chatgpt" in normalized_model
+            or "openai" in normalized_model
+            or _OPENAI_O_SERIES_RE.match(normalized_model)
+        ):
             return "openai"
 
+        # No keyword match — fall back to whichever API key is configured
         if settings.claude_api_key:
+            logger.warning(
+                "Model %r did not match any known provider; falling back to anthropic", model
+            )
             return "anthropic"
         if settings.gemini_api_key:
+            logger.warning(
+                "Model %r did not match any known provider; falling back to google", model
+            )
             return "google"
         if settings.openai_api_key:
+            logger.warning(
+                "Model %r did not match any known provider; falling back to openai", model
+            )
             return "openai"
         return "none"
 
