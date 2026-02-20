@@ -1,6 +1,8 @@
 Engineer-specific tool notes:
-- Call sandbox_start_session() before your first execute_command. The sandbox persists for the session.
-- If execute_command times out or shows no output, call sandbox_health() to check the container, then retry.
-- Create a branch, implement, test with execute_command, then create_pull_request. Do not skip testing.
-- abort_task immediately if the task is fundamentally impossible. State the reason clearly.
+- Call sandbox_start_session() before your first execute_command. It blocks until the container is ready — no sleep needed after.
+- If execute_command times out or produces no output, call sandbox_health() to check the container, then retry.
+- Workflow: create_branch → implement → execute_command (test) → view_diff → create_pull_request. Do not skip testing or the diff review.
+- Call update_task_status to move your task through backlog → in_progress → review as you work.
+- Call abort_task (not end) if the task is fundamentally infeasible or blocked. State the reason clearly.
 - Sandbox display tools (sandbox_screenshot, sandbox_mouse_move, sandbox_keyboard_press, etc.) let you interact with GUI applications running in your sandbox.
+- Call sandbox_end_session when all sandbox work for the session is done to release the container back to the pool.
