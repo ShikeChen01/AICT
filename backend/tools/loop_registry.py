@@ -207,7 +207,13 @@ async def _run_execute_command(ctx: RunContext, tool_input: dict) -> str:
     parts: list[str] = [f"Sandbox: {ctx.agent.sandbox_id}"]
     if result.truncated:
         parts.append("[output truncated]")
-    parts.append(result.stdout)
+    if result.exit_code is None and not result.stdout.strip():
+        parts.append(
+            f"[command timed out after {timeout}s — no output received. "
+            "The sandbox may still be starting up. Try again in a few seconds.]"
+        )
+    else:
+        parts.append(result.stdout)
     if result.exit_code is not None:
         parts.append(f"Exit Code: {result.exit_code}")
     return "\n".join(parts).strip()
@@ -246,7 +252,8 @@ async def _run_sandbox_health(ctx: RunContext, tool_input: dict) -> str:
             f"display={data.get('display')}"
         )
     except Exception as exc:
-        return f"Health check failed: {exc}"
+        detail = str(exc) or repr(exc)
+        return f"Health check failed: {type(exc).__name__}: {detail}"
 
 
 async def _run_sandbox_screenshot(ctx: RunContext, tool_input: dict) -> str:

@@ -7,6 +7,7 @@ import secrets
 from contextlib import asynccontextmanager
 from typing import Optional
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -62,6 +63,35 @@ async def require_master_token(request: Request) -> None:
 # ── App ───────────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="AICT Sandbox Pool Manager", lifespan=lifespan)
+
+
+# ── Readiness probe ───────────────────────────────────────────────────────────
+
+
+async def _wait_for_container_ready(
+    host_port: int,
+    auth_token: str,
+    timeout: float = 30.0,
+    poll_interval: float = 1.0,
+) -> bool:
+    """
+    Poll the container's /health endpoint until it responds 200 or timeout.
+    Called after docker.create_container so that session_start only returns
+    once the sandbox server is actually accepting requests.
+    """
+    url = f"http://127.0.0.1:{host_port}/health"
+    headers = {"Authorization": f"Bearer {auth_token}"}
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    return True
+        except Exception:
+            pass
+        await asyncio.sleep(poll_interval)
+    return False
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -316,11 +346,19 @@ async def session_start(
     _pool.add(s)
     _pool.assign(sandbox_id, body.agent_id)
 
+    # Wait for the container's uvicorn + Xvfb to be ready before returning.
+    # Without this, the very first tool call from the agent hits a container
+    # that is still booting (startup race condition).
+    ready = await _wait_for_container_ready(host_port, auth_token, timeout=30.0)
+    if not ready:
+        print(f"[pool-manager] WARNING: sandbox {sandbox_id} did not become ready in 30s")
+
     return JSONResponse({
         "sandbox_id": sandbox_id,
         "host_port": host_port,
         "auth_token": auth_token,
         "created": True,
+        "ready": ready,
     }, status_code=201)
 
 

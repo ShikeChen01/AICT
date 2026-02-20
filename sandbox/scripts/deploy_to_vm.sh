@@ -20,6 +20,13 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 log() { echo "[deploy] $*"; }
 
+# ── 0. Ensure remote directory exists (fixes pscp "unable to open" on Windows) ─
+
+log "Ensuring remote directory /tmp/aict-sandbox exists..."
+gcloud compute ssh "${VM_USER}@${GCP_INSTANCE}" \
+    --zone="${GCP_ZONE}" \
+    --command="mkdir -p /tmp/aict-sandbox"
+
 # ── 1. Sync sandbox code to VM ──────────────────────────────────────────────
 
 log "Syncing sandbox/ to VM ${GCP_INSTANCE}..."
@@ -33,18 +40,18 @@ gcloud compute scp --recurse \
 log "Running setup_vm.sh on VM..."
 gcloud compute ssh "${VM_USER}@${GCP_INSTANCE}" \
     --zone="${GCP_ZONE}" \
-    -- "sudo bash /tmp/aict-sandbox/scripts/setup_vm.sh"
+    --command="sudo bash /tmp/aict-sandbox/sandbox/scripts/setup_vm.sh"
 
 # ── 3. Verify pool manager ────────────────────────────────────────────────────
 
 log "Verifying pool manager health..."
 TOKEN=$(gcloud compute ssh "${VM_USER}@${GCP_INSTANCE}" \
     --zone="${GCP_ZONE}" \
-    -- "cat /etc/sandbox/auth_token")
+    --command="sudo cat /etc/sandbox/auth_token")
 
 HEALTH=$(gcloud compute ssh "${VM_USER}@${GCP_INSTANCE}" \
     --zone="${GCP_ZONE}" \
-    -- "curl -sf -H 'Authorization: Bearer ${TOKEN}' http://localhost:9090/api/health")
+    --command="curl -sf -H 'Authorization: Bearer ${TOKEN}' http://localhost:9090/api/health")
 
 log "Pool manager health: ${HEALTH}"
 
