@@ -21,7 +21,7 @@ const STATUSES: TaskStatus[] = [
   'specifying',
   'assigned',
   'in_progress',
-  'in_review',
+  'review',
   'done',
 ];
 

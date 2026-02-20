@@ -533,7 +533,7 @@ Sections:
 
 Drag-and-drop task board using @dnd-kit.
 
-Columns: `backlog` → `specifying` → `assigned` → `in_progress` → `in_review` → `done`
+Columns: `backlog` → `specifying` → `assigned` → `in_progress` → `review` → `done`
 
 Each task card shows:
 - Title

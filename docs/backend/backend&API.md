@@ -550,7 +550,7 @@ DELETE /api/v1/tasks/{id}
   "project_id": "uuid",
   "title": "string",
   "description": "string | null",
-  "status": "backlog | specifying | assigned | in_progress | in_review | done | aborted",
+  "status": "backlog | specifying | assigned | in_progress | review | done | aborted",
   "critical": "int (0-10, 0=most critical)",
   "urgent": "int (0-10, 0=most urgent)",
   "assigned_agent_id": "uuid | null",

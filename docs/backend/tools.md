@@ -363,7 +363,7 @@ Updates the status of a task.
 update_task_status(task_id: str, status: str)
   Parameters:
     task_id  str  required  UUID of the task
-    status   str  required  New status: backlog | specifying | assigned | in_progress | in_review | done | aborted
+    status   str  required  New status: backlog | specifying | assigned | in_progress | review | done | aborted
   Returns: "Task '{title}' status updated to {status}."
 ```
 
