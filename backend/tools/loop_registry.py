@@ -144,7 +144,13 @@ async def _run_broadcast_message(ctx: RunContext, tool_input: dict) -> str:
 
 
 async def _run_update_memory(ctx: RunContext, tool_input: dict) -> str:
-    ctx.agent.memory = {"content": str(tool_input["content"])}
+    content = tool_input.get("content")
+    if not content:
+        raise ValueError(
+            "Missing required parameter: 'content' (string). "
+            "Provide the memory text you want to persist."
+        )
+    ctx.agent.memory = {"content": str(content)}
     await ctx.db.flush()
     return "Memory updated."
 
@@ -755,6 +761,27 @@ def get_tool_defs_for_role(role: str) -> list[dict]:
         for t in _TOOLS
         if _role_has_tool(t, role)
     ]
+
+
+def validate_tool_input(tool_name: str, tool_input: dict) -> None:
+    """Check *tool_input* against the tool's ``input_schema``.
+
+    Raises :class:`ValueError` with an actionable message listing every
+    missing required parameter so the LLM can self-correct.
+    """
+    tool = next((t for t in _TOOLS if t.name == tool_name), None)
+    if tool is None:
+        return
+    required = tool.input_schema.get("required", [])
+    if not required:
+        return
+    properties = tool.input_schema.get("properties", {})
+    missing = [r for r in required if r not in tool_input]
+    if missing:
+        details = ", ".join(
+            f"'{m}' ({properties.get(m, {}).get('type', 'any')})" for m in missing
+        )
+        raise ValueError(f"Missing required parameter(s): {details}")
 
 
 def get_handlers_for_role(role: str) -> dict[str, ToolExecutor]:

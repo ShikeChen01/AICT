@@ -21,6 +21,7 @@ from backend.tools.loop_registry import (
     RunContext,
     get_handlers_for_role,
     truncate_tool_output,
+    validate_tool_input,
 )
 from backend.workers.message_router import get_message_router
 from backend.logging.my_logger import get_logger
@@ -281,6 +282,7 @@ async def run_inner_loop(
                 handler = handlers.get(name)
                 if handler is None:
                     raise RuntimeError(f"Unknown tool '{name}'")
+                validate_tool_input(name, tool_input)
                 result_text = await handler(ctx, tool_input)
             except Exception as exc:
                 result_text = truncate_tool_output(f"Tool '{name}' failed: {exc}")
