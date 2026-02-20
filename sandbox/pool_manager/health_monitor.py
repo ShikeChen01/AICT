@@ -13,12 +13,14 @@ from config import (
 )
 from docker_manager import DockerManager
 from models import PoolState, SandboxState
+from port_allocator import PortAllocator
 
 
 class HealthMonitor:
-    def __init__(self, pool: PoolState, docker: DockerManager) -> None:
+    def __init__(self, pool: PoolState, docker: DockerManager, ports: PortAllocator) -> None:
         self._pool = pool
         self._docker = docker
+        self._ports = ports
         self._task: asyncio.Task | None = None
 
     def start(self) -> None:
@@ -105,4 +107,5 @@ class HealthMonitor:
         except Exception as exc:
             print(f"[health-monitor] Evict error for {s.sandbox_id}: {exc}")
         finally:
+            self._ports.release(s.host_port)
             self._pool.remove(s.sandbox_id)

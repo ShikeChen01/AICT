@@ -15,7 +15,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from config import RING_BUFFER_BYTES
 
-TRUNCATION_NOTICE = b"\n[... output truncated — ring buffer full ...]\n"
+TRUNCATION_NOTICE = b"\n[... output truncated - ring buffer full ...]\n"
 
 
 class RingBuffer:
@@ -63,9 +63,10 @@ class ShellSession:
         else:
             self._pid = pid
             self._master_fd = master_fd
-            # Set non-blocking I/O on master fd
-            flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
-            fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+            # Keep the fd blocking — _read_fd runs in an executor thread so it
+            # is fine to block there. O_NONBLOCK would cause os.read to raise
+            # EAGAIN immediately when no data is ready, breaking the read loop
+            # before any output arrives.
             self._reader_task = asyncio.get_event_loop().create_task(self._read_loop())
 
     async def _read_loop(self) -> None:

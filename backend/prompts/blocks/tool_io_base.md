@@ -50,12 +50,17 @@ Tool I/O contract (follow exactly):
     one failure.
   - You can install any tool with apt-get / pip / npm; installs persist for the session.
   - Call sandbox_start_session() first if execute_command returns a "sandbox not ready" error.
+  - If you see "[command timed out — no output received]": call sandbox_health() to check
+    if the container is alive, then retry. Do NOT assume the command ran silently.
 
 - sandbox_start_session()
   - Input: {}
   - Output: sandbox readiness/status text
-  - Ensures your sandbox container is running. Call at session start or after a
-    "sandbox not ready" error from execute_command. Idempotent — safe to call multiple times.
+  - Ensures your sandbox container is running. Call once at the start of sandbox work.
+  - TIMING: cold start (new container) takes ~2-3 seconds; idle reuse is ~0.1 seconds.
+    The call BLOCKS until the container is healthy — no sleep or polling needed after it returns.
+    execute_command, sandbox_health, and sandbox_screenshot are immediately usable.
+  - Idempotent — safe to call multiple times.
 
 - sandbox_end_session()
   - Input: {}
@@ -64,7 +69,10 @@ Tool I/O contract (follow exactly):
 
 - sandbox_health()
   - Input: {}
-  - Output: status, uptime, and display info for your sandbox container.
+  - Output: status=ok|error  uptime=<seconds>s  display=:99
+  - TIMING: <0.1s round-trip when the container is healthy.
+  - Use to diagnose why execute_command returned no output (container may have crashed).
+  - NOT needed as a startup check — sandbox_start_session already waits for readiness.
 
 - list_branches()
   - Input: {}

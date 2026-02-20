@@ -199,7 +199,13 @@
       "- Chain commands with && or write shell scripts for multi-step workflows.",
       "- If a command fails, read stderr carefully, fix the issue, and retry.",
       "- You can install any tool (apt-get / pip / npm); installs persist for the session.",
-      "- Call sandbox_start_session() first if you get a 'sandbox not ready' error."
+      "- Call sandbox_start_session() first if you get a 'sandbox not ready' error.",
+      "",
+      "Timing:",
+      "- Commands start executing immediately after sandbox_start_session returns.",
+      "- Default timeout is 120s. For long builds, pass a higher timeout explicitly.",
+      "- If you see '[command timed out — no output received]', the sandbox may be",
+      "  starting up or the command hung. Call sandbox_health() to diagnose, then retry."
     ],
     "input_schema": {
       "type": "object",
@@ -237,11 +243,19 @@
   },
   {
     "name": "sandbox_start_session",
-    "description": "Ensure sandbox container is running for this session.",
+    "description": "Ensure sandbox container is running for this session. Cold start takes ~2-3s; idle reuse is instant.",
     "detailed_description": [
-      "Allocate and start your dedicated sandbox container. Call this at the beginning",
-      "of any session that requires execute_command, screenshot, or display access.",
-      "Idempotent — safe to call multiple times. Returns sandbox status and ID."
+      "Allocate and start your dedicated sandbox container.",
+      "Call this at the beginning of any session that needs execute_command, screenshot, or display access.",
+      "Idempotent — safe to call multiple times. Returns sandbox status and ID.",
+      "",
+      "Timing (measured on current hardware):",
+      "- Cold start (new container): ~2-3 seconds. The tool BLOCKS until the container is",
+      "  healthy and accepting connections — you do NOT need to sleep or poll after it returns.",
+      "- Warm reuse (idle container already in pool): ~0.1 seconds.",
+      "",
+      "After this returns, execute_command / sandbox_health / sandbox_screenshot are all",
+      "immediately usable with no additional wait required."
     ],
     "input_schema": {
       "type": "object",
@@ -270,11 +284,17 @@
   },
   {
     "name": "sandbox_health",
-    "description": "Check sandbox container health and uptime.",
+    "description": "Check sandbox container health and uptime. Responds in <0.1s when container is ready.",
     "detailed_description": [
-      "Ping your sandbox container's health endpoint and return its current status,",
-      "uptime in seconds, and virtual display info. Use to verify the sandbox is",
-      "responsive before starting intensive work or after a suspected timeout."
+      "Ping your sandbox container's health endpoint. Returns status, uptime in seconds, and display info.",
+      "",
+      "Timing: <0.1s round-trip when the container is healthy.",
+      "If sandbox_start_session has already returned successfully, this will pass immediately.",
+      "",
+      "Use when:",
+      "- Verifying the sandbox is alive after a long-running command.",
+      "- Diagnosing why execute_command returned no output (container may have crashed).",
+      "- NOT needed as a startup check — sandbox_start_session already waits for readiness."
     ],
     "input_schema": {
       "type": "object",

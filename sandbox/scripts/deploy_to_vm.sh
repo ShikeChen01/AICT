@@ -42,6 +42,25 @@ gcloud compute ssh "${VM_USER}@${GCP_INSTANCE}" \
     --zone="${GCP_ZONE}" \
     --command="sudo bash /tmp/aict-sandbox/sandbox/scripts/setup_vm.sh"
 
+# ── 2b. Flush all existing sandbox containers ─────────────────────────────────
+# After setup_vm.sh rebuilds the Docker image, running containers still use the
+# old image. Destroy them all so the pool manager hands out fresh containers.
+
+log "Flushing old sandbox containers..."
+TOKEN_FOR_FLUSH=$(gcloud compute ssh "${VM_USER}@${GCP_INSTANCE}" \
+    --zone="${GCP_ZONE}" \
+    --command="sudo cat /etc/sandbox/auth_token")
+
+# Get list of sandbox IDs and DELETE each one via the pool manager API.
+# Using curl + jq on the VM avoids PowerShell subshell expansion issues.
+gcloud compute ssh "${VM_USER}@${GCP_INSTANCE}" \
+    --zone="${GCP_ZONE}" \
+    --command="curl -sf -H 'Authorization: Bearer ${TOKEN_FOR_FLUSH}' http://localhost:9090/api/sandbox/list \
+        | python3 -c \"import sys,json,urllib.request; \
+            sandboxes=json.load(sys.stdin); \
+            [urllib.request.urlopen(urllib.request.Request('http://localhost:9090/api/sandbox/'+s['sandbox_id'],method='DELETE',headers={'Authorization':'Bearer ${TOKEN_FOR_FLUSH}'})) for s in sandboxes]; \
+            print(f'Flushed {len(sandboxes)} containers.')\" 2>&1 || echo 'No containers to flush.'"
+
 # ── 3. Verify pool manager ────────────────────────────────────────────────────
 
 log "Verifying pool manager health..."

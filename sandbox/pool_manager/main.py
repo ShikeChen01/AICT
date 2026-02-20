@@ -34,14 +34,45 @@ async def lifespan(app: FastAPI):
     _docker = DockerManager()
     _ports = PortAllocator()
 
-    # Reclaim ports already in use from persisted state
+    # Reconcile persisted state against Docker reality.
+    # Any sandbox whose container is not running is evicted: we destroy the
+    # Docker container (stopped containers still hold their port binding in the
+    # kernel, causing "port is already allocated" on the next create) and drop
+    # it from state so the pool doesn't hand out dead sandbox IDs.
+    stale = [s for s in _pool.all() if not _docker.is_running(s.sandbox_id)]
+    for s in stale:
+        print(f"[pool-manager] Removing stale sandbox {s.sandbox_id} (container not running) — destroying")
+        try:
+            _docker.destroy_container(s.sandbox_id)
+        except Exception as exc:
+            print(f"[pool-manager] Warning: could not destroy stale container {s.sandbox_id}: {exc}")
+        _ports.release(s.host_port)
+        _pool.remove(s.sandbox_id)
+
+    # Also destroy any Docker-level sandbox-* containers that are NOT in state
+    # (orphans from crashes / manual intervention that would block port reuse).
+    known_ids = {s.sandbox_id for s in _pool.all()}
+    for c in _docker.list_sandbox_containers():
+        # container name is "sandbox-<sandbox_id>"
+        cname = c["name"].lstrip("/")
+        if not cname.startswith("sandbox-"):
+            continue
+        sid = cname[len("sandbox-"):]
+        if sid not in known_ids:
+            print(f"[pool-manager] Destroying orphan Docker container {cname} (not in state)")
+            try:
+                _docker.destroy_container(sid)
+            except Exception as exc:
+                print(f"[pool-manager] Warning: could not destroy orphan {cname}: {exc}")
+
+    # Reclaim ports still in use from surviving state entries
     used_ports = [s.host_port for s in _pool.all()]
     _ports.reclaim_from_pool(used_ports)
 
-    _monitor = HealthMonitor(_pool, _docker)
+    _monitor = HealthMonitor(_pool, _docker, _ports)
     _monitor.start()
 
-    print(f"[pool-manager] Started. max_containers={config.MAX_CONTAINERS}")
+    print(f"[pool-manager] Started. max_containers={config.MAX_CONTAINERS} (evicted {len(stale)} stale)")
     yield
     _monitor.stop()
 
