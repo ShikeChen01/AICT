@@ -11,8 +11,8 @@ Adding a new tool: add an entry there, write an executor here, map it in _TOOL_E
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
-import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,7 +28,6 @@ from backend.db.models import Agent, AgentMessage, Repository
 from backend.db.repositories.messages import AgentMessageRepository
 from backend.schemas.task import TaskCreate
 from backend.services.agent_service import AgentService
-from backend.services.e2b_service import E2BService, LOCAL_FALLBACK_SANDBOX_ERROR
 from backend.services.message_service import MessageService
 from backend.services.session_service import SessionService
 from backend.services.task_service import TaskService
@@ -36,10 +35,11 @@ from backend.logging.my_logger import get_logger
 
 logger = get_logger(__name__)
 
-try:
-    from e2b import AsyncSandbox
-except Exception:  # pragma: no cover - optional dependency
-    AsyncSandbox = None
+
+def _get_sandbox_service():
+    """Return the VM sandbox service."""
+    from backend.services.sandbox_service import SandboxService
+    return SandboxService()
 
 MAX_TOOL_RESULT_CHARS = 12000
 
@@ -64,10 +64,6 @@ def parse_tool_uuid(tool_input: dict, field_name: str, *, required: bool = True)
         return UUID(str(raw_value))
     except (TypeError, ValueError, AttributeError) as exc:
         raise RuntimeError(f"Invalid UUID for '{field_name}': {raw_value!r}") from exc
-
-
-def is_local_fallback_sandbox(sandbox_id: str | None) -> bool:
-    return bool(sandbox_id and sandbox_id.startswith("local-sbox-"))
 
 
 # ---------------------------------------------------------------------------
@@ -206,57 +202,115 @@ async def _run_get_task_details(ctx: RunContext, tool_input: dict) -> str:
 async def _run_execute_command(ctx: RunContext, tool_input: dict) -> str:
     command = str(tool_input["command"])
     timeout = int(tool_input.get("timeout", 120))
-    svc = E2BService()
-    metadata = await svc.ensure_running_sandbox(
-        ctx.db,
-        ctx.agent,
-        persistent=bool(ctx.agent.sandbox_persist),
-    )
-    await ctx.db.flush()
-
-    if is_local_fallback_sandbox(metadata.sandbox_id):
-        return LOCAL_FALLBACK_SANDBOX_ERROR
-    if AsyncSandbox is None:
-        return "E2B SDK not available in this environment."
-
-    os.environ["E2B_API_KEY"] = settings.e2b_api_key
-    sandbox = await AsyncSandbox.connect(metadata.sandbox_id, timeout=settings.e2b_timeout_seconds)
-    proc = await sandbox.process.start(command, timeout=timeout)
-    await proc.wait()
-    parts: list[str] = []
-    if metadata.restarted:
-        parts.append(metadata.message or f"Sandbox restarted: {metadata.sandbox_id}")
-    elif metadata.created:
-        parts.append(metadata.message or f"Sandbox created: {metadata.sandbox_id}")
-    else:
-        parts.append(f"Sandbox ready: {metadata.sandbox_id}")
-    parts.append(f"Exit Code: {proc.exit_code}")
-    if proc.stdout:
-        parts.append(f"Stdout:\n{proc.stdout}")
-    if proc.stderr:
-        parts.append(f"Stderr:\n{proc.stderr}")
+    svc = _get_sandbox_service()
+    result = await svc.execute_command(ctx.db, ctx.agent, command, timeout=timeout)
+    parts: list[str] = [f"Sandbox: {ctx.agent.sandbox_id}"]
+    if result.truncated:
+        parts.append("[output truncated]")
+    parts.append(result.stdout)
+    if result.exit_code is not None:
+        parts.append(f"Exit Code: {result.exit_code}")
     return "\n".join(parts).strip()
 
 
 async def _run_start_sandbox(ctx: RunContext, tool_input: dict) -> str:
-    svc = E2BService()
-    metadata = await svc.ensure_running_sandbox(
-        ctx.db,
-        ctx.agent,
-        persistent=bool(ctx.agent.sandbox_persist),
-    )
-    await ctx.db.flush()
+    svc = _get_sandbox_service()
+    meta = await svc.ensure_running_sandbox(ctx.db, ctx.agent)
+    return meta.message or f"Sandbox ready: {meta.sandbox_id}"
 
-    if is_local_fallback_sandbox(metadata.sandbox_id):
+
+# ── Sandbox tool executors ──────────────────────────────────────────────────
+
+
+async def _run_sandbox_start_session(ctx: RunContext, tool_input: dict) -> str:
+    svc = _get_sandbox_service()
+    meta = await svc.ensure_running_sandbox(ctx.db, ctx.agent)
+    return meta.message or f"Sandbox ready: {meta.sandbox_id}"
+
+
+async def _run_sandbox_end_session(ctx: RunContext, tool_input: dict) -> str:
+    if not ctx.agent.sandbox_id:
+        return "No active sandbox to end."
+    svc = _get_sandbox_service()
+    await svc.close_sandbox(ctx.db, ctx.agent)
+    return "Sandbox session ended. Container returned to pool."
+
+
+async def _run_sandbox_health(ctx: RunContext, tool_input: dict) -> str:
+    svc = _get_sandbox_service()
+    try:
+        data = await svc.sandbox_health(ctx.agent)
         return (
-            f"Sandbox ready (local fallback): {metadata.sandbox_id}. "
-            "Remote E2B execution is unavailable in this environment."
+            f"status={data.get('status')} "
+            f"uptime={data.get('uptime_seconds')}s "
+            f"display={data.get('display')}"
         )
-    if metadata.restarted:
-        return metadata.message or f"Sandbox restarted: {metadata.sandbox_id}"
-    if metadata.created:
-        return metadata.message or f"Sandbox created: {metadata.sandbox_id}"
-    return metadata.message or f"Sandbox already running: {metadata.sandbox_id}"
+    except Exception as exc:
+        return f"Health check failed: {exc}"
+
+
+async def _run_sandbox_screenshot(ctx: RunContext, tool_input: dict) -> str:
+    if not ctx.agent.sandbox_id:
+        await _run_sandbox_start_session(ctx, {})
+    svc = _get_sandbox_service()
+    try:
+        img_bytes = await svc.take_screenshot(ctx.agent)
+        b64 = base64.b64encode(img_bytes).decode()
+        return f"Screenshot captured ({len(img_bytes)} bytes). Base64 JPEG:\n{b64[:200]}...[truncated for display]"
+    except Exception as exc:
+        return f"Screenshot failed: {exc}"
+
+
+async def _run_sandbox_mouse_move(ctx: RunContext, tool_input: dict) -> str:
+    x = int(tool_input["x"])
+    y = int(tool_input["y"])
+    svc = _get_sandbox_service()
+    try:
+        await svc.mouse_move(ctx.agent, x, y)
+        return f"Mouse moved to ({x}, {y})"
+    except Exception as exc:
+        return f"Mouse move failed: {exc}"
+
+
+async def _run_sandbox_mouse_location(ctx: RunContext, tool_input: dict) -> str:
+    svc = _get_sandbox_service()
+    try:
+        loc = await svc.mouse_location(ctx.agent)
+        return f"Mouse at x={loc.get('x')}, y={loc.get('y')}"
+    except Exception as exc:
+        return f"Mouse location failed: {exc}"
+
+
+async def _run_sandbox_keyboard_press(ctx: RunContext, tool_input: dict) -> str:
+    keys = tool_input.get("keys")
+    text = tool_input.get("text")
+    if not keys and not text:
+        return "Error: provide 'keys' or 'text'."
+    svc = _get_sandbox_service()
+    try:
+        await svc.keyboard_press(ctx.agent, keys=keys, text=text)
+        return f"Keyboard input sent: keys={keys!r} text={text!r}"
+    except Exception as exc:
+        return f"Keyboard press failed: {exc}"
+
+
+async def _run_sandbox_record_screen(ctx: RunContext, tool_input: dict) -> str:
+    svc = _get_sandbox_service()
+    try:
+        data = await svc.start_recording(ctx.agent)
+        return f"Recording started. Status: {data.get('status')}"
+    except Exception as exc:
+        return f"Start recording failed: {exc}"
+
+
+async def _run_sandbox_end_record_screen(ctx: RunContext, tool_input: dict) -> str:
+    svc = _get_sandbox_service()
+    try:
+        video_bytes = await svc.stop_recording(ctx.agent)
+        b64 = base64.b64encode(video_bytes).decode()
+        return f"Recording stopped ({len(video_bytes)} bytes). Base64 MP4:\n{b64[:200]}...[truncated for display]"
+    except Exception as exc:
+        return f"Stop recording failed: {exc}"
 
 
 async def _run_list_branches(ctx: RunContext, tool_input: dict) -> str:
@@ -485,6 +539,16 @@ _TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
     "describe_tool": _run_describe_tool,
     "create_branch": _run_create_branch,
     "create_pull_request": _run_create_pull_request,
+    # VM sandbox tools
+    "sandbox_start_session": _run_sandbox_start_session,
+    "sandbox_end_session": _run_sandbox_end_session,
+    "sandbox_health": _run_sandbox_health,
+    "sandbox_screenshot": _run_sandbox_screenshot,
+    "sandbox_mouse_move": _run_sandbox_mouse_move,
+    "sandbox_mouse_location": _run_sandbox_mouse_location,
+    "sandbox_keyboard_press": _run_sandbox_keyboard_press,
+    "sandbox_record_screen": _run_sandbox_record_screen,
+    "sandbox_end_record_screen": _run_sandbox_end_record_screen,
 }
 
 _RAW_TOOLS: list[dict] = json.loads(

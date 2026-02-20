@@ -37,26 +37,34 @@ Tool I/O contract (follow exactly):
   - Output: multiline key/value details (id, title, description, status, assigned_agent_id, git_branch, pr_url)
 
 - execute_command(command, timeout?)         *** PRIMARY TOOL — USE LIBERALLY ***
-  - Runs inside a secure, isolated E2B cloud sandbox (Ubuntu Linux).
-  - Input: command string, optional timeout int (default: 60s, max: 300s)
-  - Output: command execution text (sandbox status, exit code, stdout/stderr)
-  - The sandbox persists for the lifetime of the session — state (files, installed packages,
-    environment variables, running processes) is shared across all execute_command calls.
+  - Runs inside your dedicated sandbox container (Ubuntu 22.04, full root access).
+  - Input: command string, optional timeout int (default: 120s)
+  - Output: command execution text (sandbox ID, exit code, stdout/stderr)
+  - The sandbox persists across all execute_command calls in the session — files, installed
+    packages, environment variables, and running processes carry over between calls.
   - ALWAYS prefer execute_command over reasoning alone for any task that can be verified,
     computed, or executed: file operations, running scripts, installing packages, compiling
     code, running tests, parsing data, making HTTP requests (curl/wget), git operations, etc.
   - Multi-step workflows: chain commands with && or write a shell script and run it.
   - If a command fails, read stderr carefully, fix the issue, and retry — do not give up after
     one failure.
-  - You can install any tool with apt-get / pip / npm inside the sandbox; installs persist for
-    the session.
-  - Call start_sandbox() first if execute_command returns a "sandbox not ready" error.
+  - You can install any tool with apt-get / pip / npm; installs persist for the session.
+  - Call sandbox_start_session() first if execute_command returns a "sandbox not ready" error.
 
-- start_sandbox()
+- sandbox_start_session()
   - Input: {}
   - Output: sandbox readiness/status text
-  - Call this once at the start of a session if the sandbox is not yet running, or after a
-    "sandbox not ready" error from execute_command.
+  - Ensures your sandbox container is running. Call at session start or after a
+    "sandbox not ready" error from execute_command. Idempotent — safe to call multiple times.
+
+- sandbox_end_session()
+  - Input: {}
+  - Output: "Sandbox session ended. Container returned to pool."
+  - Releases your sandbox back to the pool. Call when you have finished all sandbox work.
+
+- sandbox_health()
+  - Input: {}
+  - Output: status, uptime, and display info for your sandbox container.
 
 - list_branches()
   - Input: {}

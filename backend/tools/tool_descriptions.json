@@ -187,20 +187,19 @@
   },
   {
     "name": "execute_command",
-    "description": "Execute shell command in a E2B sandbox.",
+    "description": "Execute shell command in your sandbox container.",
     "detailed_description": [
-      "This is important: This is your goto tool for any difficult tasks and you should use this tool creatively and boldly",
-      "Execute a shell command inside a secure, isolated E2B cloud sandbox (Ubuntu",
-      "Linux). This is your PRIMARY tool for all execution tasks: running code, file",
-      "operations, installing packages, running tests, git operations, HTTP requests",
-      "(curl/wget), and more.",
+      "*** PRIMARY TOOL — use creatively and boldly for any executable task. ***",
+      "Runs a shell command inside your dedicated sandbox container (Ubuntu 22.04, full root access).",
+      "This is your go-to tool for: running code, file operations, installing packages,",
+      "running tests, git operations, HTTP requests (curl/wget), and more.",
       "",
       "Key behaviors:",
-      "- The sandbox persists for the session — files, packages, env vars carry over.",
+      "- The sandbox persists across all calls — files, packages, env vars carry over.",
       "- Chain commands with && or write shell scripts for multi-step workflows.",
       "- If a command fails, read stderr carefully, fix the issue, and retry.",
-      "- You can install any tool (apt-get / pip / npm); installs persist.",
-      "- Call start_sandbox() first if you get a 'sandbox not ready' error."
+      "- You can install any tool (apt-get / pip / npm); installs persist for the session.",
+      "- Call sandbox_start_session() first if you get a 'sandbox not ready' error."
     ],
     "input_schema": {
       "type": "object",
@@ -209,7 +208,8 @@
           "type": "string"
         },
         "timeout": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Timeout in seconds (default 120)"
         }
       },
       "required": [
@@ -222,11 +222,171 @@
   },
   {
     "name": "start_sandbox",
-    "description": "Start or refresh sandbox for this agent.",
+    "description": "Alias for sandbox_start_session. Prefer sandbox_start_session.",
     "detailed_description": [
-      "Initialize or refresh your E2B sandbox. Call this if execute_command returns a",
-      "'sandbox not ready' error, or proactively at session start to ensure the sandbox",
-      "is available. Idempotent — safe to call multiple times."
+      "Ensures your sandbox container is running. Idempotent — safe to call multiple times.",
+      "Prefer calling sandbox_start_session() directly."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "sandbox_start_session",
+    "description": "Ensure sandbox container is running for this session.",
+    "detailed_description": [
+      "Allocate and start your dedicated sandbox container. Call this at the beginning",
+      "of any session that requires execute_command, screenshot, or display access.",
+      "Idempotent — safe to call multiple times. Returns sandbox status and ID."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "sandbox_end_session",
+    "description": "Release sandbox back to the pool when done.",
+    "detailed_description": [
+      "Release your sandbox container back to the shared pool. The container is reset",
+      "and made available for other agents. Your /workspace files are preserved in the",
+      "named volume and will be remounted if you request a sandbox again. Call when you",
+      "have finished all sandbox work for the current session."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "sandbox_health",
+    "description": "Check sandbox container health and uptime.",
+    "detailed_description": [
+      "Ping your sandbox container's health endpoint and return its current status,",
+      "uptime in seconds, and virtual display info. Use to verify the sandbox is",
+      "responsive before starting intensive work or after a suspected timeout."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "sandbox_screenshot",
+    "description": "Take a screenshot of the sandbox display.",
+    "detailed_description": [
+      "Capture the current state of the sandbox virtual display (Xvfb :99) as a JPEG",
+      "image. The result is returned as a base64-encoded string. Use to observe the",
+      "current state of any GUI application running in the sandbox."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "sandbox_mouse_move",
+    "description": "Move mouse cursor to (x, y) in sandbox display.",
+    "detailed_description": [
+      "Move the mouse cursor to the specified coordinates in the sandbox virtual display.",
+      "Coordinates are in pixels (0,0 = top-left of 1024x768 display)."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "integer",
+          "description": "X coordinate (0–1024)"
+        },
+        "y": {
+          "type": "integer",
+          "description": "Y coordinate (0–768)"
+        }
+      },
+      "required": ["x", "y"]
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "sandbox_mouse_location",
+    "description": "Get current mouse cursor position in sandbox.",
+    "detailed_description": [
+      "Return the current {x, y} coordinates of the mouse cursor in the sandbox virtual",
+      "display. Useful for verifying mouse position after moves."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "sandbox_keyboard_press",
+    "description": "Send key press or type text in sandbox.",
+    "detailed_description": [
+      "Send keyboard input to the sandbox. Use 'keys' for special key combos (e.g.",
+      "'ctrl+c', 'Return', 'Escape', 'alt+F4') or 'text' to type a string of",
+      "characters. Exactly one of 'keys' or 'text' must be provided."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "keys": {
+          "type": "string",
+          "description": "xdotool key combo (e.g. 'ctrl+c', 'Return')"
+        },
+        "text": {
+          "type": "string",
+          "description": "Raw text to type into the focused window"
+        }
+      }
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "sandbox_record_screen",
+    "description": "Start recording the sandbox screen.",
+    "detailed_description": [
+      "Start an ffmpeg screen recording of the sandbox virtual display at 2 fps.",
+      "Recording runs in the background. Call sandbox_end_record_screen when done to",
+      "stop and retrieve the video. Only one recording can be active at a time."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "sandbox_end_record_screen",
+    "description": "Stop recording and return video as base64.",
+    "detailed_description": [
+      "Stop the active screen recording and return the video file as a base64-encoded",
+      "string (mp4 format). Must have called sandbox_record_screen first."
     ],
     "input_schema": {
       "type": "object",
