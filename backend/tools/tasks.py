@@ -95,6 +95,25 @@ async def update_task_status(task_id: str, status: str) -> str:
 
 
 @tool
+async def move_task(task_id: str, new_project_id: str) -> str:
+    """
+    Move a task to a different project.
+
+    Args:
+        task_id: UUID of the task to move.
+        new_project_id: UUID of the destination project.
+    """
+    async with AsyncSessionLocal() as session:
+        service = TaskService(session)
+        try:
+            task = await service.move_to_project(uuid.UUID(task_id), uuid.UUID(new_project_id))
+            await session.commit()
+            return f"Task '{task.title}' moved to project {new_project_id}"
+        except Exception as e:
+            return f"Error moving task: {str(e)}"
+
+
+@tool
 async def get_task_details(task_id: str) -> str:
     """
     Get full details of a task including its ID, title, description, and status.

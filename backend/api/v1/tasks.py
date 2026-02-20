@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.auth import get_current_user
+from backend.core.exceptions import ProjectNotFoundError
 from backend.db.models import Repository, Task, User
 from backend.db.session import get_db
 from backend.schemas.task import TaskCreate, TaskUpdate, TaskResponse
@@ -123,6 +124,23 @@ async def assign_task(
     await _ensure_task_access(db, task_id, current_user.id)
     service = get_task_service(db)
     return await service.assign(task_id, agent_id)
+
+
+@router.post("/{task_id}/move", response_model=TaskResponse)
+async def move_task(
+    task_id: UUID,
+    new_project_id: UUID = Query(..., description="Destination project ID"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Move a task to a different project."""
+    await _ensure_task_access(db, task_id, current_user.id)
+    await _ensure_project_access(db, new_project_id, current_user.id)
+    service = get_task_service(db)
+    try:
+        return await service.move_to_project(task_id, new_project_id)
+    except ProjectNotFoundError:
+        raise HTTPException(status_code=404, detail="Destination project not found")
 
 
 @router.delete("/{task_id}", status_code=204)

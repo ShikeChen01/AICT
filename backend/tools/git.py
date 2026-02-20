@@ -90,6 +90,32 @@ async def push_changes(agent_id: str, branch_name: str) -> str:
 
 
 @tool
+async def create_github_issue(agent_id: str, title: str, body: str = "") -> str:
+    """
+    Create a GitHub issue on the project repository.
+
+    Args:
+        agent_id: UUID of the agent (must have access to the project).
+        title: The issue title.
+        body: Optional issue body / description.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Agent).where(Agent.id == uuid.UUID(agent_id)))
+        agent = result.scalar_one_or_none()
+        if not agent:
+            return "Error: Agent not found."
+
+    try:
+        git = GitService(settings.code_repo_path)
+        issue = git.create_issue(title=title, body=body)
+        issue_url = issue.get("html_url", "")
+        issue_number = issue.get("number", "?")
+        return f"Issue #{issue_number} created: {issue_url}"
+    except GitOperationFailed as exc:
+        return f"Issue creation failed: {exc}"
+
+
+@tool
 async def create_pull_request(agent_id: str, source_branch: str) -> str:
     """
     Create a Pull Request from the source branch to main.

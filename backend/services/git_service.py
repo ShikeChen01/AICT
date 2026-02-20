@@ -223,6 +223,35 @@ class GitService:
             pr_url=pr_url,
         )
 
+    def create_issue(
+        self,
+        title: str,
+        body: str = "",
+        labels: list[str] | None = None,
+    ) -> dict:
+        """Create a GitHub issue on the repository."""
+        github_ready, repo_slug = self._github_ready()
+        if not (github_ready and repo_slug):
+            raise GitOperationFailed(
+                "GitHub token and remote origin are required to create issues"
+            )
+
+        payload: dict = {"title": title, "body": body}
+        if labels:
+            payload["labels"] = labels
+
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                f"{self.github_api_base_url}/repos/{repo_slug}/issues",
+                headers=self._github_headers(),
+                json=payload,
+            )
+            if resp.status_code not in (200, 201):
+                raise GitOperationFailed(
+                    f"GitHub issue creation failed: {resp.status_code} {resp.text}"
+                )
+            return resp.json()
+
     def merge_pr(
         self,
         agent_role: str,

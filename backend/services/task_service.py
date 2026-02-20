@@ -7,8 +7,8 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.exceptions import InvalidTaskStatus, TaskNotFoundError, AgentNotFoundError
-from backend.db.models import Agent, Task, VALID_TASK_STATUSES
+from backend.core.exceptions import InvalidTaskStatus, TaskNotFoundError, AgentNotFoundError, ProjectNotFoundError
+from backend.db.models import Agent, Task, VALID_TASK_STATUSES, Repository
 from backend.schemas.task import TaskCreate, TaskUpdate, TaskResponse
 
 
@@ -249,6 +249,24 @@ class TaskService:
             content="\n".join(summary),
             message_type="system",
         )
+
+    async def move_to_project(self, task_id: UUID, new_project_id: UUID) -> Task:
+        """Move a task to a different project."""
+        task = await self.get(task_id)
+
+        result = await self.session.execute(
+            select(Repository).where(Repository.id == new_project_id)
+        )
+        if result.scalar_one_or_none() is None:
+            raise ProjectNotFoundError(new_project_id)
+
+        task.project_id = new_project_id
+        await self.session.flush()
+        await self.session.refresh(task)
+
+        await self.ws_manager.broadcast_task_update(task)
+
+        return task
 
     async def delete(self, task_id: UUID) -> bool:
         """Delete a task."""

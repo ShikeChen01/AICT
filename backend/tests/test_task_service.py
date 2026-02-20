@@ -5,8 +5,8 @@ Tests for task service.
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.exceptions import InvalidTaskStatus, TaskNotFoundError, AgentNotFoundError
-from backend.db.models import Agent, Project, Task
+from backend.core.exceptions import InvalidTaskStatus, TaskNotFoundError, AgentNotFoundError, ProjectNotFoundError
+from backend.db.models import Agent, Project, Task, Repository
 from backend.core.constants import USER_AGENT_ID
 from backend.schemas.task import TaskCreate, TaskUpdate
 from backend.services.message_service import MessageService
@@ -227,3 +227,45 @@ class TestTaskService:
 
         tasks = await service.list_by_agent(sample_engineer.id)
         assert any(t.id == task.id for t in tasks)
+
+
+
+class TestMoveToProject:
+    """Tests for TaskService.move_to_project."""
+
+    @pytest.fixture
+    def service(self, session: AsyncSession):
+        return TaskService(session)
+
+    async def test_move_task_to_new_project(
+        self, service: TaskService, sample_task: Task, session: AsyncSession
+    ):
+        import uuid as _uuid
+        new_project = Repository(
+            id=_uuid.uuid4(),
+            name="Target Project",
+            spec_repo_path="/data/specs/target",
+            code_repo_url="https://github.com/test/target",
+            code_repo_path="/data/code/target",
+        )
+        session.add(new_project)
+        await session.flush()
+
+        moved = await service.move_to_project(sample_task.id, new_project.id)
+
+        assert moved.id == sample_task.id
+        assert moved.project_id == new_project.id
+
+    async def test_move_task_invalid_project(
+        self, service: TaskService, sample_task: Task
+    ):
+        import uuid as _uuid
+        with pytest.raises(ProjectNotFoundError):
+            await service.move_to_project(sample_task.id, _uuid.uuid4())
+
+    async def test_move_task_not_found(
+        self, service: TaskService
+    ):
+        import uuid as _uuid
+        with pytest.raises(TaskNotFoundError):
+            await service.move_to_project(_uuid.uuid4(), _uuid.uuid4())

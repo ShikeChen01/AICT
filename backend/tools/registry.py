@@ -5,12 +5,13 @@ Centralizes tool definitions to avoid circular imports between
 workflow.py and node implementations.
 """
 
-from backend.tools.git import commit_changes, create_branch, create_pull_request, push_changes
+from backend.tools.git import commit_changes, create_branch, create_github_issue, create_pull_request, push_changes
 from backend.tools.tasks import (
     assign_task,
     create_kanban_task,
     get_task_details,
     list_tasks,
+    move_task,
     update_task_status,
 )
 from backend.tools.agents import list_engineers, spawn_engineer
@@ -36,6 +37,7 @@ def get_manager_tools():
         assign_task,
         update_task_status,
         get_task_details,
+        move_task,
         spawn_engineer,
         list_engineers,
         sandbox_start_session,
@@ -58,6 +60,7 @@ def get_engineer_tools():
         commit_changes,
         push_changes,
         create_pull_request,
+        create_github_issue,
         update_task_status,
         get_task_details,
         sandbox_start_session,
