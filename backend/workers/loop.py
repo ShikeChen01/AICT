@@ -255,18 +255,20 @@ async def run_inner_loop(
         end_calls = [tc for tc in tool_calls if tc.get("name") == "end"]
         non_end_calls = [tc for tc in tool_calls if tc.get("name") != "end"]
         if end_calls and non_end_calls:
-            pa.append_end_solo_warning()
-            await agent_msg_repo.create_message(
-                agent_id=agent.id,
-                project_id=project.id,
-                role="tool",
-                content=pa.messages[-1]["content"],
-                loop_iteration=iteration,
-                session_id=session_id,
-                tool_name="end",
-                tool_input={"__tool_use_id__": "end-solo-rule"},
-                tool_output=pa.messages[-1]["content"],
-            )
+            for ec in end_calls:
+                end_use_id = ec.get("id") or "end-solo-rule"
+                pa.append_end_solo_warning(end_use_id)
+                await agent_msg_repo.create_message(
+                    agent_id=agent.id,
+                    project_id=project.id,
+                    role="tool",
+                    content=pa.messages[-1]["content"],
+                    loop_iteration=iteration,
+                    session_id=session_id,
+                    tool_name="end",
+                    tool_input={"__tool_use_id__": end_use_id},
+                    tool_output=pa.messages[-1]["content"],
+                )
 
         for tc in non_end_calls:
             name = tc.get("name", "")

@@ -297,9 +297,9 @@ class LLMService:
     ) -> tuple[str, list[dict[str, Any]]]:
         """Anthropic messages API with tool use."""
         model = self._require_model(model)
-        # Build request messages (user/assistant with optional tool_use; tool results)
         api_messages: list[dict] = []
         issued_tool_use_ids: set[str] = set()
+        resolved_tool_use_ids: set[str] = set()
         for m in messages:
             role = m.get("role")
             content = m.get("content", "")
@@ -325,20 +325,18 @@ class LLMService:
                         "input": tc.get("input") or {},
                     })
                     issued_tool_use_ids.add(tc_id)
-                # Anthropic rejects an empty content list; ensure at least a text block.
                 if not blocks:
                     blocks.append({"type": "text", "text": ""})
                 api_messages.append({"role": "assistant", "content": blocks})
             elif role == "tool":
                 tool_use_id = m.get("tool_use_id", "")
-                # Anthropic requires tool_result.tool_use_id to reference a prior tool_use id.
-                # Invalid/orphaned IDs can happen in legacy history rows; skip those blocks.
                 if not tool_use_id or tool_use_id not in issued_tool_use_ids:
                     logger.warning(
                         "Skipping orphan tool_result with unknown tool_use_id=%r",
                         tool_use_id,
                     )
                     continue
+                resolved_tool_use_ids.add(tool_use_id)
                 api_messages.append({
                     "role": "user",
                     "content": [{
@@ -347,6 +345,24 @@ class LLMService:
                         "content": str(m.get("content", "")),
                     }],
                 })
+
+        dangling = issued_tool_use_ids - resolved_tool_use_ids
+        if dangling:
+            logger.warning(
+                "Stripping %d dangling tool_use id(s) with no tool_result: %s",
+                len(dangling),
+                dangling,
+            )
+            for am in api_messages:
+                if am.get("role") != "assistant":
+                    continue
+                blocks = am.get("content", [])
+                am["content"] = [
+                    b for b in blocks
+                    if b.get("type") != "tool_use" or b.get("id") not in dangling
+                ]
+                if not am["content"]:
+                    am["content"] = [{"type": "text", "text": ""}]
 
         # Anthropic tools format
         api_tools = [

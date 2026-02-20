@@ -93,6 +93,7 @@ class AnthropicSDKProvider(BaseLLMProvider):
     ) -> tuple[list[dict[str, Any]], set[str]]:
         api_messages: list[dict[str, Any]] = []
         issued_tool_use_ids: set[str] = set()
+        resolved_tool_use_ids: set[str] = set()
         for msg in messages:
             if msg.role == "user":
                 api_messages.append(
@@ -133,6 +134,7 @@ class AnthropicSDKProvider(BaseLLMProvider):
                         tool_use_id,
                     )
                     continue
+                resolved_tool_use_ids.add(tool_use_id)
                 api_messages.append(
                     {
                         "role": "user",
@@ -145,5 +147,24 @@ class AnthropicSDKProvider(BaseLLMProvider):
                         ],
                     }
                 )
+
+        dangling = issued_tool_use_ids - resolved_tool_use_ids
+        if dangling:
+            logger.warning(
+                "Stripping %d dangling tool_use id(s) with no tool_result: %s",
+                len(dangling),
+                dangling,
+            )
+            for am in api_messages:
+                if am.get("role") != "assistant":
+                    continue
+                blocks = am.get("content", [])
+                am["content"] = [
+                    b for b in blocks
+                    if b.get("type") != "tool_use" or b.get("id") not in dangling
+                ]
+                if not am["content"]:
+                    am["content"] = [{"type": "text", "text": ""}]
+
         return api_messages, issued_tool_use_ids
 

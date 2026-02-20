@@ -177,6 +177,8 @@ class PromptAssembly:
             elif h.role == "tool":
                 candidate.append(self._build_history_tool(h))
 
+        candidate = self._repair_dangling_tool_use(candidate)
+
         # Enforce history budget: drop oldest messages first
         total_chars = sum(len(m.get("content") or "") for m in candidate)
         while total_chars > _HISTORY_BUDGET_CHARS and candidate:
@@ -233,6 +235,57 @@ class PromptAssembly:
             "tool_use_id": saved_id or "",
         }
 
+    @staticmethod
+    def _repair_dangling_tool_use(messages: list[dict]) -> list[dict]:
+        """Inject synthetic error tool_results for any tool_use IDs that lack
+        a matching tool_result in the history.
+
+        Without this, Anthropic returns 400: "tool_use ids were found without
+        tool_result blocks immediately after".  This happens when a session was
+        interrupted after persisting an assistant message but before all tool
+        results were saved (e.g. end_solo_warning with wrong ID, crash, etc.).
+        """
+        issued: dict[str, int] = {}
+        resolved: set[str] = set()
+
+        for idx, m in enumerate(messages):
+            if m.get("role") == "assistant":
+                for tc in m.get("tool_calls", []):
+                    tc_id = tc.get("id", "")
+                    if tc_id:
+                        issued[tc_id] = idx
+            elif m.get("role") == "tool":
+                uid = m.get("tool_use_id", "")
+                if uid:
+                    resolved.add(uid)
+
+        dangling = set(issued.keys()) - resolved
+        if not dangling:
+            return messages
+
+        logger.warning(
+            "Repairing %d dangling tool_use id(s) in history: %s",
+            len(dangling),
+            dangling,
+        )
+
+        patched: list[dict] = []
+        for idx, m in enumerate(messages):
+            patched.append(m)
+            if m.get("role") == "assistant":
+                for tc in m.get("tool_calls", []):
+                    tc_id = tc.get("id", "")
+                    if tc_id in dangling:
+                        patched.append({
+                            "role": "tool",
+                            "content": (
+                                f"[Session interrupted — tool '{tc.get('name', '?')}' "
+                                f"was never executed. Ignore this result.]"
+                            ),
+                            "tool_use_id": tc_id,
+                        })
+        return patched
+
     # ── In-flight mutations (called by the loop each iteration) ─────────
 
     def append_assistant(
@@ -273,13 +326,17 @@ class PromptAssembly:
         """Nudge the agent when it responds without calling any tools."""
         self.messages.append({"role": "user", "content": LOOPBACK_BLOCK})
 
-    def append_end_solo_warning(self) -> None:
-        """Warn agent that END must be called alone, not alongside other tools."""
+    def append_end_solo_warning(self, tool_use_id: str = "end-solo-rule") -> None:
+        """Warn agent that END must be called alone, not alongside other tools.
+
+        ``tool_use_id`` MUST be the real id from the end tool_call so the
+        Anthropic API sees a matching tool_result for every tool_use block.
+        """
         self.messages.append(
             {
                 "role": "tool",
                 "content": END_SOLO_WARNING_BLOCK,
-                "tool_use_id": "end-solo-rule",
+                "tool_use_id": tool_use_id,
             }
         )
 
