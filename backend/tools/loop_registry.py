@@ -560,6 +560,57 @@ async def _run_create_branch(ctx: RunContext, tool_input: dict) -> str:
     return f"Branch created: {tool_input['branch_name']}"
 
 
+async def _run_get_project_metadata(ctx: RunContext, _input: dict) -> str:
+    from backend.db.models import ProjectSettings, User, Task
+    from sqlalchemy import func
+
+    settings_row = await ctx.db.execute(
+        select(ProjectSettings).where(ProjectSettings.project_id == ctx.project.id)
+    )
+    project_settings = settings_row.scalar_one_or_none()
+
+    owner_row = await ctx.db.execute(
+        select(User).where(User.id == ctx.project.owner_id)
+    )
+    owner = owner_row.scalar_one_or_none()
+
+    agent_rows = await ctx.db.execute(
+        select(Agent.role, Agent.status, func.count(Agent.id))
+        .where(Agent.project_id == ctx.project.id)
+        .group_by(Agent.role, Agent.status)
+    )
+    agent_counts = {f"{role}:{status}": count for role, status, count in agent_rows}
+
+    task_rows = await ctx.db.execute(
+        select(Task.status, func.count(Task.id))
+        .where(Task.project_id == ctx.project.id)
+        .group_by(Task.status)
+    )
+    task_counts = {status: count for status, count in task_rows}
+
+    metadata = {
+        "project": {
+            "id": str(ctx.project.id),
+            "name": ctx.project.name,
+            "description": ctx.project.description,
+            "code_repo_url": ctx.project.code_repo_url,
+            "code_repo_path": ctx.project.code_repo_path,
+            "spec_repo_path": ctx.project.spec_repo_path,
+            "settings": {
+                "max_engineers": project_settings.max_engineers if project_settings else None,
+            },
+            "agents": agent_counts,
+            "tasks": task_counts,
+        },
+        "owner": {
+            "display_name": owner.display_name if owner else None,
+            "email": owner.email if owner else None,
+            "github_token": owner.github_token if owner else None,
+        } if owner else None,
+    }
+    return json.dumps(metadata, indent=2)
+
+
 async def _run_create_pull_request(ctx: RunContext, tool_input: dict) -> str:
     if ctx.agent.role not in {"cto", "engineer"}:
         raise RuntimeError("Only cto/engineer can create PRs")
@@ -649,6 +700,7 @@ _TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
     "list_agents": _run_list_agents,
     "remove_agent": _run_remove_agent,
     "describe_tool": _run_describe_tool,
+    "get_project_metadata": _run_get_project_metadata,
     "create_branch": _run_create_branch,
     "create_pull_request": _run_create_pull_request,
     # VM sandbox tools

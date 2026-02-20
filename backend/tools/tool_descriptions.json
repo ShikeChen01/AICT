@@ -774,5 +774,23 @@
       "cto",
       "engineer"
     ]
+  },
+  {
+    "name": "get_project_metadata",
+    "description": "Get project and owner metadata for the current project.",
+    "detailed_description": [
+      "Returns structured metadata about the current project and its owner.",
+      "Project metadata includes: name, description, repository paths, settings (max_engineers),",
+      "and live aggregate counts for agents (by role/status) and tasks (by status).",
+      "Owner metadata includes: display name, email, and the GitHub access token which agents",
+      "can use to authenticate git operations (clone, push, create PRs, etc.).",
+      "Use this at the start of a session to orient yourself to the project context."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "allowed_roles": ["*"]
   }
 ]
