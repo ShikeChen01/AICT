@@ -149,7 +149,7 @@ VALID_TASK_STATUSES = (
     "specifying",
     "assigned",
     "in_progress",
-    "in_review",
+    "review",
     "done",
     "aborted",
 )

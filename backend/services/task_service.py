@@ -13,13 +13,13 @@ from backend.schemas.task import TaskCreate, TaskUpdate, TaskResponse
 
 
 # Valid status transitions
-# backlog -> specifying -> assigned -> in_progress -> in_review -> done
+# backlog -> specifying -> assigned -> in_progress -> review -> done
 VALID_TRANSITIONS: dict[str, list[str]] = {
-    "backlog": ["specifying", "assigned"],  # Can skip specifying if simple task
+    "backlog": ["specifying", "assigned", "in_progress"],  # Can skip specifying/assigned if simple task
     "specifying": ["assigned", "backlog"],  # Can go back to backlog if not ready
     "assigned": ["in_progress", "backlog", "aborted"],  # Engineer picks up, demoted, or aborts
-    "in_progress": ["in_review", "assigned", "aborted"],  # Submit for review, back to assigned, or abort
-    "in_review": ["done", "in_progress"],  # Approved or needs more work
+    "in_progress": ["review", "assigned", "aborted"],  # Submit for review, back to assigned, or abort
+    "review": ["done", "in_progress"],  # Approved or needs more work
     "done": [],  # Terminal state
     "aborted": ["backlog"],  # Can re-assign from backlog
 }

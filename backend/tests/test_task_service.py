@@ -34,8 +34,8 @@ class TestStatusValidation:
     def test_valid_transitions(self):
         assert validate_transition("backlog", "specifying") is True
         assert validate_transition("backlog", "assigned") is True
-        assert validate_transition("in_progress", "in_review") is True
-        assert validate_transition("in_review", "done") is True
+        assert validate_transition("in_progress", "review") is True
+        assert validate_transition("review", "done") is True
 
     def test_invalid_transitions(self):
         assert validate_transition("backlog", "done") is False

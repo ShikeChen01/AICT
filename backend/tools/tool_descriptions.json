@@ -5,7 +5,7 @@
     "detailed_description": [
       "End the current session. Call this when you have completed all pending work,",
       "have no more actions to take, or have been explicitly asked to stop. Must be",
-      "called alone — no other tool calls in the same turn."
+      "called alone \u2014 no other tool calls in the same turn."
     ],
     "input_schema": {
       "type": "object",
@@ -21,7 +21,7 @@
     "detailed_description": [
       "Send a direct message to another agent or the user. Use for 1-on-1",
       "communication: task assignments, status updates, questions, or delivering",
-      "results. The target_agent_id must be a valid UUID — use list_agents to discover",
+      "results. The target_agent_id must be a valid UUID \u2014 use list_agents to discover",
       "agent IDs. To message the human user, use the user's agent UUID (provided in",
       "your context)."
     ],
@@ -150,7 +150,7 @@
     "name": "sleep",
     "description": "Sleep briefly and continue.",
     "detailed_description": [
-      "Pause execution for a specified number of seconds (0–3600). Use when waiting for",
+      "Pause execution for a specified number of seconds (0\u20133600). Use when waiting for",
       "an external process to complete, throttling operations, or when a deliberate",
       "delay is needed before checking status."
     ],
@@ -216,13 +216,13 @@
     "name": "execute_command",
     "description": "Execute shell command in your sandbox container.",
     "detailed_description": [
-      "*** PRIMARY TOOL — use creatively and boldly for any executable task. ***",
+      "*** PRIMARY TOOL \u2014 use creatively and boldly for any executable task. ***",
       "Runs a shell command inside your dedicated sandbox container (Ubuntu 22.04, full root access).",
       "This is your go-to tool for: running code, file operations, installing packages,",
       "running tests, git operations, HTTP requests (curl/wget), and more.",
       "",
       "Key behaviors:",
-      "- The sandbox persists across all calls — files, packages, env vars carry over.",
+      "- The sandbox persists across all calls \u2014 files, packages, env vars carry over.",
       "- Chain commands with && or write shell scripts for multi-step workflows.",
       "- If a command fails, read stderr carefully, fix the issue, and retry.",
       "- You can install any tool (apt-get / pip / npm); installs persist for the session.",
@@ -231,7 +231,7 @@
       "Timing:",
       "- Commands start executing immediately after sandbox_start_session returns.",
       "- Default timeout is 120s. For long builds, pass a higher timeout explicitly.",
-      "- If you see '[command timed out — no output received]', the sandbox may be",
+      "- If you see '[command timed out \u2014 no output received]', the sandbox may be",
       "  starting up or the command hung. Call sandbox_health() to diagnose, then retry."
     ],
     "input_schema": {
@@ -257,7 +257,7 @@
     "name": "start_sandbox",
     "description": "Alias for sandbox_start_session. Prefer sandbox_start_session.",
     "detailed_description": [
-      "Ensures your sandbox container is running. Idempotent — safe to call multiple times.",
+      "Ensures your sandbox container is running. Idempotent \u2014 safe to call multiple times.",
       "Prefer calling sandbox_start_session() directly."
     ],
     "input_schema": {
@@ -274,11 +274,11 @@
     "detailed_description": [
       "Allocate and start your dedicated sandbox container.",
       "Call this at the beginning of any session that needs execute_command, screenshot, or display access.",
-      "Idempotent — safe to call multiple times. Returns sandbox status and ID.",
+      "Idempotent \u2014 safe to call multiple times. Returns sandbox status and ID.",
       "",
       "Timing (measured on current hardware):",
       "- Cold start (new container): ~2-3 seconds. The tool BLOCKS until the container is",
-      "  healthy and accepting connections — you do NOT need to sleep or poll after it returns.",
+      "  healthy and accepting connections \u2014 you do NOT need to sleep or poll after it returns.",
       "- Warm reuse (idle container already in pool): ~0.1 seconds.",
       "",
       "After this returns, execute_command / sandbox_health / sandbox_screenshot are all",
@@ -321,7 +321,7 @@
       "Use when:",
       "- Verifying the sandbox is alive after a long-running command.",
       "- Diagnosing why execute_command returned no output (container may have crashed).",
-      "- NOT needed as a startup check — sandbox_start_session already waits for readiness."
+      "- NOT needed as a startup check \u2014 sandbox_start_session already waits for readiness."
     ],
     "input_schema": {
       "type": "object",
@@ -359,14 +359,17 @@
       "properties": {
         "x": {
           "type": "integer",
-          "description": "X coordinate (0–1024)"
+          "description": "X coordinate (0\u20131024)"
         },
         "y": {
           "type": "integer",
-          "description": "Y coordinate (0–768)"
+          "description": "Y coordinate (0\u2013768)"
         }
       },
-      "required": ["x", "y"]
+      "required": [
+        "x",
+        "y"
+      ]
     },
     "allowed_roles": [
       "*"
@@ -486,7 +489,7 @@
     "description": "Create a kanban task.",
     "detailed_description": [
       "Create a new task on the project kanban board (manager only). Set critical",
-      "(1–10) and urgent (1–10) to help prioritize. Tasks start in 'backlog' status.",
+      "(1\u201310) and urgent (1\u201310) to help prioritize. Tasks start in 'backlog' status.",
       "After creation, use assign_task to hand it to an engineer."
     ],
     "input_schema": {
@@ -545,8 +548,9 @@
     "description": "Update task status.",
     "detailed_description": [
       "Update a task's status (manager or engineer). Valid statuses: backlog,",
-      "in_progress, review, done, aborted. Engineers can only update tasks assigned to",
-      "them; managers can update any task."
+      "specifying, assigned, in_progress, review, done, aborted.",
+      "Lifecycle: backlog -> in_progress -> review -> done.",
+      "Engineers can only update tasks assigned to them; managers can update any task."
     ],
     "input_schema": {
       "type": "object",
@@ -555,7 +559,8 @@
           "type": "string"
         },
         "status": {
-          "type": "string"
+          "type": "string",
+          "description": "New status. Valid: backlog, specifying, assigned, in_progress, review, done, aborted"
         }
       },
       "required": [
@@ -642,7 +647,11 @@
         },
         "seniority": {
           "type": "string",
-          "enum": ["junior", "intermediate", "senior"]
+          "enum": [
+            "junior",
+            "intermediate",
+            "senior"
+          ]
         }
       },
       "required": [
@@ -676,7 +685,7 @@
     "description": "Permanently remove an engineer from the project.",
     "detailed_description": [
       "Permanently removes an engineer agent from the project (manager only). This is",
-      "NOT a temporary stop or interrupt — the agent is fully deleted: its worker is",
+      "NOT a temporary stop or interrupt \u2014 the agent is fully deleted: its worker is",
       "shut down, its sandbox is closed, its sessions and message history are erased,",
       "and its database record is removed. Any tasks the engineer had in progress are",
       "reset to backlog so they can be reassigned.",
@@ -699,9 +708,13 @@
           "description": "Optional reason for removal (logged for audit purposes)."
         }
       },
-      "required": ["agent_id"]
+      "required": [
+        "agent_id"
+      ]
     },
-    "allowed_roles": ["manager"]
+    "allowed_roles": [
+      "manager"
+    ]
   },
   {
     "name": "describe_tool",
@@ -791,6 +804,8 @@
       "properties": {},
       "required": []
     },
-    "allowed_roles": ["*"]
+    "allowed_roles": [
+      "*"
+    ]
   }
 ]
