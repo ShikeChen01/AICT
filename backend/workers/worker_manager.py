@@ -33,6 +33,7 @@ class WorkerManager:
         self._task_meta: dict[asyncio.Task, tuple[UUID, UUID]] = {}
         self._shutting_down = False
         self._started = False
+        self._removing: set[UUID] = set()
 
     def _track_worker(self, worker: AgentWorker, task: asyncio.Task) -> None:
         self._workers.append(worker)
@@ -56,7 +57,8 @@ class WorkerManager:
         agent_id, project_id = metadata
         self._workers = [worker for worker in self._workers if worker.agent_id != agent_id]
 
-        if self._shutting_down:
+        if self._shutting_down or agent_id in self._removing:
+            self._removing.discard(agent_id)
             return
 
         if task.cancelled():
@@ -151,6 +153,38 @@ class WorkerManager:
                 w.interrupt()
                 return
         logger.debug("No worker found for agent %s to interrupt", agent_id)
+
+    async def remove_worker(self, agent_id: UUID) -> None:
+        """Permanently stop a worker and prevent auto-respawn.
+
+        Marks the agent as being removed, interrupts its current session,
+        cancels the asyncio task, and deregisters its message queue.
+        Safe to call even if no worker exists for the given agent.
+        """
+        self._removing.add(agent_id)
+
+        worker = next((w for w in self._workers if w.agent_id == agent_id), None)
+        task = next(
+            (t for t, meta in self._task_meta.items() if meta[0] == agent_id), None
+        )
+
+        if worker is not None:
+            worker.interrupt()
+
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        self._workers = [w for w in self._workers if w.agent_id != agent_id]
+        self._tasks = [t for t in self._tasks if self._task_meta.get(t, (None,))[0] != agent_id]
+        self._task_meta = {t: meta for t, meta in self._task_meta.items() if meta[0] != agent_id}
+        self._removing.discard(agent_id)
+
+        get_message_router().unregister(agent_id)
+        logger.info("Removed worker for agent %s", agent_id)
 
 
 _worker_manager: WorkerManager | None = None

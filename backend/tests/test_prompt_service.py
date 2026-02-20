@@ -95,6 +95,7 @@ def test_system_prompt_block_order(sample_manager, sample_project) -> None:
 def test_append_tool_result() -> None:
     pa = PromptAssembly.__new__(PromptAssembly)
     pa.messages = []
+    pa._current_iteration_tool_result_chars = 0
     pa.append_tool_result("test_tool", "success output", "tid-1")
     assert len(pa.messages) == 1
     msg = pa.messages[0]
@@ -121,7 +122,7 @@ def test_append_end_solo_warning() -> None:
     assert len(pa.messages) == 1
     msg = pa.messages[0]
     assert msg["role"] == "tool"
-    assert "END was called with other tools" in msg["content"]
+    assert "END was called alongside other tools" in msg["content"]
     assert msg["tool_use_id"] == "end-solo-rule"
 
 
@@ -141,12 +142,16 @@ def test_all_block_files_loadable_and_non_empty() -> None:
     blocks_dir = Path(__file__).parent.parent / "prompts" / "blocks"
     expected_files = [
         "rules.md",
+        "history_rules.md",
+        "incoming_message_rules.md",
+        "tool_result_rules.md",
         "thinking.md",
         "tool_io_base.md",
         "tool_io_manager.md",
         "tool_io_cto.md",
         "tool_io_engineer.md",
         "loopback.md",
+        "end_solo_warning.md",
         "summarization.md",
         "memory_template.md",
         "identity_manager.md",

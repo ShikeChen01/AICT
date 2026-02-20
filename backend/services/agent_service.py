@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.core.exceptions import MaxEngineersReached, ProjectNotFoundError
-from backend.db.models import Agent, Repository, VALID_ROLES
+from backend.db.models import Agent, Repository, Task, VALID_ROLES
 from backend.llm.model_resolver import normalize_seniority, resolve_model
 
 
@@ -149,6 +149,43 @@ class AgentService:
             await self.session.refresh(cto)
 
         return manager, cto
+
+    async def remove_agent(self, agent_id: UUID, caller_project_id: UUID) -> Agent:
+        """Permanently remove an engineer agent from the project.
+
+        Validates the target is an engineer in the same project, resets any
+        active task assignments back to backlog, nulls the circular current_task_id
+        FK, then deletes the agent (cascades sessions and messages automatically).
+
+        Returns the removed agent's data before deletion.
+        Raises ValueError on any validation failure.
+        """
+        result = await self.session.execute(select(Agent).where(Agent.id == agent_id))
+        agent = result.scalar_one_or_none()
+
+        if agent is None:
+            raise ValueError(f"Agent {agent_id} not found.")
+        if agent.project_id != caller_project_id:
+            raise ValueError("Cannot remove an agent from a different project.")
+        if agent.role in ("manager", "cto"):
+            raise ValueError(f"Cannot remove a {agent.role} — only engineers can be removed.")
+
+        # Reset tasks assigned to this agent that are still actionable
+        await self.session.execute(
+            update(Task)
+            .where(
+                Task.assigned_agent_id == agent_id,
+                Task.status.in_(("todo", "in_progress")),
+            )
+            .values(assigned_agent_id=None, status="backlog")
+        )
+
+        # Break circular FK before deletion
+        agent.current_task_id = None
+        await self.session.flush()
+
+        await self.session.delete(agent)
+        return agent
 
     async def get_or_create_project_agents(
         self,

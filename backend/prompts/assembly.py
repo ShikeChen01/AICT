@@ -6,14 +6,29 @@ and tool definitions.  Every string the LLM reads is defined here or in the .md
 block files loaded by loader.py.  The agent loop creates one instance per session
 and calls mutation methods during iteration -- it never builds message dicts itself.
 
-Block ordering (system prompt):
-    Memory -> Rules -> Thinking -> Identity -> Tool IO
-Identity and Tool IO are placed last so they sit closest to the conversation,
-reinforcing the agent's role and available actions.
+System prompt block ordering (new):
+    Rules -> History Rules -> Incoming Message Rules -> Tool Result Rules
+    -> Tool IO -> Thinking -> Memory -> Identity
+
+Tool Schema is sent as the separate `tools` parameter, not concatenated into the
+system prompt string.
+
+Conversation message ordering:
+    History (last 5 sessions) -> Incoming messages -> Tool results
+    -> Conditional (loopback / end-solo warning / summarization)
+
+Token budget (character-based estimate, 1 token ≈ 4 chars):
+    System prompt (static):  ~7k tokens
+    Tool schemas:             ~3k tokens  (fixed, provider-generated)
+    Conversation budget:      ~190k tokens remaining of a 200k window
+      - History:              up to 60% of conversation budget (~114k tokens)
+      - Tool results:         up to 30% of conversation budget (~57k tokens)
+      - Incoming messages:    8000 tokens aggregate, 6000-word per-message cap
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from backend.db.models import Agent, Repository
@@ -23,23 +38,84 @@ from backend.prompts.builder import (
     get_tool_io_block,
 )
 from backend.prompts.loader import (
+    END_SOLO_WARNING_BLOCK,
+    HISTORY_RULES_BLOCK,
+    INCOMING_MESSAGE_RULES_BLOCK,
     LOOPBACK_BLOCK,
     RULES_BLOCK,
     SUMMARIZATION_BLOCK,
     THINKING_BLOCK,
+    TOOL_RESULT_RULES_BLOCK,
 )
 from backend.tools.loop_registry import get_tool_defs_for_role
 from backend.logging.my_logger import get_logger
 
 logger = get_logger(__name__)
 
+# ---------------------------------------------------------------------------
+# Token budget constants (character-based: 1 token ≈ 4 chars)
+# ---------------------------------------------------------------------------
+
+_CHARS_PER_TOKEN = 4
+_CONTEXT_WINDOW_TOKENS = 200_000
+_CONVERSATION_BUDGET_TOKENS = 190_000  # after system prompt + tool schemas
+
+_HISTORY_BUDGET_TOKENS = int(_CONVERSATION_BUDGET_TOKENS * 0.60)   # 114k
+_TOOL_RESULT_BUDGET_TOKENS = int(_CONVERSATION_BUDGET_TOKENS * 0.30)  # 57k
+_INCOMING_MSG_BUDGET_TOKENS = 8_000
+_INCOMING_MSG_PER_MSG_WORDS = 6_000
+
+_HISTORY_BUDGET_CHARS = _HISTORY_BUDGET_TOKENS * _CHARS_PER_TOKEN
+_TOOL_RESULT_BUDGET_CHARS = _TOOL_RESULT_BUDGET_TOKENS * _CHARS_PER_TOKEN
+_INCOMING_MSG_BUDGET_CHARS = _INCOMING_MSG_BUDGET_TOKENS * _CHARS_PER_TOKEN
+_INCOMING_MSG_PER_MSG_CHARS = _INCOMING_MSG_PER_MSG_WORDS * 5  # ~5 chars/word
+
 _LEGACY_TOOL_NAME_ALIASES: dict[str, str] = {
     "execute_command E2B": "execute_command",
 }
 
 
+# ---------------------------------------------------------------------------
+# BlockMeta — lightweight descriptor for every named block
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BlockMeta:
+    name: str
+    kind: str          # "system" | "conversation" | "conditional"
+    max_chars: int | None   # None = no per-block cap (governed by budget)
+    truncation: str    # "never" | "oldest_first" | "per_item"
+
+
+BLOCK_REGISTRY: dict[str, BlockMeta] = {
+    "rules":                BlockMeta("rules", "system", None, "never"),
+    "history_rules":        BlockMeta("history_rules", "system", None, "never"),
+    "incoming_msg_rules":   BlockMeta("incoming_msg_rules", "system", None, "never"),
+    "tool_result_rules":    BlockMeta("tool_result_rules", "system", None, "never"),
+    "tool_io":              BlockMeta("tool_io", "system", None, "never"),
+    "thinking":             BlockMeta("thinking", "system", None, "never"),
+    "memory":               BlockMeta("memory", "system", 10_000, "never"),
+    "identity":             BlockMeta("identity", "system", None, "never"),
+    "history":              BlockMeta("history", "conversation", _HISTORY_BUDGET_CHARS, "oldest_first"),
+    "incoming_messages":    BlockMeta("incoming_messages", "conversation", _INCOMING_MSG_BUDGET_CHARS, "oldest_first"),
+    "tool_result":          BlockMeta("tool_result", "conversation", _TOOL_RESULT_BUDGET_CHARS, "per_item"),
+    "loopback":             BlockMeta("loopback", "conditional", 400, "never"),
+    "end_solo_warning":     BlockMeta("end_solo_warning", "conditional", 400, "never"),
+    "summarization":        BlockMeta("summarization", "conditional", 2_000, "never"),
+}
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough token estimate: 1 token per 4 characters."""
+    return max(1, len(text) // _CHARS_PER_TOKEN)
+
+
+# ---------------------------------------------------------------------------
+# PromptAssembly
+# ---------------------------------------------------------------------------
+
 class PromptAssembly:
-    """Stateful prompt assembly -- owns system_prompt, messages, and tools
+    """Stateful prompt assembly — owns system_prompt, messages, and tools
     for the entire lifetime of one agent loop session."""
 
     def __init__(
@@ -56,11 +132,22 @@ class PromptAssembly:
         tool_io = get_tool_io_block(agent.role)
         memory = get_memory_block(memory_content)
 
-        self.system_prompt: str = (
-            f"{memory}\n\n{RULES_BLOCK}\n\n{THINKING_BLOCK}\n\n{identity}\n\n{tool_io}"
-        )
+        # New system prompt order:
+        # Rules -> History Rules -> Incoming Msg Rules -> Tool Result Rules
+        # -> Tool IO -> Thinking -> Memory -> Identity
+        self.system_prompt: str = "\n\n".join([
+            RULES_BLOCK,
+            HISTORY_RULES_BLOCK,
+            INCOMING_MESSAGE_RULES_BLOCK,
+            TOOL_RESULT_RULES_BLOCK,
+            tool_io,
+            THINKING_BLOCK,
+            memory,
+            identity,
+        ])
         self.tools: list[dict] = get_tool_defs_for_role(agent.role)
         self.messages: list[dict] = []
+        self._current_iteration_tool_result_chars: int = 0
 
     # ── Initial population ──────────────────────────────────────────────
 
@@ -73,21 +160,36 @@ class PromptAssembly:
     ) -> None:
         """Build messages from persisted DB history rows and new unread text.
 
-        ``known_tool_names`` is the set of tool names the current role can
-        dispatch (used to filter stale historical tool_calls).
+        ``history`` should already be ordered oldest-first and span at most the
+        last 5 sessions (the caller — loop.py — is responsible for fetching
+        the right rows).  We apply character-budget truncation here: if the
+        total history exceeds _HISTORY_BUDGET_CHARS we drop the oldest messages.
+
+        ``known_tool_names`` is used to filter stale historical tool_calls.
         """
+        # Build candidate message list from history rows
+        candidate: list[dict] = []
         for h in history:
             if h.role == "user":
-                self.messages.append({"role": "user", "content": h.content or ""})
+                candidate.append({"role": "user", "content": h.content or ""})
             elif h.role == "assistant":
-                self._append_history_assistant(h, known_tool_names)
+                candidate.append(self._build_history_assistant(h, known_tool_names))
             elif h.role == "tool":
-                self._append_history_tool(h)
+                candidate.append(self._build_history_tool(h))
+
+        # Enforce history budget: drop oldest messages first
+        total_chars = sum(len(m.get("content") or "") for m in candidate)
+        while total_chars > _HISTORY_BUDGET_CHARS and candidate:
+            dropped = candidate.pop(0)
+            total_chars -= len(dropped.get("content") or "")
+
+        self.messages.extend(candidate)
 
         if new_messages_text:
-            self.messages.append({"role": "user", "content": new_messages_text})
+            capped = self._cap_incoming_messages(new_messages_text)
+            self.messages.append({"role": "user", "content": capped})
 
-    def _append_history_assistant(self, h: object, known_tool_names: set[str]) -> None:
+    def _build_history_assistant(self, h: object, known_tool_names: set[str]) -> dict:
         saved_tool_calls = (
             (h.tool_input or {}).get("__tool_calls__") if h.tool_input else None
         )
@@ -119,15 +221,17 @@ class PromptAssembly:
                 )
             if normalized:
                 msg["tool_calls"] = normalized
-        self.messages.append(msg)
+        return msg
 
-    def _append_history_tool(self, h: object) -> None:
+    def _build_history_tool(self, h: object) -> dict:
         saved_id = (
             (h.tool_input or {}).get("__tool_use_id__") if h.tool_input else None
         )
-        self.messages.append(
-            {"role": "tool", "content": h.content or "", "tool_use_id": saved_id or ""}
-        )
+        return {
+            "role": "tool",
+            "content": h.content or "",
+            "tool_use_id": saved_id or "",
+        }
 
     # ── In-flight mutations (called by the loop each iteration) ─────────
 
@@ -139,23 +243,28 @@ class PromptAssembly:
         if tool_calls:
             msg["tool_calls"] = tool_calls
         self.messages.append(msg)
+        # Reset per-iteration tool result budget counter
+        self._current_iteration_tool_result_chars = 0
 
     def append_tool_result(
         self, name: str, result: str, tool_use_id: str
     ) -> None:
-        """Append a successful tool execution result."""
+        """Append a successful tool execution result (with budget enforcement)."""
+        result = self._enforce_tool_result_budget(result)
         self.messages.append(
             {"role": "tool", "content": result, "tool_use_id": tool_use_id}
         )
+        self._current_iteration_tool_result_chars += len(result)
 
     def append_tool_error(
         self, name: str, exc: Exception, tool_use_id: str
     ) -> None:
         """Append a tool execution failure."""
+        content = f"Tool '{name}' failed: {exc}"
         self.messages.append(
             {
                 "role": "tool",
-                "content": f"Tool '{name}' failed: {exc}",
+                "content": content,
                 "tool_use_id": tool_use_id,
             }
         )
@@ -169,13 +278,51 @@ class PromptAssembly:
         self.messages.append(
             {
                 "role": "tool",
-                "content": (
-                    "END was called with other tools and was ignored for this "
-                    "iteration. Call END alone."
-                ),
+                "content": END_SOLO_WARNING_BLOCK,
                 "tool_use_id": "end-solo-rule",
             }
         )
+
+    def append_summarization(self) -> None:
+        """Inject the summarization prompt when context budget hits threshold."""
+        self.messages.append({"role": "user", "content": SUMMARIZATION_BLOCK})
+
+    # ── Budget helpers ──────────────────────────────────────────────────
+
+    def _enforce_tool_result_budget(self, result: str) -> str:
+        """Cap result if adding it would exceed the per-iteration tool result budget."""
+        remaining = _TOOL_RESULT_BUDGET_CHARS - self._current_iteration_tool_result_chars
+        if len(result) <= remaining:
+            return result
+        if remaining <= 0:
+            return "[tool result omitted — iteration tool result budget exhausted]"
+        return result[:remaining] + "\n[output truncated — tool result budget reached]"
+
+    def _cap_incoming_messages(self, text: str) -> str:
+        """Enforce aggregate and per-message caps on incoming message text."""
+        lines = text.split("\n")
+        capped_lines: list[str] = []
+        total_chars = 0
+        for line in lines:
+            # Per-message word cap
+            if len(line) > _INCOMING_MSG_PER_MSG_CHARS:
+                line = line[:_INCOMING_MSG_PER_MSG_CHARS] + " [message truncated]"
+            # Aggregate budget
+            if total_chars + len(line) > _INCOMING_MSG_BUDGET_CHARS:
+                capped_lines.append("[older messages omitted — incoming message budget reached]")
+                break
+            capped_lines.append(line)
+            total_chars += len(line)
+        return "\n".join(capped_lines)
+
+    def context_used_chars(self) -> int:
+        """Rough total character count across all messages (for budget monitoring)."""
+        return sum(len(m.get("content") or "") for m in self.messages)
+
+    def context_pressure_ratio(self) -> float:
+        """Fraction of conversation budget consumed (0.0–1.0+)."""
+        budget_chars = _CONVERSATION_BUDGET_TOKENS * _CHARS_PER_TOKEN
+        return self.context_used_chars() / budget_chars
 
     # ── Message formatting helpers ──────────────────────────────────────
 
@@ -214,7 +361,7 @@ class PromptAssembly:
             chunks.append(f"[Message from System (system)]: {assignment_context}")
         return "\n".join(chunks).strip()
 
-    # ── Accessors for blocks needed outside the main flow ───────────────
+    # ── Accessors ───────────────────────────────────────────────────────
 
     @staticmethod
     def get_summarization_block() -> str:

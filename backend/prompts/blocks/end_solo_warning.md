@@ -1,0 +1,1 @@
+END was called alongside other tools in the same response and was ignored for this iteration. END must always be called alone. If you have remaining work, complete it first. Then call END by itself in a separate response.

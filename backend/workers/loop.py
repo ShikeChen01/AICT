@@ -123,7 +123,9 @@ async def run_inner_loop(
         unread, agent_by_id, USER_AGENT_ID, assignment_context,
     )
 
-    history = await agent_msg_repo.list_by_session(session_id, limit=500)
+    history = await agent_msg_repo.list_last_n_sessions(
+        agent.id, session_id, n_sessions=5
+    )
     memory_content = agent.memory
     if isinstance(memory_content, dict):
         memory_content = str(memory_content) if memory_content else None
@@ -173,10 +175,22 @@ async def run_inner_loop(
         model_override=agent.model,
     )
 
+    summarization_injected = False
+
     while iteration < MAX_ITERATIONS:
         if interrupt_flag():
             await session_service.end_session_force(session_id, "interrupted")
             return "interrupted"
+
+        # Inject summarization block when context pressure hits 70%
+        if not summarization_injected and pa.context_pressure_ratio() >= 0.70:
+            logger.info(
+                "Agent %s context pressure %.0f%% — injecting summarization block",
+                agent.id,
+                pa.context_pressure_ratio() * 100,
+            )
+            pa.append_summarization()
+            summarization_injected = True
 
         try:
             content, tool_calls = await llm.chat_completion_with_tools(
@@ -289,6 +303,10 @@ async def run_inner_loop(
             if emit_tool_result:
                 emit_tool_result(name, result_text)
             pa.append_tool_result(name, result_text, tool_use_id)
+            # After a successful update_memory, allow summarization to re-trigger
+            # if context pressure remains high after the agent writes its summary.
+            if name == "update_memory" and summarization_injected:
+                summarization_injected = False
             tool_input_stored = {"__tool_use_id__": tool_use_id, **tool_input}
             await agent_msg_repo.create_message(
                 agent_id=agent.id,

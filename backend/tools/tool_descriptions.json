@@ -94,24 +94,51 @@
   },
   {
     "name": "read_history",
-    "description": "Read persistent history.",
+    "description": "Read message history. Use session_id to query a specific past session.",
     "detailed_description": [
-      "Read your past messages from previous sessions. Useful for recovering context",
-      "after a restart, reviewing past decisions, or checking what you've communicated.",
-      "Results are ordered newest-first. Use limit/offset for pagination and session_id",
-      "to filter to a specific session."
+      "Read your message history. Without session_id, returns messages from the current",
+      "session (newest first). With session_id, returns messages from that specific session",
+      "(oldest first, grouped by session). Use list_sessions to discover session IDs.",
+      "Output format: [session:{short_id}] [{timestamp}] [{role}] {content}",
+      "Session boundary markers are inserted when results span multiple sessions."
     ],
     "input_schema": {
       "type": "object",
       "properties": {
         "limit": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Maximum number of messages to return (default: 20)"
         },
         "offset": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of messages to skip (for pagination)"
         },
         "session_id": {
-          "type": "string"
+          "type": "string",
+          "description": "UUID of a specific session to query. Get session IDs from list_sessions."
+        }
+      }
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "list_sessions",
+    "description": "List your past sessions. Use to discover session IDs for read_history.",
+    "detailed_description": [
+      "Returns your recent sessions ordered newest-first. Each row shows:",
+      "  {session_id} | {started_at} | {ended_at} | {status} | {message_count}",
+      "Use the session_id with read_history(session_id=...) to retrieve messages",
+      "from a specific session. Your current context already includes the last 5 sessions,",
+      "so use this tool only when you need to access older history."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "description": "Maximum number of sessions to return (default: 20)"
         }
       }
     },
@@ -643,6 +670,38 @@
       "manager",
       "cto"
     ]
+  },
+  {
+    "name": "remove_agent",
+    "description": "Permanently remove an engineer from the project.",
+    "detailed_description": [
+      "Permanently removes an engineer agent from the project (manager only). This is",
+      "NOT a temporary stop or interrupt — the agent is fully deleted: its worker is",
+      "shut down, its sandbox is closed, its sessions and message history are erased,",
+      "and its database record is removed. Any tasks the engineer had in progress are",
+      "reset to backlog so they can be reassigned.",
+      "",
+      "Use this when an engineer is no longer needed, was spawned by mistake, or must",
+      "be permanently replaced. Cannot be used to remove the manager or CTO.",
+      "",
+      "- agent_id: UUID of the engineer to remove (use list_agents to find it).",
+      "- reason: Optional explanation for the removal (logged for audit purposes)."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "agent_id": {
+          "type": "string",
+          "description": "UUID of the engineer agent to permanently remove."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Optional reason for removal (logged for audit purposes)."
+        }
+      },
+      "required": ["agent_id"]
+    },
+    "allowed_roles": ["manager"]
   },
   {
     "name": "describe_tool",

@@ -153,18 +153,81 @@ async def _run_read_history(ctx: RunContext, tool_input: dict) -> str:
     limit = int(tool_input.get("limit", 20))
     offset = int(tool_input.get("offset", 0))
     session_filter = parse_tool_uuid(tool_input, "session_id", required=False)
-    q = (
-        select(AgentMessage)
-        .where(AgentMessage.agent_id == ctx.agent.id)
-        .order_by(AgentMessage.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
+
     if session_filter is not None:
-        q = q.where(AgentMessage.session_id == session_filter)
+        q = (
+            select(AgentMessage)
+            .where(AgentMessage.agent_id == ctx.agent.id)
+            .where(AgentMessage.session_id == session_filter)
+            .order_by(AgentMessage.created_at.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+    else:
+        # Default: current session, newest first
+        q = (
+            select(AgentMessage)
+            .where(AgentMessage.agent_id == ctx.agent.id)
+            .where(AgentMessage.session_id == ctx.session_id)
+            .order_by(AgentMessage.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+
     res = await ctx.db.execute(q)
     rows = list(res.scalars().all())
-    return "\n".join(f"[{m.role}] {m.content}" for m in rows) or "No history."
+    if not rows:
+        return "No history."
+
+    # Group by session_id to insert boundary markers
+    lines: list[str] = []
+    current_session: object = None
+    for m in rows:
+        if m.session_id != current_session:
+            current_session = m.session_id
+            ts = m.created_at.strftime("%Y-%m-%d") if m.created_at else "unknown"
+            lines.append(f"--- Session {m.session_id} (started {ts}) ---")
+        ts_full = m.created_at.strftime("%Y-%m-%d %H:%M:%S") if m.created_at else ""
+        lines.append(f"[session:{str(m.session_id)[:8]}] [{ts_full}] [{m.role}] {m.content}")
+
+    return "\n".join(lines)
+
+
+async def _run_list_sessions(ctx: RunContext, tool_input: dict) -> str:
+    from backend.db.models import AgentSession
+    from sqlalchemy import func
+
+    limit = int(tool_input.get("limit", 20))
+
+    # Count messages per session
+    count_q = (
+        select(AgentMessage.session_id, func.count(AgentMessage.id).label("msg_count"))
+        .where(AgentMessage.agent_id == ctx.agent.id)
+        .group_by(AgentMessage.session_id)
+    )
+    count_res = await ctx.db.execute(count_q)
+    msg_counts: dict = {row[0]: row[1] for row in count_res.all()}
+
+    sessions_q = (
+        select(AgentSession)
+        .where(AgentSession.agent_id == ctx.agent.id)
+        .order_by(AgentSession.started_at.desc())
+        .limit(limit)
+    )
+    sess_res = await ctx.db.execute(sessions_q)
+    sessions = list(sess_res.scalars().all())
+
+    if not sessions:
+        return "No sessions."
+
+    lines: list[str] = []
+    for s in sessions:
+        started = s.started_at.strftime("%Y-%m-%d %H:%M:%S") if s.started_at else "?"
+        ended = s.ended_at.strftime("%Y-%m-%d %H:%M:%S") if s.ended_at else "running"
+        count = msg_counts.get(s.id, 0)
+        lines.append(f"{s.id} | {started} | {ended} | {s.status} | {count} messages")
+
+    return "\n".join(lines)
 
 
 async def _run_sleep(ctx: RunContext, tool_input: dict) -> str:
@@ -445,6 +508,46 @@ async def _run_list_agents(ctx: RunContext, tool_input: dict) -> str:
     return "\n".join(f"{a.id} | {a.display_name} | {a.role} | {a.status}" for a in rows)
 
 
+async def _run_remove_agent(ctx: RunContext, tool_input: dict) -> str:
+    if ctx.agent.role != "manager":
+        raise RuntimeError("Only manager can remove agents")
+
+    target_id = parse_tool_uuid(tool_input, "agent_id")
+    reason = str(tool_input.get("reason", "")).strip()
+
+    res = await ctx.db.execute(select(Agent).where(Agent.id == target_id))
+    target = res.scalar_one_or_none()
+    if target is None:
+        return f"Error: agent {target_id} not found."
+    if target.project_id != ctx.project.id:
+        return "Error: cannot remove an agent from a different project."
+    if target.role in ("manager", "cto"):
+        return f"Error: cannot remove a {target.role} — only engineers can be removed."
+
+    display_name = target.display_name
+
+    # Close sandbox before stopping the worker
+    if target.sandbox_id:
+        try:
+            svc = _get_sandbox_service()
+            await svc.close_sandbox(ctx.db, target)
+        except Exception as exc:
+            logger.warning("Failed to close sandbox for agent %s: %s", target_id, exc)
+
+    from backend.workers.worker_manager import get_worker_manager
+    await get_worker_manager().remove_worker(target_id)
+
+    removed = await ctx.agent_service.remove_agent(target_id, ctx.project.id)
+    await ctx.db.flush()
+
+    log_suffix = f" Reason: {reason}" if reason else ""
+    logger.info("Manager %s removed agent %s (%s).%s", ctx.agent.id, target_id, display_name, log_suffix)
+    return (
+        f"Agent '{display_name}' ({target_id}) has been permanently removed from the project."
+        f"{' Reason: ' + reason if reason else ''}"
+    )
+
+
 async def _run_create_branch(ctx: RunContext, tool_input: dict) -> str:
     if ctx.agent.role not in {"cto", "engineer"}:
         raise RuntimeError("Only cto/engineer can create branches")
@@ -529,6 +632,7 @@ _TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
     "broadcast_message": _run_broadcast_message,
     "update_memory": _run_update_memory,
     "read_history": _run_read_history,
+    "list_sessions": _run_list_sessions,
     "sleep": _run_sleep,
     "list_tasks": _run_list_tasks,
     "get_task_details": _run_get_task_details,
@@ -543,6 +647,7 @@ _TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
     "interrupt_agent": _run_interrupt_agent,
     "spawn_engineer": _run_spawn_engineer,
     "list_agents": _run_list_agents,
+    "remove_agent": _run_remove_agent,
     "describe_tool": _run_describe_tool,
     "create_branch": _run_create_branch,
     "create_pull_request": _run_create_pull_request,

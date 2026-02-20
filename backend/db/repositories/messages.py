@@ -162,6 +162,45 @@ class AgentMessageRepository(BaseRepository[AgentMessage]):
         )
         return list(result.scalars().all())
 
+    async def list_last_n_sessions(
+        self,
+        agent_id: UUID,
+        current_session_id: UUID,
+        n_sessions: int = 5,
+        messages_per_session: int = 500,
+    ) -> list[AgentMessage]:
+        """Messages from the last n sessions for this agent (including current),
+        ordered oldest-first so they replay in conversation order.
+
+        The current session is always included regardless of n_sessions count.
+        """
+        from backend.db.models import AgentSession
+
+        # Find the n most recent session IDs for this agent
+        session_result = await self.session.execute(
+            select(AgentSession.id)
+            .where(AgentSession.agent_id == agent_id)
+            .order_by(AgentSession.started_at.desc())
+            .limit(n_sessions)
+        )
+        session_ids = [row[0] for row in session_result.all()]
+
+        # Ensure current session is included
+        if current_session_id not in session_ids:
+            session_ids.append(current_session_id)
+
+        if not session_ids:
+            return []
+
+        result = await self.session.execute(
+            select(AgentMessage)
+            .where(AgentMessage.agent_id == agent_id)
+            .where(AgentMessage.session_id.in_(session_ids))
+            .order_by(AgentMessage.created_at.asc())
+            .limit(messages_per_session * n_sessions)
+        )
+        return list(result.scalars().all())
+
     async def create_message(
         self,
         agent_id: UUID,
