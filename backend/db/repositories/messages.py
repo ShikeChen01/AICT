@@ -22,6 +22,7 @@ class ChannelMessageRepository(BaseRepository[ChannelMessage]):
         *,
         from_agent_id: UUID | None = None,
         target_agent_id: UUID | None = None,
+        from_user_id: UUID | None = None,
         message_type: str = "normal",
         broadcast: bool = False,
     ) -> ChannelMessage:
@@ -29,6 +30,7 @@ class ChannelMessageRepository(BaseRepository[ChannelMessage]):
             project_id=project_id,
             from_agent_id=from_agent_id,
             target_agent_id=target_agent_id,
+            from_user_id=from_user_id,
             content=content,
             message_type=message_type,
             status="sent",

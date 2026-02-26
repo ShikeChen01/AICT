@@ -26,15 +26,15 @@ class MessageService:
         content: str,
         *,
         message_type: str = "normal",
+        from_user_id: UUID | None = None,
     ) -> "ChannelMessage":
         """Send a message from one agent to another (or user to agent). Writes to DB with status=sent."""
-        from backend.db.models import ChannelMessage
-
         msg = await self._channel_repo.create_message(
             project_id=project_id,
             content=content,
             from_agent_id=from_agent_id,
             target_agent_id=target_agent_id,
+            from_user_id=from_user_id,
             message_type=message_type,
             broadcast=False,
         )
@@ -45,13 +45,18 @@ class MessageService:
         target_agent_id: UUID,
         project_id: UUID,
         content: str,
+        user_id: UUID | None = None,
     ) -> "ChannelMessage":
-        """Send a message from the user (USER_AGENT_ID) to an agent."""
+        """Send a message from the user (USER_AGENT_ID) to an agent.
+
+        ``user_id`` is the real authenticated user FK for attribution (from_user_id).
+        """
         return await self.send(
             from_agent_id=USER_AGENT_ID,
             target_agent_id=target_agent_id,
             project_id=project_id,
             content=content,
+            from_user_id=user_id,
         )
 
     async def list_conversation(

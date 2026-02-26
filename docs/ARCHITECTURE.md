@@ -262,15 +262,23 @@ Loop forever:
 **Inner loop** (`run_inner_loop()`):
 ```
 Load unread channel messages for this agent
-If no unread messages AND no assignment context → end session (normal_end)
+If no unread messages AND no current task assignment → end session (normal_end)
 Mark messages as received
 
 Load last 5 sessions of agent_messages (history)
 Assemble PromptAssembly (system prompt + message history + incoming messages)
+Resolve model: role + seniority + model_override → model string
 
 While iteration < MAX_ITERATIONS (1000):
   If interrupt_flag → end session (interrupted)
-  If context_pressure >= 70% → inject summarization block
+
+  Every MID_LOOP_MSG_CHECK_INTERVAL (5) iterations:
+    Re-check unread messages from DB
+    If new messages found: mark received, inject into messages list
+
+  If context_pressure >= 70% AND not already injected:
+    Inject summarization block into messages
+    Set summarization_injected = True
   
   Call LLM (model, system_prompt, messages, tools)
   Save assistant message to agent_messages
@@ -283,11 +291,16 @@ While iteration < MAX_ITERATIONS (1000):
     Continue
   
   If tool_calls contains "end" AND other tools:
-    Strip "end", inject end_solo_warning, continue
+    Strip "end", inject end_solo_warning tool result (using real end tool_use_id)
+    Continue (do NOT break)
   
   For each non-end tool call:
     Look up handler by tool name
+    Validate tool input schema
     Execute handler (with RunContext)
+    Truncate result to tool result budget
+    If update_memory succeeds AND summarization was injected:
+      Reset summarization_injected = False (allows re-trigger)
     Save tool result to agent_messages
     Emit agent_tool_call + agent_tool_result WebSocket events
   
@@ -310,6 +323,8 @@ End session (max_iterations)
 
 ### LangGraph Orchestration Layer
 
+> **Technical debt** — the inner loop (`loop.py`) is the primary and preferred execution path for **all agents**. The LangGraph graph below is legacy infrastructure; it is inconsistent with the "DB is single source of truth" principle (ADR-001) and is a candidate for removal.
+
 The Manager and CTO agents additionally use a LangGraph `StateGraph` compiled with a checkpointer (`backend/graph/workflow.py`). This graph handles the **Manager↔CTO consultation flow**:
 
 ```
@@ -323,9 +338,9 @@ CTO node
   → Manager node               otherwise (returns response to manager)
 ```
 
-The `OrchestratorService.run_manager_graph()` method invokes this graph and extracts the final AI response. The graph uses either `AsyncPostgresSaver` (production) or `MemorySaver` (fallback) as a checkpointer, keyed by `project_id` as the thread ID.
+The `OrchestratorService.run_manager_graph()` method invokes this graph and extracts the final AI response. The graph uses either `AsyncPostgresSaver` (production, `GRAPH_PERSIST_POSTGRES=true`) or `MemorySaver` (fallback/default) as a checkpointer, keyed by `project_id` as the thread ID.
 
-The inner loop (`loop.py`) is the primary execution path for **all agents**. The LangGraph graph is used specifically by the `OrchestratorService` for Manager-level interactions triggered by the v1 messages API.
+The LangGraph graph is used specifically by the `OrchestratorService` for Manager-level interactions triggered by the v1 messages API. The universal `run_inner_loop()` does not use LangGraph.
 
 ---
 
@@ -333,17 +348,17 @@ The inner loop (`loop.py`) is the primary execution path for **all agents**. The
 
 ### Agent Roles
 
-| Role | Count | Created by | Model tier | Sandbox |
-|------|-------|------------|------------|---------|
-| `manager` | 1 per project | System (on repo create) | Highest (e.g., Claude Opus) | Persistent |
-| `cto` | 1 per project | System (on repo create) | Highest | Persistent |
-| `engineer` | 0–N per project | Manager (via `spawn_engineer` tool) | Configurable by seniority | Ephemeral |
+| Role | Count | Created by | Default model (env-configurable) | Sandbox |
+|------|-------|------------|----------------------------------|---------|
+| `manager` | 1 per project | System (on repo create) | `MANAGER_MODEL_DEFAULT` (e.g. `claude-sonnet-4-6`) | Persistent |
+| `cto` | 1 per project | System (on repo create) | `CTO_MODEL_DEFAULT` (e.g. `claude-opus-4-6`) | Persistent |
+| `engineer` | 0–N per project | Manager (via `spawn_engineer` tool) | `junior` → `ENGINEER_JUNIOR_MODEL`, `intermediate` → `ENGINEER_INTERMEDIATE_MODEL`, `senior` → `ENGINEER_SENIOR_MODEL` | Ephemeral |
 
 **Manager (GM)** is the user-facing orchestrator. It receives all user messages, plans work, creates tasks on the Kanban board, spawns engineers, assigns tasks, and relays results. It can consult the CTO for architectural decisions.
 
 **CTO** is the architecture expert. It is consulted by the Manager or engineers for system design decisions, technology choices, and complex debugging. It has no management authority — it does not spawn or assign engineers.
 
-**Engineers** are implementation workers. They receive assigned tasks, create git branches, write and test code, commit, push, and open pull requests. They report back to whoever assigned their task. The Manager can spawn up to `project_settings.max_engineers` engineers per project.
+**Engineers** are implementation workers. They receive assigned tasks, create git branches, write and test code, commit, push, and open pull requests. They report back to whoever assigned their task. The Manager can spawn up to `project_settings.max_engineers` engineers per project (falls back to global `MAX_ENGINEERS` env var if no project setting is set). The `model_override` field on an agent always takes priority over the role/seniority default.
 
 ---
 
@@ -434,7 +449,9 @@ History (last 5 sessions, oldest-first, budget-capped)
   - Tool results: 30% of conversation budget (~57k tokens)
   - Incoming messages: 8,000 tokens aggregate (6,000-word per-message cap)
 
-**Summarization trigger**: when conversation `context_pressure_ratio >= 0.70`, the loop injects the summarization block asking the agent to condense its context into `update_memory`. After a successful `update_memory`, the flag resets so summarization can trigger again if needed.
+**Summarization trigger**: when `context_pressure_ratio() >= 0.70` (total message chars / conversation budget chars), the loop injects the summarization block (once per trigger). After the agent responds with a successful `update_memory` tool call, `summarization_injected` resets to `False`, allowing the trigger to fire again if context pressure remains high.
+
+**History repair**: `_repair_dangling_tool_use()` detects tool_use IDs in history that have no matching tool_result (can happen after mid-session crash) and injects synthetic "session interrupted" tool_results. This prevents Anthropic 400 errors on resumption.
 
 ---
 
@@ -456,6 +473,15 @@ Tools are stateless async functions registered in `backend/tools/loop_registry.p
 | **Introspection** | `describe_tool` | All agents |
 
 **`end` tool enforcement**: If `end` is called alongside other tools in the same response, the loop strips `end`, executes all other tools, and injects an `end_solo_warning` tool result. The loop does not break. The agent must call `end` alone in a subsequent response.
+
+**Structured tool errors**: when a tool handler raises an exception, `PromptAssembly.append_tool_error()` formats a structured error result:
+```
+[Tool Error]
+tool: <name>
+error: <ExceptionType>: <message>
+next_action: Review the error above and retry with corrected parameters.
+             If the schema is unclear, call describe_tool('<name>') for full parameter details.
+```
 
 **Tool result budget**: each tool result is checked against a per-iteration budget (30% of conversation budget). Results exceeding the budget are truncated with a suffix indicating truncation.
 
@@ -509,7 +535,7 @@ PostgreSQL is the single source of truth for all state. No in-memory state persi
 - Worker loops: `AsyncSessionLocal()` context manager — one session per agent wake cycle
 - Services: receive session as a parameter, never create their own
 
-**Migrations:** Alembic, auto-run at startup via `run_startup_migrations()`. Migration files live in `backend/migrations/versions/`. Currently at migration `008` (added `agent_tier` column).
+**Migrations:** Alembic, auto-run at startup via `run_startup_migrations()` (configurable via `AUTO_RUN_MIGRATIONS_ON_STARTUP`). Migration files live in `backend/migrations/versions/`. Currently at migration `008` (added `agent_tier` column). Startup migration is a soft-fail — the backend continues to serve if migration times out or fails.
 
 ---
 
@@ -631,3 +657,45 @@ The frontend **Agent Inspector** reads from this data via:
 6. **Fail loudly for critical components, silently for non-critical** — the WorkerManager startup is a hard-fail (no agents = no value). Migrations and repo provisioning are soft-fail (backend can serve without them).
 
 7. **Provider agnosticism** — the LLM layer abstracts over Anthropic, Google, and OpenAI. The `ProviderRouter` selects the provider by model name; model strings are the only coupling point.
+
+---
+
+## Current State & Roadmap
+
+See `docs/todo.md` for the full phased roadmap. Summary of completion status as of 2026-02-25:
+
+### Phase 0 — Baseline correctness (COMPLETE)
+
+| Fix | File | Status |
+|-----|------|--------|
+| OpenAI/GPT SDK wiring via provider router | `backend/services/llm_service.py`, `backend/llm/` | Done |
+| Engineer `model_override` takes priority | `backend/llm/model_resolver.py` | Done |
+| Project-level `max_engineers` enforcement | `backend/services/agent_service.py` | Done |
+| Mid-session human messages visible to agent | `backend/workers/loop.py` (mid-loop check every 5 iter) | Done |
+| Structured tool error messages with `next_action` | `backend/prompts/assembly.py` | Done |
+| Prompt system hardening (block budgets, summarization hooks) | `backend/prompts/assembly.py` | Done |
+
+### Phases 1–10 — Not yet started
+
+| Phase | Goal |
+|-------|------|
+| 1 | Self-host PostgreSQL on VM to cut Cloud SQL cost |
+| 2 | Multi-user access + repository membership model |
+| 3 | Project-level model selection + prompt overrides (frontend-driven) |
+| 4 | API limit monitor + token usage safeguards |
+| 5 | Kimi 2.5 integration (cheap provider) |
+| 6 | Image/attachment end-to-end (binary in DB, multimodal LLM calls) |
+| 7 | Streaming + messaging upgrades (structured WS events, chat semantics) |
+| 8 | Subagent pattern + async tooling safety model |
+| 9 | Sandbox image upgrades + pressure tests |
+| 10 | Per-project typed document store (arc42, C4, ADRs) |
+
+### Known Technical Debt
+
+| Item | Impact |
+|------|--------|
+| LangGraph checkpointer for Manager-CTO graph | Inconsistent with ADR-001; candidate for removal |
+| `Project = Repository` alias in models | Naming confusion |
+| `graph_persist_postgres` defaults to `False` | MemorySaver loses checkpoints on restart |
+| No API rate limiting | Cost risk at scale |
+| Sandbox containers lose file state on backend restart | Mitigated by `PROVISION_REPOS_ON_STARTUP` re-clone |

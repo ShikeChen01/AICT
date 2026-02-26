@@ -9,23 +9,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.auth import get_current_user
-from backend.db.models import AgentSession, Repository, User
+from backend.core.project_access import require_project_access
+from backend.db.models import AgentSession, User
 from backend.db.session import get_db
 from backend.schemas.session import AgentMessageResponse, AgentSessionResponse
 from backend.services.session_service import get_session_service
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
-
-
-async def _ensure_project_access(db: AsyncSession, project_id: UUID, user_id: UUID) -> None:
-    result = await db.execute(
-        select(Repository).where(
-            Repository.id == project_id,
-            (Repository.owner_id == user_id) | (Repository.owner_id.is_(None)),
-        )
-    )
-    if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Project not found")
 
 
 @router.get("", response_model=list[AgentSessionResponse])
@@ -38,7 +28,7 @@ async def list_sessions(
     db: AsyncSession = Depends(get_db),
 ):
     """List sessions for a project, optionally filtered by agent. Most recent first."""
-    await _ensure_project_access(db, project_id, current_user.id)
+    await require_project_access(db, project_id, current_user.id)
     service = get_session_service(db)
     sessions = await service.list_by_project(
         project_id=project_id,
@@ -60,7 +50,7 @@ async def get_session(
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    await _ensure_project_access(db, session.project_id, current_user.id)
+    await require_project_access(db, session.project_id, current_user.id)
     return AgentSessionResponse.model_validate(session)
 
 
@@ -77,7 +67,7 @@ async def get_session_messages(
     session = result.scalar_one_or_none()
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    await _ensure_project_access(db, session.project_id, current_user.id)
+    await require_project_access(db, session.project_id, current_user.id)
     service = get_session_service(db)
     messages = await service.get_session_messages(
         session_id=session_id,

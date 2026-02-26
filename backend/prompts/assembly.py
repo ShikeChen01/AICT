@@ -114,6 +114,9 @@ def estimate_tokens(text: str) -> int:
 # PromptAssembly
 # ---------------------------------------------------------------------------
 
+_PROMPT_OVERRIDE_MAX_CHARS = 2_000  # ~500 tokens cap for project prompt override
+
+
 class PromptAssembly:
     """Stateful prompt assembly — owns system_prompt, messages, and tools
     for the entire lifetime of one agent loop session."""
@@ -123,6 +126,8 @@ class PromptAssembly:
         agent: Agent,
         project: Repository,
         memory_content: str | None,
+        *,
+        prompt_overrides: dict | None = None,
     ) -> None:
         self._agent = agent
         self._project = project
@@ -132,10 +137,13 @@ class PromptAssembly:
         tool_io = get_tool_io_block(agent.role)
         memory = get_memory_block(memory_content)
 
-        # New system prompt order:
+        # Phase 3: project-level prompt override (role-specific, length-capped)
+        override_block = self._build_prompt_override(agent.role, prompt_overrides or {})
+
+        # System prompt block order:
         # Rules -> History Rules -> Incoming Msg Rules -> Tool Result Rules
-        # -> Tool IO -> Thinking -> Memory -> Identity
-        self.system_prompt: str = "\n\n".join([
+        # -> Tool IO -> Thinking -> Memory -> Identity [-> Project Override]
+        blocks = [
             RULES_BLOCK,
             HISTORY_RULES_BLOCK,
             INCOMING_MESSAGE_RULES_BLOCK,
@@ -144,7 +152,11 @@ class PromptAssembly:
             THINKING_BLOCK,
             memory,
             identity,
-        ])
+        ]
+        if override_block:
+            blocks.append(override_block)
+
+        self.system_prompt: str = "\n\n".join(blocks)
         self.tools: list[dict] = get_tool_defs_for_role(agent.role)
         self.messages: list[dict] = []
         self._current_iteration_tool_result_chars: int = 0
@@ -312,8 +324,17 @@ class PromptAssembly:
     def append_tool_error(
         self, name: str, exc: Exception, tool_use_id: str
     ) -> None:
-        """Append a tool execution failure."""
-        content = f"Tool '{name}' failed: {exc}"
+        """Append a tool execution failure with structured, actionable content."""
+        error_type = type(exc).__name__
+        error_detail = str(exc)
+        content = (
+            f"[Tool Error]\n"
+            f"tool: {name}\n"
+            f"error: {error_type}: {error_detail}\n"
+            f"next_action: Review the error above and retry with corrected parameters. "
+            f"If the schema is unclear, call describe_tool('{name}') for full parameter details."
+        )
+        content = self._enforce_tool_result_budget(content)
         self.messages.append(
             {
                 "role": "tool",
@@ -321,6 +342,7 @@ class PromptAssembly:
                 "tool_use_id": tool_use_id,
             }
         )
+        self._current_iteration_tool_result_chars += len(content)
 
     def append_loopback(self) -> None:
         """Nudge the agent when it responds without calling any tools."""
@@ -424,3 +446,19 @@ class PromptAssembly:
     def get_summarization_block() -> str:
         """Return the summarization prompt (injected at ~70% context capacity)."""
         return SUMMARIZATION_BLOCK
+
+    @staticmethod
+    def _build_prompt_override(role: str | None, overrides: dict) -> str:
+        """Build the project-level prompt override block for injection into the system prompt.
+
+        Looks up the role key (e.g. 'manager', 'cto', 'engineer').
+        Returns an empty string if no override is set.
+        Caps content at ``_PROMPT_OVERRIDE_MAX_CHARS`` to prevent prompt stuffing.
+        """
+        role_norm = (role or "").strip().lower()
+        text = str(overrides.get(role_norm) or "").strip()
+        if not text:
+            return ""
+        if len(text) > _PROMPT_OVERRIDE_MAX_CHARS:
+            text = text[:_PROMPT_OVERRIDE_MAX_CHARS] + "\n[project prompt override truncated]"
+        return f"## Project-specific instructions\n\n{text}"

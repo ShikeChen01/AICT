@@ -1,11 +1,15 @@
 """
 LLM service for manager responses.
 
-Supports Anthropic and Google Gemini with provider auto-selection.
+Supports Anthropic, Google Gemini, and OpenAI with provider auto-selection.
+All providers route through the CloudLLMFacade/ProviderRouter when
+``llm_use_legacy_http`` is False (the default). Legacy direct-HTTP paths are
+kept for backward compatibility but are not the recommended code path.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from typing import Any
 
@@ -14,6 +18,9 @@ import httpx
 from backend.config import settings
 from backend.llm.cloud_facade import CloudLLMFacade
 from backend.logging.my_logger import get_logger
+
+# Matches OpenAI o-series models: o1, o3, o4-mini, o1-mini, o3-pro, etc.
+_OPENAI_O_SERIES_RE = re.compile(r"^o\d")
 
 logger = get_logger(__name__)
 
@@ -45,13 +52,10 @@ class LLMService:
         system_prompt = self._build_system_prompt(project_context or {})
         messages = self._build_messages(history, user_message)
 
-        # Keep Gemini on direct API calls from the service layer.
-        if provider == "google":
-            return await self._call_google(model, system_prompt, messages)
-
         if provider == "none":
             raise RuntimeError(
-                "No LLM provider configured. Set CLAUDE_API_KEY or GEMINI_API_KEY."
+                "No LLM provider configured. "
+                "Set CLAUDE_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY."
             )
 
         if not settings.llm_use_legacy_http:
@@ -73,10 +77,14 @@ class LLMService:
                 raise RuntimeError("LLM response did not contain text content")
             return text
 
+        # Legacy direct-HTTP paths
+        if provider == "google":
+            return await self._call_google(model, system_prompt, messages)
         if provider == "anthropic":
             return await self._call_anthropic(model, system_prompt, messages)
         raise RuntimeError(
-            "No LLM provider configured. Set CLAUDE_API_KEY or GEMINI_API_KEY."
+            f"Provider '{provider}' is not supported in legacy HTTP mode. "
+            "Set LLM_USE_LEGACY_HTTP=false to use the facade for all providers."
         )
 
     @staticmethod
@@ -88,11 +96,22 @@ class LLMService:
         if "gemini" in normalized or "google" in normalized:
             if settings.gemini_api_key:
                 return "google"
+        if (
+            "gpt" in normalized
+            or "chatgpt" in normalized
+            or "openai" in normalized
+            or _OPENAI_O_SERIES_RE.match(normalized)
+        ):
+            if settings.openai_api_key:
+                return "openai"
 
+        # No keyword match — fall back to whichever API key is configured
         if settings.claude_api_key:
             return "anthropic"
         if settings.gemini_api_key:
             return "google"
+        if settings.openai_api_key:
+            return "openai"
         return "none"
 
     @staticmethod
@@ -239,25 +258,25 @@ class LLMService:
         system_prompt: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
-    ) -> tuple[str, list[dict[str, Any]]]:
+    ) -> tuple[str, list[dict[str, Any]], Any]:
         """
         Non-streaming chat with tool support. Used by the universal agent loop.
         messages: list of {role, content} or {role, content, tool_calls} / {role, role: "tool", content, tool_use_id}
         tools: list of {name, description, input_schema}
-        Returns (content_text, tool_calls) where tool_calls is list of {id, name, input}.
+        Returns (content_text, tool_calls, llm_response) where:
+          - content_text: str
+          - tool_calls: list of {id, name, input}
+          - llm_response: LLMResponse (carries input_tokens, output_tokens, provider, model)
         """
+        from backend.llm.contracts import LLMResponse as _LLMResponse
+
         model = self._require_model(model)
         provider = self._select_provider(model)
 
-        # Keep Gemini on direct API calls from the service layer.
-        if provider == "google":
-            return await self._call_google_with_tools(
-                model, system_prompt, messages, tools
-            )
-
         if provider == "none":
             raise RuntimeError(
-                "No LLM provider configured. Set CLAUDE_API_KEY or GEMINI_API_KEY."
+                "No LLM provider configured. "
+                "Set CLAUDE_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY."
             )
 
         if not settings.llm_use_legacy_http:
@@ -269,24 +288,32 @@ class LLMService:
                 provider=provider,
             )
             logger.info(
-                "LLM facade response: provider=%s model=%s request_id=%s tool_calls=%d",
+                "LLM facade response: provider=%s model=%s request_id=%s tool_calls=%d in=%d out=%d",
                 response.provider,
                 response.model,
                 response.request_id,
                 len(response.tool_calls),
+                response.input_tokens,
+                response.output_tokens,
             )
-            return response.text, [
+            tool_calls = [
                 {"id": tc.id, "name": tc.name, "input": tc.input}
                 for tc in response.tool_calls
             ]
+            return response.text, tool_calls, response
 
-        if provider == "anthropic":
-            return await self._call_anthropic_with_tools(
-                model, system_prompt, messages, tools
+        # Legacy direct-HTTP paths — wrap result in a minimal LLMResponse stub
+        if provider == "google":
+            text, calls = await self._call_google_with_tools(model, system_prompt, messages, tools)
+        elif provider == "anthropic":
+            text, calls = await self._call_anthropic_with_tools(model, system_prompt, messages, tools)
+        else:
+            raise RuntimeError(
+                f"Provider '{provider}' is not supported in legacy HTTP mode. "
+                "Set LLM_USE_LEGACY_HTTP=false to use the facade for all providers."
             )
-        raise RuntimeError(
-            "No LLM provider configured. Set CLAUDE_API_KEY or GEMINI_API_KEY."
-        )
+        stub = _LLMResponse(text=text, provider=provider, model=model)
+        return text, calls, stub
 
     async def _call_anthropic_with_tools(
         self,

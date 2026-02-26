@@ -107,12 +107,14 @@ def test_append_tool_result() -> None:
 def test_append_tool_error() -> None:
     pa = PromptAssembly.__new__(PromptAssembly)
     pa.messages = []
+    pa._current_iteration_tool_result_chars = 0
     pa.append_tool_error("bad_tool", RuntimeError("boom"), "tid-2")
     assert len(pa.messages) == 1
     msg = pa.messages[0]
     assert msg["role"] == "tool"
-    assert "Tool 'bad_tool' failed:" in msg["content"]
+    assert "bad_tool" in msg["content"]
     assert "boom" in msg["content"]
+    assert "next_action" in msg["content"]
 
 
 def test_append_end_solo_warning() -> None:

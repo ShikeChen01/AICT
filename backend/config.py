@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     manager_model_default: str = "claude-sonnet-4-6"
     cto_model_default: str = "claude-opus-4-6"
-    engineer_junior_model: str = "gpt-5.2-2025-12-11"
+    engineer_junior_model: str = "gpt-5.2"
     engineer_intermediate_model: str = "claude-sonnet-4-6"
     engineer_senior_model: str = "claude-opus-4-6"
     llm_request_timeout_seconds: int = Field(default=60, ge=5, le=300)

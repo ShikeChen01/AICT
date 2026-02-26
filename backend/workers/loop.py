@@ -9,7 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.constants import USER_AGENT_ID
 from backend.db.models import Agent, Repository, Task
+from backend.db.repositories.llm_usage import LLMUsageRepository
 from backend.db.repositories.messages import AgentMessageRepository
+from backend.db.repositories.project_settings import ProjectSettingsRepository
 from backend.llm.model_resolver import resolve_model
 from backend.prompts.assembly import PromptAssembly
 from backend.services.agent_service import AgentService
@@ -30,6 +32,8 @@ logger = get_logger(__name__)
 
 MAX_ITERATIONS = 1000
 MAX_LOOPBACKS = 3
+# Check for new human messages every N iterations while the loop is running
+MID_LOOP_MSG_CHECK_INTERVAL = 5
 
 
 async def _send_fallback_message(
@@ -131,7 +135,17 @@ async def run_inner_loop(
     if isinstance(memory_content, dict):
         memory_content = str(memory_content) if memory_content else None
 
-    pa = PromptAssembly(agent, project, memory_content)
+    # Phase 3: load project-level model + prompt overrides
+    ps_repo = ProjectSettingsRepository(db)
+    project_settings = await ps_repo.get_by_project(project.id)
+    model_overrides = (project_settings.model_overrides or {}) if project_settings else {}
+    prompt_overrides = (project_settings.prompt_overrides or {}) if project_settings else {}
+    daily_token_budget = (project_settings.daily_token_budget or 0) if project_settings else 0
+
+    # Phase 4: usage repo for token tracking
+    usage_repo = LLMUsageRepository(db)
+
+    pa = PromptAssembly(agent, project, memory_content, prompt_overrides=prompt_overrides)
     pa.load_history(
         history,
         new_messages_text,
@@ -174,6 +188,7 @@ async def run_inner_loop(
         agent.role,
         seniority=getattr(agent, "tier", None),
         model_override=agent.model,
+        project_model_overrides=model_overrides,
     )
 
     summarization_injected = False
@@ -182,6 +197,32 @@ async def run_inner_loop(
         if interrupt_flag():
             await session_service.end_session_force(session_id, "interrupted")
             return "interrupted"
+
+        # Re-check for new human messages every MID_LOOP_MSG_CHECK_INTERVAL iterations.
+        # This ensures the agent sees user input sent after the session started.
+        if iteration > 0 and iteration % MID_LOOP_MSG_CHECK_INTERVAL == 0:
+            mid_loop_unread = await message_service.get_unread_for_agent(agent.id)
+            if mid_loop_unread:
+                await message_service.mark_received([m.id for m in mid_loop_unread])
+                mid_loop_text = PromptAssembly.format_incoming_messages(
+                    mid_loop_unread, agent_by_id, USER_AGENT_ID
+                )
+                capped = pa._cap_incoming_messages(mid_loop_text)
+                pa.messages.append({"role": "user", "content": capped})
+                await agent_msg_repo.create_message(
+                    agent_id=agent.id,
+                    project_id=project.id,
+                    role="user",
+                    content=capped,
+                    loop_iteration=iteration,
+                    session_id=session_id,
+                )
+                logger.info(
+                    "Agent %s mid-loop: injected %d new message(s) at iteration %d",
+                    agent.id,
+                    len(mid_loop_unread),
+                    iteration,
+                )
 
         # Inject summarization block when context pressure hits 70%
         if not summarization_injected and pa.context_pressure_ratio() >= 0.70:
@@ -193,8 +234,27 @@ async def run_inner_loop(
             pa.append_summarization()
             summarization_injected = True
 
+        # Phase 4: daily token budget enforcement
+        if daily_token_budget > 0:
+            tokens_today = await usage_repo.daily_tokens_for_project(project.id)
+            if tokens_today >= daily_token_budget:
+                logger.warning(
+                    "Agent %s: daily token budget (%d) exhausted (%d used) — ending session",
+                    agent.id, daily_token_budget, tokens_today,
+                )
+                await session_service.end_session_force(session_id, "budget_exhausted")
+                await _send_fallback_message(
+                    message_service,
+                    agent,
+                    project,
+                    f"This project's daily token budget ({daily_token_budget:,} tokens) has been "
+                    "reached. Agents will resume after midnight UTC.",
+                    emit_agent_message,
+                )
+                return "budget_exhausted"
+
         try:
-            content, tool_calls = await llm.chat_completion_with_tools(
+            content, tool_calls, llm_response = await llm.chat_completion_with_tools(
                 model=resolved_model,
                 system_prompt=pa.system_prompt,
                 messages=pa.messages,
@@ -212,6 +272,21 @@ async def run_inner_loop(
                 emit_agent_message,
             )
             return "error"
+
+        # Phase 4: record token usage
+        try:
+            await usage_repo.record(
+                project_id=project.id,
+                agent_id=agent.id,
+                session_id=session_id,
+                provider=llm_response.provider,
+                model=llm_response.model,
+                input_tokens=llm_response.input_tokens,
+                output_tokens=llm_response.output_tokens,
+                request_id=llm_response.request_id,
+            )
+        except Exception as exc:
+            logger.warning("Failed to record LLM usage event: %s", exc)
 
         iteration += 1
         await session_service.increment_iteration(session_id)

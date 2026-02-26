@@ -2,8 +2,8 @@
 SQLAlchemy models for AICT.
 
 Target schema per docs/db.md:
-- users, repositories, project_settings, agents, tasks
-- channel_messages, agent_messages, agent_sessions
+- users, repositories, repository_memberships, project_settings, agents, tasks
+- channel_messages, agent_messages, agent_sessions, llm_usage_events
 """
 
 import uuid
@@ -47,6 +47,7 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
     repositories = relationship("Repository", back_populates="owner")
+    memberships = relationship("RepositoryMembership", back_populates="user", cascade="all, delete-orphan")
 
 
 # ── Repositories ────────────────────────────────────────────────────
@@ -74,10 +75,43 @@ class Repository(Base):
     channel_messages = relationship(
         "ChannelMessage", back_populates="project", cascade="all, delete-orphan"
     )
+    memberships = relationship(
+        "RepositoryMembership", back_populates="repository", cascade="all, delete-orphan"
+    )
 
 
 # Backwards compatibility
 Project = Repository
+
+
+# ── Repository Memberships ───────────────────────────────────────────
+
+
+VALID_MEMBERSHIP_ROLES = ("owner", "member", "viewer")
+
+
+class RepositoryMembership(Base):
+    """Tracks which users have access to which repositories and their role."""
+
+    __tablename__ = "repository_memberships"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    repository_id = Column(
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id = Column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    role = Column(String(50), nullable=False, default="member")  # owner | member | viewer
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    repository = relationship("Repository", back_populates="memberships")
+    user = relationship("User", back_populates="memberships")
+
+    __table_args__ = (
+        Index("ix_repo_memberships_repo_user", "repository_id", "user_id", unique=True),
+        Index("ix_repo_memberships_user", "user_id"),
+    )
 
 
 # ── Project Settings (NEW) ──────────────────────────────────────────
@@ -95,6 +129,13 @@ class ProjectSettings(Base):
     )
     max_engineers = Column(Integer, default=5, nullable=False)
     persistent_sandbox_count = Column(Integer, default=1, nullable=False)
+    # Phase 3: per-project model and prompt overrides
+    model_overrides = Column(JSON, nullable=True)
+    # e.g. {"manager": "claude-opus-4-6", "engineer_junior": "gpt-5.2"}
+    prompt_overrides = Column(JSON, nullable=True)
+    # e.g. {"manager": "Always respond in English.", "engineer": "Focus on unit tests."}
+    # Phase 4: daily token budget (0 = unlimited)
+    daily_token_budget = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
@@ -202,6 +243,10 @@ class ChannelMessage(Base):
     )
     from_agent_id = Column(Uuid, nullable=True)  # NULL = system; user = USER_AGENT_ID
     target_agent_id = Column(Uuid, nullable=True)  # NULL = broadcast
+    # Phase 2: real user FK for attribution (set when sent from REST API; NULL for agent-to-agent)
+    from_user_id = Column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     content = Column(Text, nullable=False)
     message_type = Column(String(20), default="normal", nullable=False)  # 'normal', 'system'
     status = Column(String(20), default="sent", nullable=False)  # 'sent', 'received'
@@ -284,4 +329,39 @@ class AgentMessage(Base):
     __table_args__ = (
         Index("ix_agent_messages_agent_time", "agent_id", "created_at"),
         Index("ix_agent_messages_session", "session_id", "loop_iteration"),
+    )
+
+
+# ── LLM Usage Events (Phase 4) ──────────────────────────────────────
+
+
+class LLMUsageEvent(Base):
+    """One row per LLM API call. Used for cost attribution and daily budget enforcement."""
+
+    __tablename__ = "llm_usage_events"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    )
+    agent_id = Column(
+        Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
+    )
+    session_id = Column(
+        Uuid, ForeignKey("agent_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    user_id = Column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    provider = Column(String(50), nullable=False)   # anthropic | google | openai
+    model = Column(String(100), nullable=False)
+    input_tokens = Column(Integer, nullable=False, default=0)
+    output_tokens = Column(Integer, nullable=False, default=0)
+    request_id = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_llm_usage_project_time", "project_id", "created_at"),
+        Index("ix_llm_usage_agent", "agent_id"),
+        Index("ix_llm_usage_session", "session_id"),
     )

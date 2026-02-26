@@ -50,6 +50,8 @@ class LLMResponse:
     model: str = ""
     request_id: str | None = None
     raw: Any = None
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class LLMProviderError(RuntimeError):

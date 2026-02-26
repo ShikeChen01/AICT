@@ -7,12 +7,12 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.core.auth import get_current_user
-from backend.core.exceptions import ProjectNotFoundError
+from backend.core.project_access import add_owner_membership, require_project_access
 from backend.db.models import Agent, Repository, User
 from backend.db.session import get_db
 from backend.db.repositories.project_settings import ProjectSettingsRepository
@@ -53,12 +53,17 @@ async def list_repositories(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from backend.db.models import RepositoryMembership
     result = await db.execute(
         select(Repository)
         .where(
-            or_(
-                Repository.owner_id == current_user.id,
-                Repository.owner_id.is_(None),
+            (Repository.owner_id.is_(None))
+            | (
+                Repository.id.in_(
+                    select(RepositoryMembership.repository_id).where(
+                        RepositoryMembership.user_id == current_user.id
+                    )
+                )
             )
         )
         .order_by(Repository.created_at.desc())
@@ -73,18 +78,7 @@ async def get_repository(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Repository).where(
-            Repository.id == repository_id,
-            or_(
-                Repository.owner_id == current_user.id,
-                Repository.owner_id.is_(None),
-            ),
-        )
-    )
-    repository = result.scalar_one_or_none()
-    if not repository:
-        raise ProjectNotFoundError(repository_id)
+    repository = await require_project_access(db, repository_id, current_user.id)
     return _repository_to_response(repository)
 
 
@@ -165,6 +159,9 @@ async def create_repository(
     db.add(manager)
     db.add(cto)
 
+    await db.flush()
+    await add_owner_membership(db, repository_id, current_user.id)
+
     await db.commit()
     await db.refresh(repository)
     logger.info("Created repository: %s (%s)", repository.id, repository.name)
@@ -244,6 +241,9 @@ async def import_repository(
     db.add(manager)
     db.add(cto)
 
+    await db.flush()
+    await add_owner_membership(db, repository_id, current_user.id)
+
     await db.commit()
     await db.refresh(repository)
 
@@ -262,18 +262,7 @@ async def update_repository(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Repository).where(
-            Repository.id == repository_id,
-            or_(
-                Repository.owner_id == current_user.id,
-                Repository.owner_id.is_(None),
-            ),
-        )
-    )
-    repository = result.scalar_one_or_none()
-    if not repository:
-        raise ProjectNotFoundError(repository_id)
+    repository = await require_project_access(db, repository_id, current_user.id)
 
     if data.name is not None:
         repository.name = data.name
@@ -294,23 +283,12 @@ async def get_repository_settings(
     db: AsyncSession = Depends(get_db),
 ):
     """Get project settings for a repository."""
-    result = await db.execute(
-        select(Repository).where(
-            Repository.id == repository_id,
-            or_(
-                Repository.owner_id == current_user.id,
-                Repository.owner_id.is_(None),
-            ),
-        )
-    )
-    repository = result.scalar_one_or_none()
-    if not repository:
-        raise ProjectNotFoundError(repository_id)
+    await require_project_access(db, repository_id, current_user.id)
     repo_settings = ProjectSettingsRepository(db)
-    settings = await repo_settings.get_or_create_defaults(repository_id)
+    ps = await repo_settings.get_or_create_defaults(repository_id)
     await db.commit()
-    await db.refresh(settings)
-    return ProjectSettingsResponse.model_validate(settings)
+    await db.refresh(ps)
+    return ProjectSettingsResponse.model_validate(ps)
 
 
 @router.patch("/{repository_id}/settings", response_model=ProjectSettingsResponse)
@@ -321,27 +299,37 @@ async def update_repository_settings(
     db: AsyncSession = Depends(get_db),
 ):
     """Update project settings."""
-    result = await db.execute(
-        select(Repository).where(
-            Repository.id == repository_id,
-            or_(
-                Repository.owner_id == current_user.id,
-                Repository.owner_id.is_(None),
-            ),
-        )
-    )
-    repository = result.scalar_one_or_none()
-    if not repository:
-        raise ProjectNotFoundError(repository_id)
+    await require_project_access(db, repository_id, current_user.id)
     repo_settings = ProjectSettingsRepository(db)
-    settings = await repo_settings.get_or_create_defaults(repository_id)
+    ps = await repo_settings.get_or_create_defaults(repository_id)
     if data.max_engineers is not None:
-        settings.max_engineers = data.max_engineers
+        ps.max_engineers = data.max_engineers
     if data.persistent_sandbox_count is not None:
-        settings.persistent_sandbox_count = data.persistent_sandbox_count
+        ps.persistent_sandbox_count = data.persistent_sandbox_count
+    if data.model_overrides is not None:
+        ps.model_overrides = data.model_overrides
+    if data.prompt_overrides is not None:
+        ps.prompt_overrides = data.prompt_overrides
+    if data.daily_token_budget is not None:
+        ps.daily_token_budget = data.daily_token_budget
     await db.commit()
-    await db.refresh(settings)
-    return ProjectSettingsResponse.model_validate(settings)
+    await db.refresh(ps)
+    return ProjectSettingsResponse.model_validate(ps)
+
+
+@router.get("/{repository_id}/usage")
+async def get_repository_usage(
+    repository_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Phase 4: today's token usage rollup + recent 50 LLM calls."""
+    await require_project_access(db, repository_id, current_user.id)
+    from backend.db.repositories.llm_usage import LLMUsageRepository
+    usage_repo = LLMUsageRepository(db)
+    rollup = await usage_repo.daily_rollup(repository_id)
+    recent = await usage_repo.usage_summary(repository_id, limit=50)
+    return {"today": rollup, "recent_calls": recent}
 
 
 @router.delete("/{repository_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -350,18 +338,9 @@ async def delete_repository(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Repository).where(
-            Repository.id == repository_id,
-            or_(
-                Repository.owner_id == current_user.id,
-                Repository.owner_id.is_(None),
-            ),
-        )
+    repository = await require_project_access(
+        db, repository_id, current_user.id, owner_only=True
     )
-    repository = result.scalar_one_or_none()
-    if not repository:
-        raise ProjectNotFoundError(repository_id)
 
     # Remove workers for all agents in the project before deleting them.
     from backend.workers.worker_manager import get_worker_manager

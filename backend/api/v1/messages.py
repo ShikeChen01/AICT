@@ -6,13 +6,12 @@ POST /messages/send (202), GET /messages (conversation), GET /messages/all (acti
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.auth import get_current_user
-from backend.core.exceptions import ProjectNotFoundError
-from backend.db.models import Repository, User
+from backend.core.project_access import require_project_access
+from backend.db.models import User
 from backend.db.session import get_db
 from backend.logging.my_logger import get_logger
 from backend.schemas.message import ChannelMessageResponse, ChannelMessageSend
@@ -21,21 +20,6 @@ from backend.services.message_service import get_message_service
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/messages", tags=["messages"])
-
-
-async def _ensure_project_access(
-    db: AsyncSession, project_id: UUID, user_id: UUID
-) -> None:
-    """Raise if project is not accessible to the user (owner or unowned)."""
-    result = await db.execute(
-        select(Repository).where(
-            Repository.id == project_id,
-            (Repository.owner_id == user_id) | (Repository.owner_id.is_(None)),
-        )
-    )
-    repo = result.scalar_one_or_none()
-    if not repo:
-        raise ProjectNotFoundError(project_id)
 
 
 @router.post(
@@ -52,12 +36,13 @@ async def send_message(
     Send a message from the user to an agent. Fire-and-forget (202).
     The agent wakes up if sleeping; response arrives via WebSocket.
     """
-    await _ensure_project_access(db, body.project_id, current_user.id)
+    await require_project_access(db, body.project_id, current_user.id)
     service = get_message_service(db)
     msg = await service.send_user_to_agent(
         target_agent_id=body.target_agent_id,
         project_id=body.project_id,
         content=body.content,
+        user_id=current_user.id,
     )
     await db.commit()
     logger.info(
@@ -90,7 +75,7 @@ async def list_conversation(
     db: AsyncSession = Depends(get_db),
 ):
     """Messages between the user and a specific agent (conversation view)."""
-    await _ensure_project_access(db, project_id, current_user.id)
+    await require_project_access(db, project_id, current_user.id)
     service = get_message_service(db)
     messages = await service.list_conversation(
         project_id=project_id, agent_id=agent_id, limit=limit, offset=offset
@@ -107,7 +92,7 @@ async def list_all_messages(
     db: AsyncSession = Depends(get_db),
 ):
     """All messages to/from the user in the project (activity view)."""
-    await _ensure_project_access(db, project_id, current_user.id)
+    await require_project_access(db, project_id, current_user.id)
     service = get_message_service(db)
     messages = await service.list_all_user_messages(
         project_id=project_id, limit=limit, offset=offset

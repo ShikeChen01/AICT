@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.config import settings
 from backend.core.exceptions import MaxEngineersReached, ProjectNotFoundError
 from backend.db.models import Agent, Repository, Task, VALID_ROLES
+from backend.db.repositories.project_settings import ProjectSettingsRepository
 from backend.llm.model_resolver import normalize_seniority, resolve_model
 
 
@@ -70,7 +71,13 @@ class AgentService:
         Raises MaxEngineersReached if the project already has max_engineers.
         """
         count = await self.count_by_role(project_id, "engineer")
-        limit = settings.max_engineers
+        ps_repo = ProjectSettingsRepository(self.session)
+        project_settings = await ps_repo.get_by_project(project_id)
+        limit = (
+            project_settings.max_engineers
+            if project_settings is not None
+            else settings.max_engineers
+        )
         if count >= limit:
             raise MaxEngineersReached(limit)
 

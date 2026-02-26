@@ -136,13 +136,32 @@ export interface AgentMessageLog {
   created_at: string;
 }
 
-// ─── Project Settings (NEW) ────────────────────────────────────────────
+// ─── Project Settings ─────────────────────────────────────────────────
+
+export interface ModelOverrides {
+  manager?: string;
+  cto?: string;
+  engineer_junior?: string;
+  engineer_intermediate?: string;
+  engineer_senior?: string;
+}
+
+export interface PromptOverrides {
+  manager?: string;
+  cto?: string;
+  engineer?: string;
+}
 
 export interface ProjectSettings {
   id: UUID;
   project_id: UUID;
   max_engineers: number;
   persistent_sandbox_count: number;
+  // Phase 3
+  model_overrides: ModelOverrides | null;
+  prompt_overrides: PromptOverrides | null;
+  // Phase 4
+  daily_token_budget: number;
   created_at: string;
   updated_at: string;
 }
@@ -150,6 +169,58 @@ export interface ProjectSettings {
 export interface ProjectSettingsUpdate {
   max_engineers?: number;
   persistent_sandbox_count?: number;
+  // Phase 3
+  model_overrides?: ModelOverrides | null;
+  prompt_overrides?: PromptOverrides | null;
+  // Phase 4
+  daily_token_budget?: number;
+}
+
+// ─── LLM Usage (Phase 4) ─────────────────────────────────────────────
+
+export interface LLMUsageByModel {
+  provider: string;
+  model: string;
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+export interface LLMUsageRollup {
+  date_utc: string;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_tokens: number;
+  by_model: LLMUsageByModel[];
+}
+
+export interface LLMUsageCall {
+  id: UUID;
+  provider: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  agent_id: UUID | null;
+  session_id: UUID | null;
+  created_at: string;
+}
+
+export interface ProjectUsageResponse {
+  today: LLMUsageRollup;
+  recent_calls: LLMUsageCall[];
+}
+
+// ─── Repository Memberships (Phase 2) ────────────────────────────────
+
+export type MembershipRole = 'owner' | 'member' | 'viewer';
+
+export interface RepositoryMembership {
+  id: UUID;
+  repository_id: UUID;
+  user_id: UUID;
+  role: MembershipRole;
+  created_at: string;
 }
 
 // ─── Channel Messages (NEW — user-to-agent) ───────────────────────────
@@ -161,6 +232,7 @@ export interface ChannelMessage {
   project_id: UUID;
   from_agent_id: UUID | null;
   target_agent_id: UUID | null;
+  from_user_id: UUID | null;  // Phase 2: real user attribution
   content: string;
   message_type: ChannelMessageType;
   status: 'sent' | 'received';

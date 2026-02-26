@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.auth import get_current_user
 from backend.core.exceptions import AgentNotFoundError
-from backend.db.models import Agent, Repository, Task, User
+from backend.core.project_access import require_project_access
+from backend.db.models import Agent, Task, User
 from backend.db.session import get_db
 from backend.schemas.agent import (
     AgentContextResponse,
@@ -29,23 +30,12 @@ from backend.services.message_service import get_message_service
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 
-async def _ensure_project_access(db: AsyncSession, project_id: UUID, user_id: UUID) -> None:
-    result = await db.execute(
-        select(Repository).where(
-            Repository.id == project_id,
-            (Repository.owner_id == user_id) | (Repository.owner_id.is_(None)),
-        )
-    )
-    if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-
 async def _ensure_agent_access(db: AsyncSession, agent_id: UUID, user_id: UUID) -> Agent:
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
         raise AgentNotFoundError(agent_id)
-    await _ensure_project_access(db, agent.project_id, user_id)
+    await require_project_access(db, agent.project_id, user_id)
     return agent
 
 
@@ -57,7 +47,7 @@ async def list_agents(
 ):
     """List all agents for a project (ordered by role: manager, cto, engineer)."""
     if isinstance(current_user, User):
-        await _ensure_project_access(db, project_id, current_user.id)
+        await require_project_access(db, project_id, current_user.id)
     role_order = case(
         (Agent.role == "manager", 0),
         (Agent.role == "cto", 1),
@@ -84,7 +74,7 @@ async def list_agent_status(
     pending_message_count = unread (status=sent) channel messages for that agent.
     """
     if isinstance(current_user, User):
-        await _ensure_project_access(db, project_id, current_user.id)
+        await require_project_access(db, project_id, current_user.id)
     role_order = case(
         (Agent.role == "manager", 0),
         (Agent.role == "cto", 1),
@@ -174,7 +164,7 @@ async def spawn_engineer(
 
     Enforces max_engineers limit (default 5). Raises 400 if limit reached.
     """
-    await _ensure_project_access(db, data.project_id, current_user.id)
+    await require_project_access(db, data.project_id, current_user.id)
     service = get_agent_service(db)
     agent = await service.spawn_engineer(
         data.project_id,

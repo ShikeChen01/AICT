@@ -142,6 +142,7 @@ class GeminiProviderAdapter(BaseLLMProvider):
                     )
                 )
 
+        usage_meta = data.get("usageMetadata") or {}
         return LLMResponse(
             text="\n".join(p for p in text_parts if p).strip(),
             tool_calls=tool_calls,
@@ -149,5 +150,7 @@ class GeminiProviderAdapter(BaseLLMProvider):
             model=request.model,
             request_id=None,
             raw=data,
+            input_tokens=int(usage_meta.get("promptTokenCount") or 0),
+            output_tokens=int(usage_meta.get("candidatesTokenCount") or 0),
         )
 

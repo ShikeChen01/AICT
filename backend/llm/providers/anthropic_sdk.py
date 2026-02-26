@@ -79,6 +79,7 @@ class AnthropicSDKProvider(BaseLLMProvider):
                         )
                     )
 
+        usage = getattr(resp, "usage", None)
         return LLMResponse(
             text="\n".join(p for p in text_parts if p).strip(),
             tool_calls=tool_calls,
@@ -86,6 +87,8 @@ class AnthropicSDKProvider(BaseLLMProvider):
             model=request.model,
             request_id=getattr(resp, "_request_id", None),
             raw=resp,
+            input_tokens=getattr(usage, "input_tokens", 0) or 0,
+            output_tokens=getattr(usage, "output_tokens", 0) or 0,
         )
 
     def _build_messages(

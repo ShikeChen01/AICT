@@ -11,7 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.auth import get_current_user
-from backend.db.models import Repository, Task, User
+from backend.core.project_access import require_project_access
+from backend.db.models import Task, User
 from backend.db.session import get_db
 from backend.schemas.task import TaskCreate, TaskUpdate, TaskResponse
 from backend.services.task_service import get_task_service
@@ -19,23 +20,12 @@ from backend.services.task_service import get_task_service
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
-async def _ensure_project_access(db: AsyncSession, project_id: UUID, user_id: UUID) -> None:
-    result = await db.execute(
-        select(Repository).where(
-            Repository.id == project_id,
-            (Repository.owner_id == user_id) | (Repository.owner_id.is_(None)),
-        )
-    )
-    if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-
 async def _ensure_task_access(db: AsyncSession, task_id: UUID, user_id: UUID) -> Task:
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    await _ensure_project_access(db, task.project_id, user_id)
+    await require_project_access(db, task.project_id, user_id)
     return task
 
 
@@ -48,7 +38,7 @@ async def list_tasks(
     db: AsyncSession = Depends(get_db),
 ):
     """List tasks for a project with optional filters."""
-    await _ensure_project_access(db, project_id, current_user.id)
+    await require_project_access(db, project_id, current_user.id)
     service = get_task_service(db)
 
     if agent_id:
@@ -81,7 +71,7 @@ async def create_task(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new task."""
-    await _ensure_project_access(db, project_id, current_user.id)
+    await require_project_access(db, project_id, current_user.id)
     service = get_task_service(db)
     return await service.create(project_id, data)
 

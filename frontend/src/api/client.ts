@@ -20,6 +20,7 @@ import type {
   AgentWakeResponse,
   ProjectSettings,
   ProjectSettingsUpdate,
+  ProjectUsageResponse,
   Repository,
   UserProfile,
   WSEvent,
@@ -236,6 +237,12 @@ export async function updateProjectSettings(
   data: ProjectSettingsUpdate
 ): Promise<ProjectSettings> {
   return request<ProjectSettings>(`PATCH`, `/repositories/${repositoryId}/settings`, data);
+}
+
+// ─── Project Usage (Phase 4) ─────────────────────────────────────────
+
+export async function getProjectUsage(repositoryId: string): Promise<ProjectUsageResponse> {
+  return request<ProjectUsageResponse>('GET', `/repositories/${repositoryId}/usage`);
 }
 
 // ─── Tasks ───────────────────────────────────────────────────────────
