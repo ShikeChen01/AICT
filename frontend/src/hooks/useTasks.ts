@@ -24,7 +24,7 @@ const TASK_STATUSES: TaskStatus[] = [
   'specifying',
   'assigned',
   'in_progress',
-  'in_review',
+  'review',
   'done',
   'aborted',
 ];
@@ -94,7 +94,7 @@ export function useTasks(projectId: string | null): UseTasksReturn {
       specifying: [],
       assigned: [],
       in_progress: [],
-      in_review: [],
+      review: [],
       done: [],
       aborted: [],
     };

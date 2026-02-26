@@ -14,7 +14,7 @@ export type TaskStatus =
   | 'specifying'
   | 'assigned'
   | 'in_progress'
-  | 'in_review'
+  | 'review'
   | 'done'
   | 'aborted';
 

@@ -82,7 +82,7 @@ async def update_task_status(task_id: str, status: str) -> str:
 
     Args:
         task_id: UUID of the task.
-        status: One of backlog/specifying/assigned/in_progress/in_review/done.
+        status: One of backlog/specifying/assigned/in_progress/review/done/aborted.
     """
     async with AsyncSessionLocal() as session:
         service = TaskService(session)

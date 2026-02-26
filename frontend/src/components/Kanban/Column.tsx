@@ -19,7 +19,7 @@ const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; bgColor:
   specifying: { label: 'Specifying', color: 'text-purple-700', bgColor: 'bg-purple-100' },
   assigned: { label: 'Assigned', color: 'text-blue-700', bgColor: 'bg-blue-100' },
   in_progress: { label: 'In Progress', color: 'text-amber-700', bgColor: 'bg-amber-100' },
-  in_review: { label: 'In Review', color: 'text-cyan-700', bgColor: 'bg-cyan-100' },
+  review: { label: 'In Review', color: 'text-cyan-700', bgColor: 'bg-cyan-100' },
   done: { label: 'Done', color: 'text-green-700', bgColor: 'bg-green-100' },
   aborted: { label: 'Aborted', color: 'text-red-700', bgColor: 'bg-red-100' },
 };
