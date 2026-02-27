@@ -9,12 +9,9 @@ _env_file = ".env.development" if _env == "development" else ".env"
 
 
 class Settings(BaseSettings):
-    # Database — use DATABASE_URL directly, or build from components
+    # Database
     database_url: str = "postgresql+asyncpg://aict:aict@localhost:5432/aict"
-    db_user: str = ""
-    db_password: str = ""
-    db_name: str = ""
-    db_socket_path: str = ""  # e.g. /cloudsql/project:region:instance
+    db_ssl_mode: str = "disable"  # "disable" (local dev) | "require" (VM)
 
     # Auth
     api_token: str = "change-me-in-production"
@@ -25,6 +22,8 @@ class Settings(BaseSettings):
     claude_api_key: str = ""
     gemini_api_key: str = ""
     openai_api_key: str = ""
+    moonshot_api_key: str = ""
+    moonshot_base_url: str = "https://api.moonshot.cn/v1"
     manager_model_default: str = "claude-sonnet-4-6"
     cto_model_default: str = "claude-opus-4-6"
     engineer_junior_model: str = "gpt-5.2"
@@ -82,3 +81,38 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+# ── LLM Model Pricing ────────────────────────────────────────────────
+#
+# User-configurable pricing table used by the cost calculator.
+# Keys are model name prefixes (longest match wins; exact match beats prefix).
+# Values are USD price per 1,000,000 tokens for input and output respectively.
+#
+# Example: "claude-sonnet-4-6" matches any model whose name starts with that string.
+# Update these when provider pricing changes — no code changes required elsewhere.
+#
+LLM_MODEL_PRICING: dict[str, dict[str, float]] = {
+    # Anthropic
+    "claude-opus-4-6":         {"input": 15.00, "output": 75.00},
+    "claude-sonnet-4-6":       {"input":  3.00, "output": 15.00},
+    "claude-haiku-4-6":        {"input":  0.80, "output":  4.00},
+    "claude-opus-4-5":         {"input": 15.00, "output": 75.00},
+    "claude-sonnet-4-5":       {"input":  3.00, "output": 15.00},
+    "claude-haiku-4-5":        {"input":  0.80, "output":  4.00},
+    # OpenAI
+    "gpt-5.2":                 {"input": 10.00, "output": 30.00},
+    "gpt-4o-mini":             {"input":  0.15, "output":  0.60},
+    "gpt-4o":                  {"input":  2.50, "output": 10.00},
+    "o3":                      {"input": 10.00, "output": 40.00},
+    "o4-mini":                 {"input":  1.10, "output":  4.40},
+    # Google
+    "gemini-2.5-pro":          {"input":  1.25, "output":  5.00},
+    "gemini-2.0-flash":        {"input":  0.10, "output":  0.40},
+    "gemini-2.0-flash-lite":   {"input":  0.075,"output":  0.30},
+    # Moonshot / Kimi (OpenAI-compatible)
+    "kimi-k2":                 {"input":  0.15, "output":  2.50},
+    "moonshot-v1-8k":          {"input":  0.30, "output":  0.30},
+    "moonshot-v1-32k":         {"input":  0.30, "output":  0.30},
+    "moonshot-v1-128k":        {"input":  0.30, "output":  0.30},
+}

@@ -1,12 +1,12 @@
 import { Link, Navigate, useParams } from 'react-router-dom';
-import { BackendLogsView } from '../components/BackendLogs';
+import { UsageStreamView } from '../components/BackendLogs';
 import { ConnectionStatus } from '../components/Workspace/ConnectionStatus';
 import { AgentStreamProvider, useAgentStreamContext } from '../contexts/AgentStreamContext';
 import { useProjectContext } from '../contexts/ProjectContext';
 
-function BackendLogsContent({ projectId }: { projectId: string }) {
+function UsageStreamContent({ projectId }: { projectId: string }) {
   const { projects, loading } = useProjectContext();
-  const { backendLogs, clearBackendLogs, isConnected, workersReady } = useAgentStreamContext();
+  const { usageEvents, clearUsageEvents, isConnected, workersReady } = useAgentStreamContext();
   const project = projects.find((p) => p.id === projectId);
 
   if (loading) {
@@ -23,10 +23,10 @@ function BackendLogsContent({ projectId }: { projectId: string }) {
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="truncate text-lg font-semibold text-[var(--text-primary)]">
-              Backend logs - {project.name}
+              AI Usage &mdash; {project.name}
             </h1>
             <p className="text-xs text-[var(--text-muted)]">
-              Live backend log stream for this repository.
+              Real-time LLM call stream: tokens, cost, and model breakdown.
             </p>
           </div>
           <Link
@@ -39,7 +39,7 @@ function BackendLogsContent({ projectId }: { projectId: string }) {
       </header>
 
       <main className="mx-auto h-[calc(100vh-73px)] max-w-7xl p-4">
-        <BackendLogsView logs={backendLogs} onClear={clearBackendLogs} />
+        <UsageStreamView events={usageEvents} onClear={clearUsageEvents} />
       </main>
 
       <div className="pointer-events-none">
@@ -58,11 +58,11 @@ export function BackendLogsPage() {
   return (
     <AgentStreamProvider
       projectId={projectId}
-      enablePrimaryStream={false}
-      enableBackendLogStream
-      backendLogsWsChannels="backend_logs"
+      enablePrimaryStream
+      enableBackendLogStream={false}
+      wsChannels="usage"
     >
-      <BackendLogsContent projectId={projectId} />
+      <UsageStreamContent projectId={projectId} />
     </AgentStreamProvider>
   );
 }

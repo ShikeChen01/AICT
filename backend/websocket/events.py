@@ -39,6 +39,9 @@ class EventType(str, Enum):
     BACKEND_LOG = "backend_log"
     BACKEND_LOG_SNAPSHOT = "backend_log_snapshot"
 
+    # LLM usage (real-time cost/token stream)
+    USAGE_UPDATE = "usage_update"
+
 
 class WebSocketEvent(BaseModel):
     """Base WebSocket event structure."""
@@ -435,6 +438,48 @@ def create_agent_message_event(
             target_agent_id=target_agent_id,
             content=content,
             message_type=message_type,
+            created_at=created_at,
+        ).model_dump(mode="json"),
+    )
+
+
+# ── Usage update payload ───────────────────────────────────────────
+
+
+class UsageUpdatePayload(BaseModel):
+    """One LLM call recorded — sent after every successful agent LLM call."""
+    project_id: UUID
+    agent_id: UUID | None
+    model: str
+    provider: str
+    input_tokens: int
+    output_tokens: int
+    estimated_cost_usd: float
+    created_at: str
+
+
+def create_usage_update_event(
+    *,
+    project_id: UUID,
+    agent_id: UUID | None,
+    model: str,
+    provider: str,
+    input_tokens: int,
+    output_tokens: int,
+    estimated_cost_usd: float,
+    created_at: str,
+) -> WebSocketEvent:
+    """Create usage_update event emitted after each LLM call."""
+    return WebSocketEvent(
+        type=EventType.USAGE_UPDATE,
+        data=UsageUpdatePayload(
+            project_id=project_id,
+            agent_id=agent_id,
+            model=model,
+            provider=provider,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            estimated_cost_usd=estimated_cost_usd,
             created_at=created_at,
         ).model_dump(mode="json"),
     )

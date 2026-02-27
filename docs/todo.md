@@ -84,15 +84,29 @@ Goal: "API limit monitor", "general safeguards… monitor token usage", "loop ra
 - [x] `GET /api/v1/repositories/{id}/usage` endpoint (today rollup + recent 50 calls)
 - [x] `Settings.tsx`: Token Budget section (daily limit input + usage rollup + recent calls table)
 
-## Phase 5 — Integrate Kimi 2.5 (cheap provider)
+## Phase 4b — Rate limiting + cost calculator ✅
 
-- [ ] Add Kimi provider adapter + configuration
-  - [ ] `backend/config.py`: add key/base_url config (OpenAI-compatible shape)
-  - [ ] `backend/llm/router.py`: route `kimi-*` models to Kimi provider
-  - [ ] Add a provider implementation (prefer reusing OpenAI-compatible client with custom base URL)
-- [ ] Surface in UI defaults and presets
-  - [ ] Add “cheap preset” model choices in frontend dropdowns
+Goal: "configure the limit monitor", "cost calculator use price from backend/config.py", "rate limit (query per hour, token per hour)", "soft pause + resume at once when user adjust limits".
 
+- [x] Migration 012: `project_settings.calls_per_hour_limit`, `tokens_per_hour_limit`, `daily_cost_budget_usd`
+- [x] `LLM_MODEL_PRICING` dict in `backend/config.py` — USD per 1M tokens, user-editable
+- [x] `backend/llm/pricing.py`: `estimate_cost_usd(model, input_tokens, output_tokens)` (exact + prefix match)
+- [x] `LLMUsageRepository.daily_cost_usd_for_project()`, `hourly_stats()`, `hourly_rollup()`
+- [x] Loop Gate 2: `daily_cost_budget_usd` hard-stop → `cost_budget_exhausted`
+- [x] Loop Gate 3: hourly call/token rate limits → soft-pause (5 s poll, 10 min max, resumes if limits raised from UI)
+- [x] `GET /repositories/{id}/usage` returns `last_hour` rollup for rate-limit progress bars
+- [x] `Settings.tsx`: Rate Limits section (calls/hour + tokens/hour inputs + live progress bars)
+- [x] `Settings.tsx`: Daily cost budget input + cost column in usage table + recent calls
+- [x] `ProjectSettingsResponse` / `ProjectSettingsUpdate` schemas + frontend types updated
+
+## Phase 5 — Integrate Kimi 2.5 (cheap provider) ✅
+
+- [x] Add Kimi provider adapter + configuration
+  - [x] `backend/config.py`: `moonshot_api_key` + `moonshot_base_url` (OpenAI-compatible shape); Kimi K2 + Moonshot pricing entries
+  - [x] `backend/llm/router.py`: route `kimi-*` and `moonshot-*` models to Kimi provider
+  - [x] `backend/llm/providers/kimi_sdk.py`: thin `KimiSDKProvider` subclass reusing OpenAI SDK with custom base URL
+- [x] Surface in UI defaults and presets
+  - [x] `Settings.tsx`: model selection converted from free-text + datalist to grouped `<select>` dropdowns; Kimi K2 + Moonshot models added as "Kimi / Moonshot" group
 ## Phase 6 — Images end-to-end (DB-stored binaries)
 
 Goal: “allow images to flow through… save images as binary in db”.
@@ -170,17 +184,18 @@ Goal: “per project, a single source of truth… manager-only write… template
 
 - [ ] Pricing story
   - [ ] Document `$20 base tier + API cost` vs `$200+ infra deployment`
-  - [ ] Ensure Phase 4 yields enough usage data to justify and explain costs
+  - [x] Phase 4/4b now records per-call token + cost data — sufficient usage data exists to justify and explain costs
 
 ---
 
 ## Coverage check: each `tmp/todo.txt` item mapped
 
 - **self host Postgres / set up selfhosting postgres** → Phase 1
-- **configurable model selection (frontend, project-level, defaults in config)** → Phase 3
-- **configurable prompt per model/project** → Phase 3
-- **API limit monitor / monitor token usage / safeguards** → Phase 4
-- **multiple users** → Phase 2
+- **configurable model selection (frontend, project-level, defaults in config)** → Phase 3 ✅
+- **configurable prompt per model/project** → Phase 3 ✅
+- **API limit monitor / monitor token usage / safeguards** → Phase 4 ✅
+- **cost calculator + per-hour rate limits** → Phase 4b ✅
+- **multiple users** → Phase 2 ✅
 - **integrate Kimi2.5** → Phase 5
 - **images flow + store binary in DB** → Phase 6
 - **async tooling** → Phase 8
@@ -214,7 +229,7 @@ These choices change interfaces and long-term cost; they must be written down (A
 ## What’s missing from `tmp/todo.txt` (but needed for robustness)
 
 - **Data retention/cleanup**: `channel_messages` / `agent_messages` growth requires archival/pruning policy.
-- **Security**: attachment size/type limits (and scanning later), API rate limiting, audit logs for membership/settings changes.
+- **Security**: attachment size/type limits (and scanning later), audit logs for membership/settings changes. *(Project-level LLM rate limiting is now done — Phase 4b. HTTP-level API rate limiting is still missing.)*
 - **Migration + rollout strategy**: feature flags for new providers/multimodal, staging, and test coverage targets.
 - **UX affordance for “topic switch summarization”**: explicit UI trigger + loop integration to write a summary artifact.
 - **Error taxonomy**: consistent error codes across REST, WS, tool results, and provider failures for actionable frontend rendering.

@@ -6,6 +6,7 @@ from backend.config import settings
 from backend.llm.providers.anthropic_sdk import AnthropicSDKProvider
 from backend.llm.providers.base import BaseLLMProvider
 from backend.llm.providers.gemini_sdk import GeminiProviderAdapter
+from backend.llm.providers.kimi_sdk import KimiSDKProvider
 from backend.llm.providers.openai_sdk import OpenAISDKProvider
 from backend.logging.my_logger import get_logger
 
@@ -22,7 +23,7 @@ class ProviderRouter:
     def resolve_provider_name(self, model: str, provider: str | None = None) -> str:
         if provider:
             normalized = provider.lower()
-            if normalized in {"anthropic", "google", "openai"}:
+            if normalized in {"anthropic", "google", "openai", "kimi", "moonshot"}:
                 return normalized
 
         normalized_model = (model or "").lower()
@@ -30,6 +31,8 @@ class ProviderRouter:
             return "anthropic"
         if "gemini" in normalized_model or "google" in normalized_model:
             return "google"
+        if "kimi" in normalized_model or "moonshot" in normalized_model:
+            return "kimi"
         if (
             "gpt" in normalized_model
             or "chatgpt" in normalized_model
@@ -73,6 +76,13 @@ class ProviderRouter:
             if not settings.openai_api_key:
                 raise RuntimeError("OPENAI_API_KEY is not configured")
             return OpenAISDKProvider(api_key=settings.openai_api_key)
+        if selected in {"kimi", "moonshot"}:
+            if not settings.moonshot_api_key:
+                raise RuntimeError("MOONSHOT_API_KEY is not configured")
+            return KimiSDKProvider(
+                api_key=settings.moonshot_api_key,
+                base_url=settings.moonshot_base_url,
+            )
         raise RuntimeError(
-            "No LLM provider configured. Set CLAUDE_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY."
+            "No LLM provider configured. Set CLAUDE_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, or MOONSHOT_API_KEY."
         )

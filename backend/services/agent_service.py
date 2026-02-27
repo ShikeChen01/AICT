@@ -85,7 +85,16 @@ class AgentService:
         if display_name is None:
             display_name = f"Engineer-{count + 1}"
         normalized_seniority = normalize_seniority(seniority)
-        effective_model = resolve_model("engineer", seniority=normalized_seniority)
+        project_model_overrides = (
+            dict(project_settings.model_overrides)
+            if project_settings and project_settings.model_overrides
+            else None
+        )
+        effective_model = resolve_model(
+            "engineer",
+            seniority=normalized_seniority,
+            project_model_overrides=project_model_overrides,
+        )
 
         agent = Agent(
             project_id=project_id,
@@ -126,8 +135,23 @@ class AgentService:
         existing = {a.role: a for a in result.scalars().all()}
         manager = existing.get("manager")
         cto = existing.get("cto")
-        manager_model_resolved = resolve_model("manager", model_override=manager_model)
-        cto_model_resolved = resolve_model("cto", model_override=cto_model)
+        ps_repo = ProjectSettingsRepository(self.session)
+        project_settings_for_model = await ps_repo.get_by_project(project.id)
+        proj_model_overrides = (
+            dict(project_settings_for_model.model_overrides)
+            if project_settings_for_model and project_settings_for_model.model_overrides
+            else None
+        )
+        manager_model_resolved = resolve_model(
+            "manager",
+            model_override=manager_model,
+            project_model_overrides=proj_model_overrides,
+        )
+        cto_model_resolved = resolve_model(
+            "cto",
+            model_override=cto_model,
+            project_model_overrides=proj_model_overrides,
+        )
 
         if not manager:
             manager = Agent(

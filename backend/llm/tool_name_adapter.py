@@ -133,4 +133,6 @@ def denormalize_response_tool_calls(response: LLMResponse, adapter: ToolNameAdap
         model=response.model,
         request_id=response.request_id,
         raw=response.raw,
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
     )

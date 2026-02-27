@@ -28,6 +28,7 @@ from backend.websocket.events import (
     create_sandbox_log_event,
     create_task_created_event,
     create_task_update_event,
+    create_usage_update_event,
     create_workflow_update_event,
 )
 from backend.logging.my_logger import get_logger
@@ -44,6 +45,7 @@ class Channel(str, Enum):
     ACTIVITY = "activity"
     BACKEND_LOGS = "backend_logs"
     WORKFLOW = "workflow"
+    USAGE = "usage"
     ALL = "all"
 
 
@@ -67,6 +69,7 @@ class ConnectionInfo:
                 Channel.ACTIVITY,
                 Channel.BACKEND_LOGS,
                 Channel.WORKFLOW,
+                Channel.USAGE,
             ])
 
     def unsubscribe(self, channel: Channel) -> None:
@@ -372,6 +375,30 @@ class WebSocketManager:
             content=content,
         )
         return await self.broadcast(event, Channel.ACTIVITY, project_id)
+
+    async def broadcast_usage_update(
+        self,
+        project_id: UUID,
+        agent_id: UUID | None,
+        model: str,
+        provider: str,
+        input_tokens: int,
+        output_tokens: int,
+        estimated_cost_usd: float,
+        created_at: str,
+    ) -> int:
+        """Broadcast a usage_update event after an LLM call completes."""
+        event = create_usage_update_event(
+            project_id=project_id,
+            agent_id=agent_id,
+            model=model,
+            provider=provider,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            estimated_cost_usd=estimated_cost_usd,
+            created_at=created_at,
+        )
+        return await self.broadcast(event, Channel.USAGE, project_id)
 
     async def broadcast_to_project(
         self,

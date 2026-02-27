@@ -14,6 +14,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -131,11 +132,14 @@ class ProjectSettings(Base):
     persistent_sandbox_count = Column(Integer, default=1, nullable=False)
     # Phase 3: per-project model and prompt overrides
     model_overrides = Column(JSON, nullable=True)
-    # e.g. {"manager": "claude-opus-4-6", "engineer_junior": "gpt-5.2"}
     prompt_overrides = Column(JSON, nullable=True)
-    # e.g. {"manager": "Always respond in English.", "engineer": "Focus on unit tests."}
-    # Phase 4: daily token budget (0 = unlimited)
+    # Phase 4: hard daily limits
     daily_token_budget = Column(Integer, default=0, nullable=False)
+    # Phase 4b: rolling hourly rate limits (0 = unlimited)
+    calls_per_hour_limit = Column(Integer, default=0, nullable=False)
+    tokens_per_hour_limit = Column(Integer, default=0, nullable=False)
+    # Phase 4b: daily cost cap in USD (0.0 = unlimited)
+    daily_cost_budget_usd = Column(Float, default=0.0, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 

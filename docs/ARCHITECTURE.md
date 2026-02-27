@@ -145,7 +145,7 @@ All user-facing endpoints are at `/api/v1/*`. Firebase Bearer token authenticati
 | Health | `GET /api/v1/health` | Basic liveness check |
 | Worker health | `GET /api/v1/health/workers` | WorkerManager diagnostic status |
 | Auth | `/api/v1/auth/*` | User profile, GitHub token |
-| Repositories | `/api/v1/repositories/*` | Project CRUD, settings |
+| Repositories | `/api/v1/repositories/*` | Project CRUD, settings, usage |
 | Agents | `/api/v1/agents/*` | Agent roster, status, inspector, memory |
 | Messages | `/api/v1/messages/*` | User↔agent messaging |
 | Sessions | `/api/v1/sessions/*` | Agent session history and message log |
@@ -159,7 +159,8 @@ See `docs/backend/backend&API.md` for the full endpoint specification.
 2. Clones the repo into a local `code_path` directory
 3. Creates a `Repository` DB row with local paths
 4. Auto-creates **Manager** and **CTO** agents for the project
-5. Spawns `AgentWorker` tasks for both agents via `WorkerManager.spawn_worker()`
+5. Adds the creating user as an `owner` membership row in `repository_memberships`
+6. Spawns `AgentWorker` tasks for both agents via `WorkerManager.spawn_worker()`
 
 ---
 
@@ -266,8 +267,10 @@ If no unread messages AND no current task assignment → end session (normal_end
 Mark messages as received
 
 Load last 5 sessions of agent_messages (history)
+Load project_settings (model_overrides, prompt_overrides, all budget/rate limits)
 Assemble PromptAssembly (system prompt + message history + incoming messages)
-Resolve model: role + seniority + model_override → model string
+  → injects role-specific project prompt_override block (max 2000 chars) if set
+Resolve model: agent.model_override > project_model_overrides > global defaults
 
 While iteration < MAX_ITERATIONS (1000):
   If interrupt_flag → end session (interrupted)
@@ -279,21 +282,35 @@ While iteration < MAX_ITERATIONS (1000):
   If context_pressure >= 70% AND not already injected:
     Inject summarization block into messages
     Set summarization_injected = True
-  
+
+  ── Pre-call gates (checked every iteration, in order) ──────────────
+  Gate 1 — daily_token_budget > 0:
+    If tokens_today >= budget → end session (budget_exhausted) [hard stop]
+  Gate 2 — daily_cost_budget_usd > 0:
+    If cost_today_usd >= budget → end session (cost_budget_exhausted) [hard stop]
+  Gate 3 — calls_per_hour_limit or tokens_per_hour_limit > 0:
+    If hourly window exceeded → SOFT PAUSE:
+      Sleep 5s, re-read project_settings from DB, re-check limits
+      Repeat until limits clear OR user raises the limit OR 10-min timeout
+      On timeout → end session (rate_limited_timeout)
+      On interrupt during pause → end session (interrupted)
+  ─────────────────────────────────────────────────────────────────────
+
   Call LLM (model, system_prompt, messages, tools)
+  Record LLMUsageEvent (provider, model, input_tokens, output_tokens) [soft-fail]
   Save assistant message to agent_messages
   Emit agent_text WebSocket event
-  
+
   If no tool_calls:
     loopbacks++
     If loopbacks >= MAX_LOOPBACKS (3) → end session (max_loopbacks)
     Inject loopback prompt
     Continue
-  
+
   If tool_calls contains "end" AND other tools:
     Strip "end", inject end_solo_warning tool result (using real end tool_use_id)
     Continue (do NOT break)
-  
+
   For each non-end tool call:
     Look up handler by tool name
     Validate tool input schema
@@ -303,7 +320,7 @@ While iteration < MAX_ITERATIONS (1000):
       Reset summarization_injected = False (allows re-trigger)
     Save tool result to agent_messages
     Emit agent_tool_call + agent_tool_result WebSocket events
-  
+
   If only "end" tool call → end session (normal_end)
 
 End session (max_iterations)
@@ -314,10 +331,15 @@ End session (max_iterations)
 | Reason | Trigger |
 |--------|---------|
 | `normal_end` | Agent called `end` tool alone |
-| `max_iterations` | Hit 1000-iteration safeguard |
+| `max_iterations` | Hit 1,000-iteration safeguard |
 | `max_loopbacks` | 3 consecutive responses without tool calls |
 | `interrupted` | Interrupt flag set by WorkerManager |
 | `error` | Unrecoverable exception |
+| `budget_exhausted` | Daily token budget reached (hard stop) |
+| `cost_budget_exhausted` | Daily cost budget (USD) reached (hard stop) |
+| `rate_limited_timeout` | Hourly rate limit not cleared within 10-minute soft-pause window |
+
+**Rate limit soft-pause behaviour**: when the hourly call or token limit is hit, the loop does **not** end the session. Instead it sleeps in 5-second cycles, re-reading `project_settings` from DB on each cycle. If the user raises or clears the limit from the Settings page the agent resumes within one poll cycle (≤5 s) without losing session state. After 10 minutes of waiting the session ends with `rate_limited_timeout`.
 
 ---
 
@@ -384,7 +406,7 @@ All state transitions persist to the `agents.status` column immediately.
 
 All communication flows through the `channel_messages` table. There is no separate chat system or ticket system.
 
-**Participants:** Every agent has a UUID. The user is represented by the reserved `USER_AGENT_ID = UUID("00000000-0000-0000-0000-000000000000")`, which never exists in the `agents` table.
+**Participants:** Every agent has a UUID. The user is represented by the reserved `USER_AGENT_ID = UUID("00000000-0000-0000-0000-000000000000")`, which never exists in the `agents` table. User messages carry a `from_user_id` FK to the `users` table for attribution.
 
 **Message delivery flow:**
 1. Sender calls `send_message` tool (or user calls `POST /api/v1/messages/send`)
@@ -407,18 +429,20 @@ All communication flows through the `channel_messages` table. There is no separa
 
 The LLM layer is a provider-agnostic abstraction in `backend/llm/`. See `docs/backend/llm.md` for full details.
 
-**Contracts** (`backend/llm/contracts.py`): `LLMTool`, `LLMToolCall`, `LLMMessage`, `LLMRequest`, `LLMResponse` — provider-independent dataclasses.
+**Contracts** (`backend/llm/contracts.py`): `LLMTool`, `LLMToolCall`, `LLMMessage`, `LLMRequest`, `LLMResponse` — provider-independent dataclasses. `LLMResponse` includes `input_tokens` and `output_tokens` populated by every provider.
 
 **Provider Router** (`backend/llm/router.py`): resolves the correct provider from the model name string (keyword matching: `claude` → Anthropic, `gemini` → Google, `gpt`/`o1`/`o3` → OpenAI). Falls back to whichever API key is configured.
 
 **Providers** (`backend/llm/providers/`):
-- `AnthropicSDKProvider` — Anthropic Python SDK
-- `GeminiProviderAdapter` — Google Gemini SDK
-- `OpenAISDKProvider` — OpenAI Python SDK
+- `AnthropicSDKProvider` — Anthropic Python SDK; captures `usage.input_tokens` / `usage.output_tokens` from the response.
+- `GeminiProviderAdapter` — Google Gemini SDK; captures `usage_metadata` token counts.
+- `OpenAISDKProvider` — OpenAI Python SDK; captures `usage.prompt_tokens` / `usage.completion_tokens`.
 
-**Model resolver** (`backend/llm/model_resolver.py`): maps agent role + seniority → default model string from settings. Engineer seniority levels: `junior`, `intermediate`, `senior`, each with a configurable default model.
+**Model resolver** (`backend/llm/model_resolver.py`): maps agent role + seniority → model string with a three-tier priority: (1) agent's own `model_override`, (2) project-level `model_overrides` dict (keyed by role), (3) global defaults from `settings`. Engineer seniority levels: `junior`, `intermediate`, `senior`.
 
-**LLM Service** (`backend/services/llm_service.py`): thin service used by the inner loop. Calls `ProviderRouter.get_provider(model)` then `provider.complete(request)`.
+**Pricing** (`backend/llm/pricing.py`): `estimate_cost_usd(model, input_tokens, output_tokens)` — looks up `LLM_MODEL_PRICING` in `backend/config.py` (exact match then longest-prefix match) and returns an estimated USD cost. Used by `LLMUsageRepository` when recording and summarising usage events.
+
+**LLM Service** (`backend/services/llm_service.py`): thin service used by the inner loop. Calls `ProviderRouter.get_provider(model)` then `provider.complete(request)`. Returns a 3-tuple `(text, tool_calls, llm_response)` so the caller can record token counts.
 
 ---
 
@@ -426,12 +450,13 @@ The LLM layer is a provider-agnostic abstraction in `backend/llm/`. See `docs/ba
 
 See `docs/backend/prompt_system.md` for the complete specification.
 
-**`PromptAssembly`** (`backend/prompts/assembly.py`) owns the entire LLM-facing context for a session. It is instantiated once per session by the inner loop and mutated as iterations progress.
+**`PromptAssembly`** (`backend/prompts/assembly.py`) owns the entire LLM-facing context for a session. It is instantiated once per session by the inner loop and mutated as iterations progress. Accepts a `prompt_overrides` dict; if a role-specific entry is present, it appends a `## Project-specific instructions` block (capped at 2,000 characters) at the end of the system prompt.
 
 **System prompt block order** (concatenated, sent as the `system` parameter):
 ```
 Rules → History Rules → Incoming Message Rules → Tool Result Rules
 → Tool IO → Thinking → Memory → Identity
+[→ Project-specific instructions (if prompt_override set for this role)]
 ```
 
 **Conversation message order** (sent as `messages` array):
@@ -523,19 +548,35 @@ PostgreSQL is the single source of truth for all state. No in-memory state persi
 |-------|---------|
 | `users` | Firebase-authenticated users with GitHub credentials |
 | `repositories` | Projects (git repos + local paths) |
-| `project_settings` | Per-project configurables (max engineers, sandbox count) |
+| `repository_memberships` | User access to projects (roles: `owner`, `member`, `viewer`) |
+| `project_settings` | Per-project configurables: max engineers, model/prompt overrides, token/cost/rate budgets |
 | `agents` | Agent definitions (role, model, status, memory, sandbox) |
 | `tasks` | Kanban board items with 2D priority (critical + urgent) |
-| `channel_messages` | Inter-agent and user communication channel |
+| `channel_messages` | Inter-agent and user communication channel; includes `from_user_id` for attribution |
 | `agent_sessions` | Session tracking (one row per agent wake→END cycle) |
 | `agent_messages` | Persistent log of every LLM message in every session |
+| `llm_usage_events` | One row per LLM API call: provider, model, token counts, estimated cost, agent, session, user |
+
+**`project_settings` key columns:**
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `max_engineers` | int | Max simultaneous engineer agents |
+| `model_overrides` | JSONB | Per-role model override map (e.g. `{"manager": "claude-opus-4-6"}`) |
+| `prompt_overrides` | JSONB | Per-role extra system prompt text (max 2,000 chars per role) |
+| `daily_token_budget` | int | Max tokens/day (UTC); `0` = unlimited. Hard stop. |
+| `daily_cost_budget_usd` | float | Max estimated USD/day (UTC); `0.0` = unlimited. Hard stop. |
+| `calls_per_hour_limit` | int | Max LLM calls in rolling 60-min window; `0` = unlimited. Soft pause. |
+| `tokens_per_hour_limit` | int | Max tokens in rolling 60-min window; `0` = unlimited. Soft pause. |
+
+**Access control:** every API endpoint that touches a project calls `require_project_access(db, project_id, user_id)` from `backend/core/project_access.py`. This checks `repository_memberships` for a matching row and falls back to the legacy `owner_id IS NULL` pattern for backwards compatibility. Owner-only operations pass `owner_only=True`.
 
 **Session management:**
 - API routes: `Depends(get_db)` — one session per request with auto-commit/rollback
 - Worker loops: `AsyncSessionLocal()` context manager — one session per agent wake cycle
 - Services: receive session as a parameter, never create their own
 
-**Migrations:** Alembic, auto-run at startup via `run_startup_migrations()` (configurable via `AUTO_RUN_MIGRATIONS_ON_STARTUP`). Migration files live in `backend/migrations/versions/`. Currently at migration `008` (added `agent_tier` column). Startup migration is a soft-fail — the backend continues to serve if migration times out or fails.
+**Migrations:** Alembic, auto-run at startup via `run_startup_migrations()` (configurable via `AUTO_RUN_MIGRATIONS_ON_STARTUP`). Migration files live in `backend/migrations/versions/`. Currently at migration `012` (rate limits + cost budget). Startup migration is a soft-fail — the backend continues to serve if migration times out or fails.
 
 ---
 
@@ -585,6 +626,13 @@ The frontend is a React 19 + TypeScript SPA built with Vite. See `docs/frontend.
 Users authenticate via Firebase Google OAuth. The frontend gets a Firebase ID token, sends it as `Authorization: Bearer <token>` on every API request. The backend verifies it with Firebase Admin SDK and resolves/creates the user record.
 
 No separate login endpoint exists. Token verification happens in the `get_current_user` FastAPI dependency.
+
+### Project Access Control (Membership)
+
+Project-level access is enforced by `backend/core/project_access.py`:
+- `require_project_access(db, project_id, user_id, owner_only=False)` — raises `403` if the user has no `repository_memberships` row for the project (falls back to `owner_id IS NULL` for legacy/public projects).
+- `add_owner_membership(db, project_id, user_id)` — called automatically on `POST /repositories` and import to give the creator `owner` role.
+- Membership roles: `owner` (full control including settings), `member` (read/write), `viewer` (read-only). Role enforcement is per-endpoint.
 
 ### GitHub Token (per-user)
 
@@ -640,6 +688,15 @@ The frontend **Agent Inspector** reads from this data via:
 - `GET /api/v1/sessions?agent_id={id}` — session history
 - `GET /api/v1/sessions/{id}/messages` — full message log for a session
 
+### LLM Usage & Cost Monitoring
+
+Every LLM call records an `llm_usage_events` row via `LLMUsageRepository.record()` (soft-fail — write errors do not abort the agent loop). The `GET /api/v1/repositories/{id}/usage` endpoint returns:
+- **Today's rollup** — total calls, total input/output tokens, estimated cost USD, per-model breakdown.
+- **Last-hour rollup** — calls and tokens in the rolling 60-minute window (used for rate-limit progress bars in the UI).
+- **Recent 50 calls** — individual call records with model, tokens, and estimated cost.
+
+Cost estimation uses `backend/llm/pricing.py`, which looks up `LLM_MODEL_PRICING` (defined in `backend/config.py`) by exact model name then longest-prefix match. Prices are in USD per 1,000,000 tokens for input and output separately. Users can edit `LLM_MODEL_PRICING` directly in `config.py` to keep pricing current.
+
 ---
 
 ## Design Principles
@@ -675,14 +732,48 @@ See `docs/todo.md` for the full phased roadmap. Summary of completion status as 
 | Structured tool error messages with `next_action` | `backend/prompts/assembly.py` | Done |
 | Prompt system hardening (block budgets, summarization hooks) | `backend/prompts/assembly.py` | Done |
 
-### Phases 1–10 — Not yet started
+### Phase 2 — Multi-user access + attribution (COMPLETE)
+
+| Item | Files |
+|------|-------|
+| `repository_memberships` table + `channel_messages.from_user_id` | migration 009 |
+| Centralised access check | `backend/core/project_access.py` |
+| Membership data access | `backend/db/repositories/membership.py` |
+| All API endpoints use `require_project_access()` | repositories, messages, agents, sessions, tasks |
+| Auto-owner membership on create/import | `backend/api/v1/repositories.py` |
+| User attribution on sent messages | `MessageService`, schema, frontend types |
+
+### Phase 3 — Project-level model selection + prompt overrides (COMPLETE)
+
+| Item | Files |
+|------|-------|
+| `model_overrides` + `prompt_overrides` columns | migration 010, `db/models.py` |
+| Three-tier model resolution | `backend/llm/model_resolver.py` |
+| Prompt override injection into system prompt | `backend/prompts/assembly.py` |
+| Settings UI: per-role model inputs + prompt textareas | `frontend/src/pages/Settings.tsx` |
+| API + types updated | `backend/schemas/project_settings.py`, `frontend/src/types/index.ts` |
+
+### Phase 4 — API limit monitor + token usage safeguards (COMPLETE)
+
+| Item | Files |
+|------|-------|
+| `llm_usage_events` table + `daily_token_budget` | migration 011 |
+| Token usage captured in all 3 providers | `backend/llm/providers/` |
+| Usage repository (record, rollup, summary) | `backend/db/repositories/llm_usage.py` |
+| Loop records usage after each LLM call | `backend/workers/loop.py` |
+| Daily token hard-stop gate in loop | `backend/workers/loop.py` |
+| `GET /repositories/{id}/usage` endpoint | `backend/api/v1/repositories.py` |
+| Settings UI: budget + usage table + recent calls | `frontend/src/pages/Settings.tsx` |
+| Hourly rate limits (calls + tokens) — soft-pause | migration 012, `loop.py` |
+| Daily cost budget (USD) — hard-stop | migration 012, `loop.py` |
+| Cost estimation (pricing lookup) | `backend/llm/pricing.py`, `backend/config.py` |
+| Settings UI: rate limit inputs + progress bars + cost column | `frontend/src/pages/Settings.tsx` |
+
+### Phases 1, 5–10 — Not yet started
 
 | Phase | Goal |
 |-------|------|
 | 1 | Self-host PostgreSQL on VM to cut Cloud SQL cost |
-| 2 | Multi-user access + repository membership model |
-| 3 | Project-level model selection + prompt overrides (frontend-driven) |
-| 4 | API limit monitor + token usage safeguards |
 | 5 | Kimi 2.5 integration (cheap provider) |
 | 6 | Image/attachment end-to-end (binary in DB, multimodal LLM calls) |
 | 7 | Streaming + messaging upgrades (structured WS events, chat semantics) |
@@ -697,5 +788,5 @@ See `docs/todo.md` for the full phased roadmap. Summary of completion status as 
 | LangGraph checkpointer for Manager-CTO graph | Inconsistent with ADR-001; candidate for removal |
 | `Project = Repository` alias in models | Naming confusion |
 | `graph_persist_postgres` defaults to `False` | MemorySaver loses checkpoints on restart |
-| No API rate limiting | Cost risk at scale |
+| `LLM_MODEL_PRICING` in `config.py` is manually maintained | Prices go stale; no automated price-feed |
 | Sandbox containers lose file state on backend restart | Mitigated by `PROVISION_REPOS_ON_STARTUP` re-clone |

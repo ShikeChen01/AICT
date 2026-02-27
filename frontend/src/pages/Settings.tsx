@@ -1,5 +1,5 @@
 /**
- * Repository Settings Page — Phases 2, 3, 4
+ * Repository Settings Page — Phases 2, 3, 4 + 4b (rate limits + cost)
  *
  * Sections:
  *  1. General (name, description)
@@ -7,7 +7,8 @@
  *  3. Agent Limits (max engineers)
  *  4. Model Selection (per-role model overrides — Phase 3)
  *  5. Prompt Customization (per-role prompt overrides — Phase 3)
- *  6. Token Budget & Usage (daily budget, rollup — Phase 4)
+ *  6. Rate Limits (calls/hour + tokens/hour — Phase 4b)
+ *  7. Token Budget & Cost (daily token budget, daily cost budget, rollup — Phase 4/4b)
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -21,8 +22,9 @@ import {
   CheckCircle,
   Cpu,
   MessageSquare,
-  BarChart2,
   Users,
+  Gauge,
+  DollarSign,
 } from 'lucide-react';
 import {
   getProject,
@@ -40,13 +42,45 @@ import type {
 } from '../types';
 import { Button, Card, Input, Textarea } from '../components/ui';
 
-const MODEL_PRESETS = [
-  'claude-sonnet-4-6',
-  'claude-opus-4-6',
-  'gpt-5.2',
-  'gpt-4o',
-  'gemini-2.0-flash',
-  'gemini-2.5-pro',
+// ── Constants ──────────────────────────────────────────────────────────
+
+type ModelGroup = { label: string; models: { value: string; label: string }[] };
+
+const MODEL_GROUPS: ModelGroup[] = [
+  {
+    label: 'Anthropic',
+    models: [
+      { value: 'claude-opus-4-6',    label: 'Claude Opus 4.6 (powerful)' },
+      { value: 'claude-sonnet-4-6',  label: 'Claude Sonnet 4.6 (balanced)' },
+      { value: 'claude-haiku-4-6',   label: 'Claude Haiku 4.6 (fast)' },
+    ],
+  },
+  {
+    label: 'OpenAI',
+    models: [
+      { value: 'gpt-5.2',      label: 'GPT-5.2' },
+      { value: 'gpt-4o',       label: 'GPT-4o' },
+      { value: 'gpt-4o-mini',  label: 'GPT-4o Mini (cheap)' },
+      { value: 'o4-mini',      label: 'o4-mini (reasoning)' },
+    ],
+  },
+  {
+    label: 'Google',
+    models: [
+      { value: 'gemini-2.5-pro',        label: 'Gemini 2.5 Pro' },
+      { value: 'gemini-2.0-flash',      label: 'Gemini 2.0 Flash (fast)' },
+      { value: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite (cheapest)' },
+    ],
+  },
+  {
+    label: 'Kimi / Moonshot',
+    models: [
+      { value: 'kimi-k2-0711-preview', label: 'Kimi K2 (Kimi 2.5, very cheap)' },
+      { value: 'moonshot-v1-8k',       label: 'Moonshot v1 8k' },
+      { value: 'moonshot-v1-32k',      label: 'Moonshot v1 32k' },
+      { value: 'moonshot-v1-128k',     label: 'Moonshot v1 128k' },
+    ],
+  },
 ];
 
 const ROLE_KEYS: { key: keyof ModelOverrides; label: string }[] = [
@@ -63,11 +97,22 @@ const PROMPT_ROLE_KEYS: { key: keyof PromptOverrides; label: string }[] = [
   { key: 'engineer', label: 'Engineers (all tiers)' },
 ];
 
+// ── Helpers ────────────────────────────────────────────────────────────
+
 function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
+
+function fmtCost(usd: number): string {
+  if (usd === 0) return '$0.00';
+  if (usd < 0.001) return `$${usd.toFixed(6)}`;
+  if (usd < 0.01)  return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(4)}`;
+}
+
+// ── Component ──────────────────────────────────────────────────────────
 
 export function SettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -82,23 +127,21 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // General form state
+  // ── Form state ──────────────────────────────────────────────────────
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [repoUrl, setRepoUrl] = useState('');
-
-  // Agent limits
   const [maxEngineers, setMaxEngineers] = useState(5);
-
-  // Phase 3: model overrides
   const [modelOverrides, setModelOverrides] = useState<ModelOverrides>({});
-
-  // Phase 3: prompt overrides
   const [promptOverrides, setPromptOverrides] = useState<PromptOverrides>({});
-
-  // Phase 4: daily token budget
+  // Rate limits
+  const [callsPerHour, setCallsPerHour] = useState(0);
+  const [tokensPerHour, setTokensPerHour] = useState(0);
+  // Budgets
   const [dailyTokenBudget, setDailyTokenBudget] = useState(0);
+  const [dailyCostBudget, setDailyCostBudget] = useState(0);
 
+  // ── Data loading ────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     if (!projectId) return;
     try {
@@ -117,7 +160,10 @@ export function SettingsPage() {
       setMaxEngineers(settings.max_engineers);
       setModelOverrides(settings.model_overrides || {});
       setPromptOverrides(settings.prompt_overrides || {});
+      setCallsPerHour(settings.calls_per_hour_limit || 0);
+      setTokensPerHour(settings.tokens_per_hour_limit || 0);
       setDailyTokenBudget(settings.daily_token_budget || 0);
+      setDailyCostBudget(settings.daily_cost_budget_usd || 0);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -128,6 +174,7 @@ export function SettingsPage() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  // ── Save ────────────────────────────────────────────────────────────
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!projectId || !project) return;
@@ -137,8 +184,10 @@ export function SettingsPage() {
     try {
       const repoUpdates: Record<string, string | null> = {};
       if (name !== project.name) repoUpdates.name = name;
-      if (description !== (project.description || '')) repoUpdates.description = description || null;
-      if (repoUrl !== (project.code_repo_url || '')) repoUpdates.code_repo_url = repoUrl || null;
+      if (description !== (project.description || ''))
+        repoUpdates.description = description || null;
+      if (repoUrl !== (project.code_repo_url || ''))
+        repoUpdates.code_repo_url = repoUrl || null;
       if (Object.keys(repoUpdates).length > 0) {
         const updated = await updateProject(projectId, repoUpdates);
         setProject(updated);
@@ -148,10 +197,15 @@ export function SettingsPage() {
         max_engineers: maxEngineers,
         model_overrides: Object.keys(modelOverrides).length > 0 ? modelOverrides : null,
         prompt_overrides: Object.keys(promptOverrides).length > 0 ? promptOverrides : null,
+        calls_per_hour_limit: callsPerHour,
+        tokens_per_hour_limit: tokensPerHour,
         daily_token_budget: dailyTokenBudget,
+        daily_cost_budget_usd: dailyCostBudget,
       });
       setPs(updatedSettings);
-      setSuccess('Settings saved successfully');
+      // Refresh usage after save (limits changed — active agents will pick up within 5s)
+      getProjectUsage(projectId).then(setUsage).catch(() => null);
+      setSuccess('Settings saved. Active agents will respect new limits within 5 seconds.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     } finally {
@@ -159,6 +213,7 @@ export function SettingsPage() {
     }
   };
 
+  // ── Loading / error states ──────────────────────────────────────────
   if (isLoading) {
     return (
       <div className="min-h-screen bg-[var(--app-bg)] flex items-center justify-center">
@@ -173,7 +228,10 @@ export function SettingsPage() {
         <div className="text-center">
           <AlertCircle className="w-12 h-12 mx-auto text-red-500 mb-4" />
           <h2 className="text-lg font-semibold text-gray-900">Repository not found</h2>
-          <button onClick={() => navigate('/repositories')} className="mt-4 text-blue-600 hover:text-blue-800">
+          <button
+            onClick={() => navigate('/repositories')}
+            className="mt-4 text-blue-600 hover:text-blue-800"
+          >
             Back to Repositories
           </button>
         </div>
@@ -181,6 +239,15 @@ export function SettingsPage() {
     );
   }
 
+  // ── Derived values for usage display ──────────────────────────────
+  const hourlyCallsUsed = usage?.last_hour.total_calls ?? 0;
+  const hourlyTokensUsed = usage?.last_hour.total_tokens ?? 0;
+  const callsPct = callsPerHour > 0 ? Math.min(100, (hourlyCallsUsed / callsPerHour) * 100) : 0;
+  const tokensPct = tokensPerHour > 0 ? Math.min(100, (hourlyTokensUsed / tokensPerHour) * 100) : 0;
+  const todayCost = usage?.today.estimated_cost_usd ?? 0;
+  const costPct = dailyCostBudget > 0 ? Math.min(100, (todayCost / dailyCostBudget) * 100) : 0;
+
+  // ── Render ──────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[var(--app-bg)]">
       <header className="bg-[var(--surface-card)] border-b border-[var(--border-color)]">
@@ -215,40 +282,58 @@ export function SettingsPage() {
         )}
 
         <form onSubmit={handleSave} className="space-y-8">
-          {/* ── General ── */}
+
+          {/* ── 1. General ── */}
           <Card className="p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">General</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Repository Name</label>
-                <Input type="text" value={name} onChange={(e) => setName(e.target.value)} required />
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Repository Name
+                </label>
+                <Input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Description
+                </label>
+                <Textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={3}
+                />
               </div>
             </div>
           </Card>
 
-          {/* ── Git ── */}
+          {/* ── 2. Git ── */}
           <Card className="p-6">
             <div className="flex items-center gap-2 mb-4">
               <GitBranch className="w-5 h-5 text-gray-500" />
               <h2 className="text-lg font-semibold text-gray-900">Git Integration</h2>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Repository URL</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Repository URL
+              </label>
               <Input
                 type="url"
                 value={repoUrl}
                 onChange={(e) => setRepoUrl(e.target.value)}
                 placeholder="https://github.com/user/repo"
               />
-              <p className="text-xs text-gray-500 mt-1">GitHub token is configured in User Settings.</p>
+              <p className="text-xs text-gray-500 mt-1">
+                GitHub token is configured in User Settings.
+              </p>
             </div>
           </Card>
 
-          {/* ── Agent Limits ── */}
+          {/* ── 3. Agent Limits ── */}
           <Card className="p-6">
             <div className="flex items-center gap-2 mb-4">
               <Users className="w-5 h-5 text-gray-500" />
@@ -266,63 +351,52 @@ export function SettingsPage() {
                 max={20}
               />
               <p className="text-xs text-gray-500 mt-1">
-                Maximum number of Engineer agents the Manager can spawn for this project.
+                Maximum Engineer agents the Manager can spawn for this project.
               </p>
             </div>
           </Card>
 
-          {/* ── Model Selection (Phase 3) ── */}
+          {/* ── 4. Model Selection ── */}
           <Card className="p-6">
             <div className="flex items-center gap-2 mb-1">
               <Cpu className="w-5 h-5 text-gray-500" />
               <h2 className="text-lg font-semibold text-gray-900">Model Selection</h2>
             </div>
             <p className="text-sm text-gray-500 mb-4">
-              Override the default model for each agent role. Leave blank to use the global default.
+              Override the default model for each agent role. Select "— global default —" to inherit
+              from server config.
             </p>
             <div className="space-y-3">
               {ROLE_KEYS.map(({ key, label }) => (
                 <div key={key}>
                   <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-                  <div className="flex gap-2">
-                    <Input
-                      type="text"
-                      value={modelOverrides[key] || ''}
-                      onChange={(e) =>
-                        setModelOverrides((prev) => ({
-                          ...prev,
-                          [key]: e.target.value || undefined,
-                        }))
-                      }
-                      placeholder="e.g. claude-sonnet-4-6 (leave blank for default)"
-                      list={`model-presets-${key}`}
-                      className="flex-1"
-                    />
-                    <datalist id={`model-presets-${key}`}>
-                      {MODEL_PRESETS.map((m) => <option key={m} value={m} />)}
-                    </datalist>
-                    {modelOverrides[key] && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setModelOverrides((prev) => {
-                            const next = { ...prev };
-                            delete next[key];
-                            return next;
-                          })
-                        }
-                        className="text-xs text-gray-400 hover:text-red-500 px-2"
-                      >
-                        clear
-                      </button>
-                    )}
-                  </div>
+                  <select
+                    value={modelOverrides[key] || ''}
+                    onChange={(e) =>
+                      setModelOverrides((prev) => ({
+                        ...prev,
+                        [key]: e.target.value || undefined,
+                      }))
+                    }
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">— global default —</option>
+                    {MODEL_GROUPS.map((group) => (
+                      <optgroup key={group.label} label={group.label}>
+                        {group.models.map((m) => (
+                          <option key={m.value} value={m.value}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
                 </div>
               ))}
             </div>
           </Card>
 
-          {/* ── Prompt Customization (Phase 3) ── */}
+          {/* ── 5. Prompt Customization ── */}
           <Card className="p-6">
             <div className="flex items-center gap-2 mb-1">
               <MessageSquare className="w-5 h-5 text-gray-500" />
@@ -356,72 +430,226 @@ export function SettingsPage() {
             </div>
           </Card>
 
-          {/* ── Token Budget (Phase 4) ── */}
+          {/* ── 6. Rate Limits ── */}
           <Card className="p-6">
             <div className="flex items-center gap-2 mb-1">
-              <BarChart2 className="w-5 h-5 text-gray-500" />
-              <h2 className="text-lg font-semibold text-gray-900">Token Budget &amp; Usage</h2>
+              <Gauge className="w-5 h-5 text-gray-500" />
+              <h2 className="text-lg font-semibold text-gray-900">Rate Limits</h2>
             </div>
-            <p className="text-sm text-gray-500 mb-4">
-              Set a daily token limit (UTC). Agents will be halted once the budget is reached.
-              Set to 0 for unlimited.
+            <p className="text-sm text-gray-500 mb-5">
+              Control the speed of agent LLM operations. When a limit is hit, the agent
+              soft-pauses and polls every 5 seconds. Raising the limit here takes effect
+              within one poll cycle — the agent resumes automatically without losing its
+              session. Set to 0 to disable.
             </p>
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Daily Token Budget <span className="text-gray-400 font-normal">(0 = unlimited)</span>
-              </label>
-              <Input
-                type="number"
-                value={dailyTokenBudget}
-                onChange={(e) => setDailyTokenBudget(Number(e.target.value))}
-                min={0}
-                step={1000}
-              />
+
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Calls / hour <span className="text-gray-400 font-normal">(0 = unlimited)</span>
+                </label>
+                <Input
+                  type="number"
+                  value={callsPerHour}
+                  onChange={(e) => setCallsPerHour(Number(e.target.value))}
+                  min={0}
+                  step={10}
+                />
+                {usage && callsPerHour > 0 && (
+                  <div className="mt-2">
+                    <div className="flex justify-between text-xs text-gray-500 mb-1">
+                      <span>Last 60 min: {hourlyCallsUsed.toLocaleString()} calls</span>
+                      <span>{callsPerHour.toLocaleString()} limit</span>
+                    </div>
+                    <div className="w-full bg-gray-100 rounded-full h-1.5">
+                      <div
+                        className={`h-1.5 rounded-full transition-all ${callsPct >= 90 ? 'bg-red-500' : callsPct >= 70 ? 'bg-amber-400' : 'bg-blue-500'}`}
+                        style={{ width: `${callsPct}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tokens / hour <span className="text-gray-400 font-normal">(0 = unlimited)</span>
+                </label>
+                <Input
+                  type="number"
+                  value={tokensPerHour}
+                  onChange={(e) => setTokensPerHour(Number(e.target.value))}
+                  min={0}
+                  step={10000}
+                />
+                {usage && tokensPerHour > 0 && (
+                  <div className="mt-2">
+                    <div className="flex justify-between text-xs text-gray-500 mb-1">
+                      <span>Last 60 min: {fmtTokens(hourlyTokensUsed)}</span>
+                      <span>{fmtTokens(tokensPerHour)} limit</span>
+                    </div>
+                    <div className="w-full bg-gray-100 rounded-full h-1.5">
+                      <div
+                        className={`h-1.5 rounded-full transition-all ${tokensPct >= 90 ? 'bg-red-500' : tokensPct >= 70 ? 'bg-amber-400' : 'bg-blue-500'}`}
+                        style={{ width: `${tokensPct}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {usage && (
+            {usage && (callsPerHour > 0 || tokensPerHour > 0) && (
+              <p className="text-xs text-gray-400 mt-4">
+                After 10 minutes of waiting (max pause), the agent ends its session. Send a new
+                message once limits reset or are raised.
+              </p>
+            )}
+          </Card>
+
+          {/* ── 7. Token Budget & Cost ── */}
+          <Card className="p-6">
+            <div className="flex items-center gap-2 mb-1">
+              <DollarSign className="w-5 h-5 text-gray-500" />
+              <h2 className="text-lg font-semibold text-gray-900">Budget &amp; Cost</h2>
+            </div>
+            <p className="text-sm text-gray-500 mb-5">
+              Set hard daily limits. When exhausted the agent session ends immediately.
+              Costs are estimated using the pricing table in <code className="text-xs bg-gray-100 px-1 rounded">backend/config.py</code>.
+            </p>
+
+            <div className="grid grid-cols-2 gap-6 mb-6">
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Daily token budget <span className="text-gray-400 font-normal">(0 = unlimited)</span>
+                </label>
+                <Input
+                  type="number"
+                  value={dailyTokenBudget}
+                  onChange={(e) => setDailyTokenBudget(Number(e.target.value))}
+                  min={0}
+                  step={10000}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Daily cost budget (USD) <span className="text-gray-400 font-normal">(0 = unlimited)</span>
+                </label>
+                <Input
+                  type="number"
+                  value={dailyCostBudget}
+                  onChange={(e) => setDailyCostBudget(Number(e.target.value))}
+                  min={0}
+                  step={0.5}
+                />
+                {usage && dailyCostBudget > 0 && (
+                  <div className="mt-2">
+                    <div className="flex justify-between text-xs text-gray-500 mb-1">
+                      <span>Today: {fmtCost(todayCost)}</span>
+                      <span>{fmtCost(dailyCostBudget)} limit</span>
+                    </div>
+                    <div className="w-full bg-gray-100 rounded-full h-1.5">
+                      <div
+                        className={`h-1.5 rounded-full transition-all ${costPct >= 90 ? 'bg-red-500' : costPct >= 70 ? 'bg-amber-400' : 'bg-green-500'}`}
+                        style={{ width: `${costPct}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Usage stats */}
+            {usage && (
+              <>
+                {/* Today's rollup */}
                 <h3 className="text-sm font-semibold text-gray-700 mb-3">Today's Usage</h3>
-                <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="grid grid-cols-4 gap-3 mb-5">
                   {[
-                    { label: 'Input tokens', value: fmtTokens(usage.today.total_input_tokens) },
+                    { label: 'Input tokens',  value: fmtTokens(usage.today.total_input_tokens) },
                     { label: 'Output tokens', value: fmtTokens(usage.today.total_output_tokens) },
-                    { label: 'Total tokens', value: fmtTokens(usage.today.total_tokens) },
+                    { label: 'Total tokens',  value: fmtTokens(usage.today.total_tokens) },
+                    { label: 'Est. cost',     value: fmtCost(usage.today.estimated_cost_usd) },
                   ].map(({ label, value }) => (
                     <div key={label} className="bg-gray-50 rounded-lg p-3 text-center">
-                      <div className="text-lg font-semibold text-gray-900">{value}</div>
+                      <div className="text-base font-semibold text-gray-900">{value}</div>
                       <div className="text-xs text-gray-500">{label}</div>
                     </div>
                   ))}
                 </div>
 
+                {/* Last-hour stats */}
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Last 60 Minutes</h3>
+                <div className="grid grid-cols-2 gap-3 mb-5">
+                  {[
+                    { label: 'Calls',  value: usage.last_hour.total_calls.toLocaleString() },
+                    { label: 'Tokens', value: fmtTokens(usage.last_hour.total_tokens) },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="bg-gray-50 rounded-lg p-3 text-center">
+                      <div className="text-base font-semibold text-gray-900">{value}</div>
+                      <div className="text-xs text-gray-500">{label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Per-model breakdown */}
                 {usage.today.by_model.length > 0 && (
-                  <div className="mb-4">
-                    <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">By model</h4>
-                    <div className="space-y-1">
-                      {usage.today.by_model.map((row) => (
-                        <div key={`${row.provider}-${row.model}`} className="flex items-center text-sm">
-                          <span className="flex-1 text-gray-700 font-mono text-xs">{row.model}</span>
-                          <span className="text-gray-500 text-xs mr-4">{row.calls} calls</span>
-                          <span className="text-gray-700 text-xs">
-                            {fmtTokens(row.input_tokens + row.output_tokens)} tokens
-                          </span>
-                        </div>
-                      ))}
+                  <div className="mb-5">
+                    <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                      By model — today
+                    </h4>
+                    <div className="overflow-auto">
+                      <table className="w-full text-xs text-gray-600">
+                        <thead>
+                          <tr className="border-b border-gray-200 text-gray-500">
+                            <th className="text-left py-1 pr-3">Model</th>
+                            <th className="text-right pr-3">Calls</th>
+                            <th className="text-right pr-3">Input</th>
+                            <th className="text-right pr-3">Output</th>
+                            <th className="text-right">Est. cost</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {usage.today.by_model.map((row) => (
+                            <tr key={`${row.provider}-${row.model}`} className="border-b border-gray-100">
+                              <td className="font-mono py-1 pr-3">{row.model}</td>
+                              <td className="text-right pr-3">{row.calls}</td>
+                              <td className="text-right pr-3">{fmtTokens(row.input_tokens)}</td>
+                              <td className="text-right pr-3">{fmtTokens(row.output_tokens)}</td>
+                              <td className="text-right text-green-700 font-medium">
+                                {fmtCost(row.estimated_cost_usd)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="text-gray-700 font-semibold border-t border-gray-300">
+                            <td className="py-1 pr-3">Total</td>
+                            <td />
+                            <td className="text-right pr-3">{fmtTokens(usage.today.total_input_tokens)}</td>
+                            <td className="text-right pr-3">{fmtTokens(usage.today.total_output_tokens)}</td>
+                            <td className="text-right text-green-700">{fmtCost(usage.today.estimated_cost_usd)}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
                     </div>
                   </div>
                 )}
 
+                {/* Recent calls */}
                 {usage.recent_calls.length > 0 && (
                   <div>
-                    <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Recent calls</h4>
-                    <div className="overflow-auto max-h-40">
+                    <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                      Recent calls
+                    </h4>
+                    <div className="overflow-auto max-h-48">
                       <table className="w-full text-xs text-gray-600">
                         <thead>
                           <tr className="border-b border-gray-200 text-gray-500">
                             <th className="text-left py-1 pr-3">Model</th>
                             <th className="text-right pr-3">In</th>
                             <th className="text-right pr-3">Out</th>
+                            <th className="text-right pr-3">Cost</th>
                             <th className="text-right">Time</th>
                           </tr>
                         </thead>
@@ -431,6 +659,9 @@ export function SettingsPage() {
                               <td className="font-mono py-1 pr-3">{c.model}</td>
                               <td className="text-right pr-3">{fmtTokens(c.input_tokens)}</td>
                               <td className="text-right pr-3">{fmtTokens(c.output_tokens)}</td>
+                              <td className="text-right pr-3 text-green-700">
+                                {fmtCost(c.estimated_cost_usd)}
+                              </td>
                               <td className="text-right text-gray-400">
                                 {new Date(c.created_at).toLocaleTimeString()}
                               </td>
@@ -441,13 +672,17 @@ export function SettingsPage() {
                     </div>
                   </div>
                 )}
-              </div>
+              </>
             )}
           </Card>
 
           <div className="flex justify-end">
             <Button type="submit" disabled={isSaving} className="px-6">
-              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {isSaving ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4" />
+              )}
               Save Changes
             </Button>
           </div>

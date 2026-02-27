@@ -19,8 +19,12 @@ class ProjectSettingsResponse(BaseModel):
     # Phase 3: per-project model and prompt overrides
     model_overrides: dict[str, Any] | None = None
     prompt_overrides: dict[str, Any] | None = None
-    # Phase 4: daily token budget (0 = unlimited)
+    # Phase 4: hard daily limits
     daily_token_budget: int = 0
+    # Phase 4b: rolling hourly rate limits + cost budget
+    calls_per_hour_limit: int = 0
+    tokens_per_hour_limit: int = 0
+    daily_cost_budget_usd: float = 0.0
     created_at: datetime
     updated_at: datetime
 
@@ -32,8 +36,12 @@ class ProjectSettingsUpdate(BaseModel):
 
     max_engineers: int | None = Field(None, ge=0, le=20)
     persistent_sandbox_count: int | None = Field(None, ge=0, le=10)
-    # Phase 3: pass None to leave unchanged, pass {} to clear all overrides
+    # Phase 3
     model_overrides: dict[str, Any] | None = None
     prompt_overrides: dict[str, Any] | None = None
-    # Phase 4: 0 = unlimited, >0 = max tokens/day
+    # Phase 4: hard daily limits
     daily_token_budget: int | None = Field(None, ge=0)
+    # Phase 4b: rate limits (0 = unlimited) and cost budget
+    calls_per_hour_limit: int | None = Field(None, ge=0)
+    tokens_per_hour_limit: int | None = Field(None, ge=0)
+    daily_cost_budget_usd: float | None = Field(None, ge=0.0)

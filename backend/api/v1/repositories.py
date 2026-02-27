@@ -312,6 +312,12 @@ async def update_repository_settings(
         ps.prompt_overrides = data.prompt_overrides
     if data.daily_token_budget is not None:
         ps.daily_token_budget = data.daily_token_budget
+    if data.calls_per_hour_limit is not None:
+        ps.calls_per_hour_limit = data.calls_per_hour_limit
+    if data.tokens_per_hour_limit is not None:
+        ps.tokens_per_hour_limit = data.tokens_per_hour_limit
+    if data.daily_cost_budget_usd is not None:
+        ps.daily_cost_budget_usd = data.daily_cost_budget_usd
     await db.commit()
     await db.refresh(ps)
     return ProjectSettingsResponse.model_validate(ps)
@@ -323,13 +329,14 @@ async def get_repository_usage(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Phase 4: today's token usage rollup + recent 50 LLM calls."""
+    """Phase 4: today's token + cost rollup, last-60-min rate window, recent 50 LLM calls."""
     await require_project_access(db, repository_id, current_user.id)
     from backend.db.repositories.llm_usage import LLMUsageRepository
     usage_repo = LLMUsageRepository(db)
     rollup = await usage_repo.daily_rollup(repository_id)
+    hourly = await usage_repo.hourly_rollup(repository_id)
     recent = await usage_repo.usage_summary(repository_id, limit=50)
-    return {"today": rollup, "recent_calls": recent}
+    return {"today": rollup, "last_hour": hourly, "recent_calls": recent}
 
 
 @router.delete("/{repository_id}", status_code=status.HTTP_204_NO_CONTENT)

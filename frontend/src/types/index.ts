@@ -160,8 +160,12 @@ export interface ProjectSettings {
   // Phase 3
   model_overrides: ModelOverrides | null;
   prompt_overrides: PromptOverrides | null;
-  // Phase 4
+  // Phase 4: daily hard limits
   daily_token_budget: number;
+  // Phase 4b: hourly rate limits + cost budget
+  calls_per_hour_limit: number;
+  tokens_per_hour_limit: number;
+  daily_cost_budget_usd: number;
   created_at: string;
   updated_at: string;
 }
@@ -174,6 +178,10 @@ export interface ProjectSettingsUpdate {
   prompt_overrides?: PromptOverrides | null;
   // Phase 4
   daily_token_budget?: number;
+  // Phase 4b
+  calls_per_hour_limit?: number;
+  tokens_per_hour_limit?: number;
+  daily_cost_budget_usd?: number;
 }
 
 // ─── LLM Usage (Phase 4) ─────────────────────────────────────────────
@@ -184,6 +192,7 @@ export interface LLMUsageByModel {
   calls: number;
   input_tokens: number;
   output_tokens: number;
+  estimated_cost_usd: number;
 }
 
 export interface LLMUsageRollup {
@@ -191,7 +200,15 @@ export interface LLMUsageRollup {
   total_input_tokens: number;
   total_output_tokens: number;
   total_tokens: number;
+  estimated_cost_usd: number;
   by_model: LLMUsageByModel[];
+}
+
+export interface LLMHourlyRollup {
+  window: string;
+  total_calls: number;
+  total_tokens: number;
+  by_model: Omit<LLMUsageByModel, 'estimated_cost_usd'>[];
 }
 
 export interface LLMUsageCall {
@@ -201,6 +218,7 @@ export interface LLMUsageCall {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  estimated_cost_usd: number;
   agent_id: UUID | null;
   session_id: UUID | null;
   created_at: string;
@@ -208,6 +226,7 @@ export interface LLMUsageCall {
 
 export interface ProjectUsageResponse {
   today: LLMUsageRollup;
+  last_hour: LLMHourlyRollup;
   recent_calls: LLMUsageCall[];
 }
 
@@ -329,7 +348,9 @@ export type WSEventType =
   | 'agent_tool_call'
   | 'agent_tool_result'
   | 'agent_message'
-  | 'system_message';
+  | 'system_message'
+  // Real-time LLM usage stream
+  | 'usage_update';
 
 export interface WSEvent<T = unknown> {
   type: WSEventType;
@@ -481,6 +502,19 @@ export interface AgentWakeRequest {
 
 export interface AgentWakeResponse {
   message: string;
+}
+
+// ─── LLM Usage Stream (real-time, Phase 4 WebSocket) ─────────────────
+
+export interface UsageUpdateData {
+  project_id: UUID;
+  agent_id: UUID | null;
+  model: string;
+  provider: string;
+  input_tokens: number;
+  output_tokens: number;
+  estimated_cost_usd: number;
+  created_at: string;
 }
 
 // ─── Stream buffer (frontend) ──────────────────────────────────────────

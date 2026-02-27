@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aict-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aict}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-aict}
+    volumes:
+      - ${PGDATA_DIR:-/opt/postgres/data}:/var/lib/postgresql/data
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - /opt/postgres/ssl:/etc/postgresql/ssl:ro
+    command:
+      - "postgres"
+      - "-c"
+      - "config_file=/etc/postgresql/postgresql.conf"
+      - "-c"
+      - "hba_file=/etc/postgresql/pg_hba.conf"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aict} -d ${POSTGRES_DB:-aict}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    shm_size: 256mb
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"

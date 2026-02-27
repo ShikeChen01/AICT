@@ -25,11 +25,13 @@ import type {
   AgentRole,
   BackendLogItem,
   BackendLogSnapshotData,
+  UsageUpdateData,
 } from '../types';
 
 const MAX_CHUNKS = 500;
 const MAX_ACTIVITY = 400;
 const MAX_BACKEND_LOGS = 1000;
+const MAX_USAGE_EVENTS = 500;
 
 function createEmptyBuffer(agentId: string): AgentStreamBuffer {
   return {
@@ -45,11 +47,13 @@ interface AgentStreamContextValue {
   buffers: Map<string, AgentStreamBuffer>;
   activityLogs: ActivityLogItem[];
   backendLogs: BackendLogItem[];
+  usageEvents: UsageUpdateData[];
   inspectedAgentId: string | null;
   setInspectedAgent: (agentId: string | null) => void;
   getBuffer: (agentId: string) => AgentStreamBuffer;
   clearBuffer: (agentId: string) => void;
   clearBackendLogs: () => void;
+  clearUsageEvents: () => void;
   isConnected: boolean;
   workersReady: boolean;
 }
@@ -58,7 +62,7 @@ const AgentStreamContext = createContext<AgentStreamContextValue | null>(null);
 
 export function AgentStreamProvider({
   projectId,
-  wsChannels = 'agent_stream,messages,kanban,agents,activity,workflow',
+  wsChannels = 'agent_stream,messages,kanban,agents,activity,workflow,usage',
   backendLogsWsChannels = 'backend_logs',
   enablePrimaryStream = true,
   enableBackendLogStream = true,
@@ -76,6 +80,7 @@ export function AgentStreamProvider({
   const [buffers, setBuffers] = useState<Map<string, AgentStreamBuffer>>(new Map());
   const [activityLogs, setActivityLogs] = useState<ActivityLogItem[]>([]);
   const [backendLogs, setBackendLogs] = useState<BackendLogItem[]>([]);
+  const [usageEvents, setUsageEvents] = useState<UsageUpdateData[]>([]);
   const [inspectedAgentId, setInspectedAgentId] = useState<string | null>(null);
   const [primaryConnected, setPrimaryConnected] = useState(false);
   const [backendLogConnected, setBackendLogConnected] = useState(false);
@@ -258,6 +263,11 @@ export function AgentStreamProvider({
           });
           break;
         }
+        case 'usage_update': {
+          const d = data as unknown as UsageUpdateData;
+          setUsageEvents((prev) => [d, ...prev].slice(0, MAX_USAGE_EVENTS));
+          break;
+        }
         case 'system_message': {
           const d = data as unknown as SystemMessageData;
           const currentInspected = inspectedAgentRef.current;
@@ -392,6 +402,10 @@ export function AgentStreamProvider({
     setBackendLogs([]);
   }, []);
 
+  const clearUsageEvents = useCallback(() => {
+    setUsageEvents([]);
+  }, []);
+
   const isConnected = useMemo(() => {
     if (enablePrimaryStream && enableBackendLogStream) {
       return primaryConnected && backendLogConnected;
@@ -410,11 +424,13 @@ export function AgentStreamProvider({
       buffers,
       activityLogs,
       backendLogs,
+      usageEvents,
       inspectedAgentId,
       setInspectedAgent: setInspectedAgentId,
       getBuffer,
       clearBuffer,
       clearBackendLogs,
+      clearUsageEvents,
       isConnected,
       workersReady,
     }),
@@ -422,10 +438,12 @@ export function AgentStreamProvider({
       buffers,
       activityLogs,
       backendLogs,
+      usageEvents,
       inspectedAgentId,
       getBuffer,
       clearBuffer,
       clearBackendLogs,
+      clearUsageEvents,
       isConnected,
       workersReady,
     ]
