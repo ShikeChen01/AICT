@@ -12,6 +12,7 @@ import { AgentChatView } from '../components/AgentChat';
 import { KanbanBoard } from '../components/Kanban';
 import { WorkflowGraph } from '../components/Workflow';
 import { ArtifactBrowser } from '../components/Artifacts';
+import { ArchitecturePage } from '../components/Architecture/ArchitecturePage';
 import { AgentsPanel } from '../components/Agents';
 import { ActivityFeed } from '../components/ActivityFeed';
 import { AgentStream } from '../components/AgentChat/AgentStream';
@@ -112,21 +113,7 @@ function WorkspaceContent({
       main = <WorkflowGraph projectId={projectId} />;
       break;
     case 'artifacts':
-      if (projectsLoading) {
-        main = (
-          <div className="flex h-full items-center justify-center text-gray-500">
-            Loading project...
-          </div>
-        );
-      } else if (!project) {
-        main = (
-          <div className="flex h-full items-center justify-center text-gray-600">
-            Project not found.
-          </div>
-        );
-      } else {
-        main = <ArtifactBrowser projectId={projectId} project={project} />;
-      }
+      main = <ArchitecturePage projectId={projectId} />;
       break;
     default:
       main = null;

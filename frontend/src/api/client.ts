@@ -558,3 +558,18 @@ export function createWebSocketClient(projectId: string, channels: string = 'all
 
 // Export error class
 export { APIClientError };
+
+// ─── Architecture Documents (Phase 10) ───────────────────────────────
+
+import type { ProjectDocument, ProjectDocumentSummary } from '../types';
+
+export async function listDocuments(repositoryId: string): Promise<ProjectDocumentSummary[]> {
+  return request<ProjectDocumentSummary[]>('GET', `/repositories/${repositoryId}/documents`);
+}
+
+export async function getDocument(repositoryId: string, docType: string): Promise<ProjectDocument> {
+  return request<ProjectDocument>(
+    'GET',
+    `/repositories/${repositoryId}/documents/${encodeURIComponent(docType)}`
+  );
+}

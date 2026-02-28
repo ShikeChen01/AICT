@@ -1,4 +1,14 @@
-"""Universal per-agent loop with tool execution."""
+"""Universal per-agent loop with tool execution.
+
+Design: "wake-to-END" loop. One agent wakes when it has unread channel messages (or an
+assigned task with no unread). Each iteration: (1) optionally inject mid-loop messages,
+(2) run budget/rate-limit gates, (3) call LLM with system prompt + conversation + tools,
+(4) persist assistant message and optionally run tools, (5) append tool results to
+conversation and loop, or handle END / loopback / error. Session ends when the agent
+calls the "end" tool (normal_end), or on max_iterations, max_loopbacks, interrupt,
+budget_exhausted, or LLM error. All agents (GM, CTO, Engineers) use this same loop;
+behavior differs by role via prompt blocks and tool registry (get_tool_defs_for_role).
+"""
 
 from __future__ import annotations
 
@@ -36,6 +46,10 @@ from backend.logging.my_logger import get_logger
 
 logger = get_logger(__name__)
 
+# ---------------------------------------------------------------------------
+# Vision and loop constants
+# ---------------------------------------------------------------------------
+
 # Vision-capable model name prefixes (conservative whitelist).
 # Any model whose name starts with one of these is assumed to support image inputs.
 _VISION_CAPABLE_PREFIXES = (
@@ -61,13 +75,20 @@ def _model_supports_vision(model: str) -> bool:
     return any(m.startswith(p) for p in _VISION_CAPABLE_PREFIXES)
 
 
+# Safeguard: stop session after this many LLM turns (avoids runaway loops).
 MAX_ITERATIONS = 1000
+# If the agent replies with text only (no tool calls) this many times in a row, end session.
 MAX_LOOPBACKS = 3
-# Check for new human messages every N iterations while the loop is running
+# Check for new human messages every N iterations so the agent sees late-sent user input.
 MID_LOOP_MSG_CHECK_INTERVAL = 5
-# Rate limit soft-pause: poll interval and maximum total wait before giving up
+# Rate limit soft-pause: poll interval and maximum total wait before giving up.
 RATE_LIMIT_POLL_SECONDS = 5
 RATE_LIMIT_MAX_WAIT_SECONDS = 600  # 10 minutes
+
+
+# ---------------------------------------------------------------------------
+# Helpers: fallback message, assignment context, rate-limit pause
+# ---------------------------------------------------------------------------
 
 
 async def _send_fallback_message(
@@ -204,7 +225,13 @@ async def run_inner_loop(
     emit_tool_result: callable[[str, str], None] | None = None,
     emit_agent_message: callable[[object], None] | None = None,
 ) -> str:
-    """Run wake-to-END loop for one agent session."""
+    """Run wake-to-END loop for one agent session.
+
+    Returns an end reason string: "normal_end", "interrupted", "max_iterations",
+    "max_loopbacks", "budget_exhausted", "cost_budget_exhausted", "rate_limited_timeout",
+    or "error".
+    """
+    # --- Services and repos used for the whole session ---
     message_service = MessageService(db)
     session_service = SessionService(db)
     task_service = TaskService(db)
@@ -213,9 +240,11 @@ async def run_inner_loop(
     llm = LLMService()
     handlers = get_handlers_for_role(agent.role)
 
+    # --- Session bootstrap: require either unread messages or an assigned task ---
     unread = await message_service.get_unread_for_agent(agent.id)
     assignment_context = None
     if not unread:
+        # No new messages: only continue if this agent has an active assigned task to work on.
         assignment_context = await _assignment_message_for_agent(db, agent)
         if not assignment_context:
             await session_service.end_session(session_id, end_reason="normal_end", status="completed")
@@ -227,15 +256,17 @@ async def run_inner_loop(
     project_agents = list(result.scalars().all())
     agent_by_id = {a.id: a for a in project_agents}
 
+    # Format unread channel messages (or assignment context) as the "incoming" user text.
     new_messages_text = PromptAssembly.format_incoming_messages(
         unread, agent_by_id, USER_AGENT_ID, assignment_context,
     )
 
-    # Phase 6: load image attachments for unread messages (if any)
+    # Load image attachments for unread messages (if any); attached later to the user message.
     _attachment_repo = AttachmentRepository(db)
     _unread_ids = [m.id for m in unread if m.id is not None]
     _attachments_by_msg = await _attachment_repo.get_for_messages(_unread_ids)
 
+    # Load last 5 sessions of conversation for context; agent memory is injected into system prompt.
     history = await agent_msg_repo.list_last_n_sessions(
         agent.id, session_id, n_sessions=5
     )
@@ -243,7 +274,7 @@ async def run_inner_loop(
     if isinstance(memory_content, dict):
         memory_content = str(memory_content) if memory_content else None
 
-    # Phase 3 + 4: load project-level settings (model/prompt overrides + all limits)
+    # Load project-level settings: model/prompt overrides and budget/rate limits.
     ps_repo = ProjectSettingsRepository(db)
     project_settings = await ps_repo.get_by_project(project.id)
     model_overrides = (project_settings.model_overrides or {}) if project_settings else {}
@@ -253,10 +284,9 @@ async def run_inner_loop(
     tokens_per_hour_limit = (project_settings.tokens_per_hour_limit or 0) if project_settings else 0
     daily_cost_budget_usd = (project_settings.daily_cost_budget_usd or 0.0) if project_settings else 0.0
 
-    # Phase 4: usage repo for token tracking + rate limiting
     usage_repo = LLMUsageRepository(db)
 
-    # Resolve model early so vision capability check is available before building messages.
+    # Resolve which model to use (role + overrides) so we can decide if we can attach images.
     resolved_model = resolve_model(
         agent.role,
         seniority=getattr(agent, "tier", None),
@@ -264,6 +294,7 @@ async def run_inner_loop(
         project_model_overrides=model_overrides,
     )
 
+    # Build prompt: system blocks + tool defs; then load history and append incoming messages.
     pa = PromptAssembly(agent, project, memory_content, prompt_overrides=prompt_overrides)
     pa.load_history(
         history,
@@ -271,7 +302,7 @@ async def run_inner_loop(
         known_tool_names=set(handlers.keys()),
     )
 
-    # Phase 6: attach image parts to the initial user message when attachments exist.
+    # If the user attached images, add them to the last user message (or a note if model is text-only).
     if _attachments_by_msg and new_messages_text:
         all_image_parts: list[ImagePart] = []
         for msg in unread:
@@ -310,6 +341,7 @@ async def run_inner_loop(
                     resolved_model,
                 )
 
+    # Persist the initial user turn to agent_messages so it appears in history on next load.
     if new_messages_text:
         await agent_msg_repo.create_message(
             agent_id=agent.id,
@@ -322,6 +354,7 @@ async def run_inner_loop(
 
     iteration = 0
     loopbacks = 0
+    # RunContext is passed to every tool handler (db, agent, project, services, emit callbacks).
     ctx = RunContext(
         db=db,
         agent=agent,
@@ -345,13 +378,13 @@ async def run_inner_loop(
 
     summarization_injected = False
 
+    # ========== Main loop: each iteration = one LLM call, then optional tool execution ==========
     while iteration < MAX_ITERATIONS:
         if interrupt_flag():
             await session_service.end_session_force(session_id, "interrupted")
             return "interrupted"
 
-        # Re-check for new human messages every MID_LOOP_MSG_CHECK_INTERVAL iterations.
-        # This ensures the agent sees user input sent after the session started.
+        # Mid-loop: periodically pull new channel messages so the agent sees late-sent user input.
         if iteration > 0 and iteration % MID_LOOP_MSG_CHECK_INTERVAL == 0:
             mid_loop_unread = await message_service.get_unread_for_agent(agent.id)
             if mid_loop_unread:
@@ -376,7 +409,7 @@ async def run_inner_loop(
                     iteration,
                 )
 
-        # Inject summarization block when context pressure hits 70%
+        # When context is ~70% full, ask the agent to summarize into memory so we can truncate history.
         if not summarization_injected and pa.context_pressure_ratio() >= 0.70:
             logger.info(
                 "Agent %s context pressure %.0f%% — injecting summarization block",
@@ -386,7 +419,8 @@ async def run_inner_loop(
             pa.append_summarization()
             summarization_injected = True
 
-        # ── Gate 1: daily token budget (hard stop) ─────────────────────
+        # ── Budget/rate-limit gates (checked before each LLM call) ─────────────────────────
+        # Gate 1: daily token budget — hard stop, session ends.
         if daily_token_budget > 0:
             tokens_today = await usage_repo.daily_tokens_for_project(project.id)
             if tokens_today >= daily_token_budget:
@@ -403,7 +437,7 @@ async def run_inner_loop(
                 )
                 return "budget_exhausted"
 
-        # ── Gate 2: daily cost budget (hard stop) ───────────────────────
+        # Gate 2: daily cost budget — hard stop, session ends.
         if daily_cost_budget_usd > 0:
             cost_today = await usage_repo.daily_cost_usd_for_project(project.id)
             if cost_today >= daily_cost_budget_usd:
@@ -420,7 +454,7 @@ async def run_inner_loop(
                 )
                 return "cost_budget_exhausted"
 
-        # ── Gate 3: hourly rate limits (soft pause — resumes when limits clear) ──
+        # Gate 3: hourly rate limits — soft pause; we wait until limits clear or timeout.
         if calls_per_hour_limit > 0 or tokens_per_hour_limit > 0:
             hourly = await usage_repo.hourly_stats(project.id)
             calls_over = calls_per_hour_limit > 0 and hourly["calls"] >= calls_per_hour_limit
@@ -445,13 +479,14 @@ async def run_inner_loop(
                         emit_agent_message,
                     )
                     return "rate_limited_timeout"
-                # Limits cleared or relaxed — update local vars so remaining gates use fresh values
+                # Limits cleared or user relaxed them — refresh local limit vars for next iteration.
                 if fresh_limits:
                     calls_per_hour_limit = fresh_limits.get("calls_per_hour_limit", calls_per_hour_limit)
                     tokens_per_hour_limit = fresh_limits.get("tokens_per_hour_limit", tokens_per_hour_limit)
                     daily_token_budget = fresh_limits.get("daily_token_budget", daily_token_budget)
                     daily_cost_budget_usd = fresh_limits.get("daily_cost_budget_usd", daily_cost_budget_usd)
 
+        # --- Call LLM with full context; get text response and optional tool calls ---
         try:
             content, tool_calls, llm_response = await llm.chat_completion_with_tools(
                 model=resolved_model,
@@ -472,7 +507,7 @@ async def run_inner_loop(
             )
             return "error"
 
-        # Phase 4: record token usage + broadcast real-time usage event
+        # Record token usage in DB and broadcast usage event for the frontend (cost/usage display).
         _effective_model = llm_response.model or resolved_model
         _effective_provider = llm_response.provider or "unknown"
         try:
@@ -511,6 +546,7 @@ async def run_inner_loop(
         iteration += 1
         await session_service.increment_iteration(session_id)
 
+        # Persist assistant turn (text + tool_calls) and append to prompt for next round.
         assistant_tool_input = {"__tool_calls__": tool_calls} if tool_calls else None
         await agent_msg_repo.create_message(
             agent_id=agent.id,
@@ -525,6 +561,7 @@ async def run_inner_loop(
             emit_text(content)
         pa.append_assistant(content or "", tool_calls)
 
+        # --- No tool calls: agent replied with text only; prompt to use tools or call END ---
         if not tool_calls:
             loopbacks += 1
             if loopbacks >= MAX_LOOPBACKS:
@@ -548,6 +585,7 @@ async def run_inner_loop(
             continue
 
         loopbacks = 0
+        # Rule: END must be called alone. If agent called END with other tools, inject warning and synthetic result.
         end_calls = [tc for tc in tool_calls if tc.get("name") == "end"]
         non_end_calls = [tc for tc in tool_calls if tc.get("name") != "end"]
         if end_calls and non_end_calls:
@@ -566,6 +604,7 @@ async def run_inner_loop(
                     tool_output=pa.messages[-1]["content"],
                 )
 
+        # --- Execute each non-END tool, persist tool result, append to prompt ---
         for tc in non_end_calls:
             name = tc.get("name", "")
             tool_input = tc.get("input") or {}
@@ -580,6 +619,7 @@ async def run_inner_loop(
                 validate_tool_input(name, tool_input)
                 result_text = await handler(ctx, tool_input)
             except Exception as exc:
+                # Tool failed or unknown: inject error text into prompt and persist as tool result; then continue to next tool.
                 result_text = truncate_tool_output(f"Tool '{name}' failed: {exc}")
                 pa.append_tool_error(name, exc, tool_use_id)
                 if emit_tool_result:
@@ -602,8 +642,7 @@ async def run_inner_loop(
             if emit_tool_result:
                 emit_tool_result(name, result_text)
             pa.append_tool_result(name, result_text, tool_use_id)
-            # After a successful update_memory, allow summarization to re-trigger
-            # if context pressure remains high after the agent writes its summary.
+            # Allow summarization to be injected again if context is still high after update_memory.
             if name == "update_memory" and summarization_injected:
                 summarization_injected = False
             tool_input_stored = {"__tool_use_id__": tool_use_id, **tool_input}
@@ -619,6 +658,7 @@ async def run_inner_loop(
                 tool_output=result_text,
             )
 
+        # --- Agent called only END: record synthetic tool result and end session normally ---
         if end_calls and not non_end_calls:
             end_text = "Session ended."
             if emit_tool_result:
@@ -637,6 +677,7 @@ async def run_inner_loop(
             await session_service.end_session(session_id, end_reason="normal_end", status="completed")
             return "normal_end"
 
+    # Fell through: hit MAX_ITERATIONS (safeguard).
     logger.warning(
         "Agent %s hit max_iterations (%d) in session %s",
         agent.id,

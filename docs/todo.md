@@ -184,25 +184,98 @@ Goal: delete the legacy LangGraph tool layer, rename ambiguous sandbox naming, r
 
 ## Phase 9 — Sandbox enhancements + pressure tests
 
-- [ ] Sandbox image upgrades
-  - [ ] Update `sandbox/Dockerfile` to install `git` and `chromium` (+ deps/fonts)
-- [ ] Pressure tests
-  - [ ] Add load tests: spawn N agents, send messages, validate no dropped wakeups and stable WS streaming under load
+> **Current state (audited):** Ubuntu 22.04 VM, 4-core, `(4.0 - 0.2) / 0.5 = 7` max concurrent containers (each: 0.5 CPU, 256 MB). Xvfb virtual display `:99` at 1024×768×24 already running. Screenshot via `ffmpeg x11grab` already wired (`sandbox_screenshot` tool). **No chromium installed. No window manager installed** (bare Xvfb only). Port range 30001-30100 gives 100 slots — not the bottleneck.
 
-## Phase 10 — Per-project “single source of truth” architecture entry + templates
+### 9b — Memory leak audit
 
-Goal: “per project, a single source of truth… manager-only write… templates: C4, arc42-lite, ADRs”.
+- [x] Audit `sandbox/pool_manager/main.py` container teardown path: verify `docker rm -f` is called on every `reset` and `remove` code path (including error branches)
+- [x] Audit volume lifecycle: check that Docker volumes created per-container are pruned on container destruction — no orphaned volumes
+- [x] Audit port reclaim: verify `port_range` set in pool manager state is always returned to the free pool after container removal, even on exception
+- [x] Audit `sandbox/pool_manager/main.py` idle TTL path: confirm containers that exceed `IDLE_TTL_SECONDS = 1800` are actually reaped by the health-check loop, not just marked stale
+- [x] Add a `GET /pool/debug` endpoint to pool manager that returns: container count, port occupancy, memory per container (`docker stats` snapshot) — for observability without SSH
 
-- [ ] Add a typed document store in DB
-  - [ ] New table (e.g., `project_documents`) for:
-    - [ ] `architecture_source_of_truth` (single long entry)
-    - [ ] `arc42_lite`
-    - [ ] `c4_diagrams`
-    - [ ] `adrs/*`
-  - [ ] Enforce manager-only write access; everyone read
-- [ ] API + UI
-  - [ ] Add endpoints to read/update docs
-  - [ ] Frontend: “Architecture” page rendering templates and current content
+### 9c — GUI desktop + headed browser setup
+
+- [x] **Install chromium + git in `sandbox/Dockerfile`:**
+  - Add `git`, `google-chrome-stable` (via Google apt repo — chromium-browser on Ubuntu 22.04 is a snap stub and does not work in Docker), `fonts-liberation`, `fonts-noto-color-emoji`, `fonts-noto-cjk`, `libnss3`, `libatk-bridge2.0-0`, `libxss1`, `dbus-x11`
+  - Add Google apt repo: `https://dl.google.com/linux/linux_signing_key.pub` + `deb [arch=amd64] https://dl.google.com/linux/chrome/deb/ stable main`
+- [x] **Install a minimal window manager** (`openbox`) so Chrome windows are properly positioned and composited on the Xvfb display; add `openbox --sm-disable &` to `entrypoint.sh` after Xvfb start
+- [x] **Verify screenshot captures browser correctly:** after Dockerfile changes, run `google-chrome-stable --display=:99 --no-sandbox --disable-dev-shm-usage https://example.com &` then `sandbox_screenshot` and confirm browser window appears in the JPEG output
+- [x] Update `sandbox/scripts/setup_vm.sh` and `sandbox/scripts/deploy_to_vm.sh` to rebuild the `sandbox-base` Docker image after Dockerfile changes
+
+## Phase 10 — Per-project "single source of truth" architecture entry + templates
+
+Goal: "per project, a single source of truth… manager-only write… templates: C4, arc42-lite, ADRs".
+
+> **Design decisions (locked):** Write access is manager **agent** only (not users) — manager calls a tool that upserts the document. Users get read-only REST. Content is plain Markdown (rendered in frontend). Real-time updates via WebSocket event. The existing `/artifacts` route in the frontend is repurposed as the Architecture page.
+
+### 10a — DB migration
+
+- [x] Create `backend/migrations/versions/013_project_documents.py`:
+  - New table `project_documents`:
+    - `id` — `UUID`, PK, `server_default=uuid_generate_v4()`
+    - `project_id` — `UUID`, FK → `repositories.id` ON DELETE CASCADE, not null
+    - `doc_type` — `VARCHAR(100)`, not null (values: `"architecture_source_of_truth"`, `"arc42_lite"`, `"c4_diagrams"`, `"adr/{slug}"`)
+    - `title` — `VARCHAR(255)`, nullable
+    - `content` — `TEXT`, nullable (raw Markdown)
+    - `updated_by_agent_id` — `UUID`, FK → `agents.id` ON DELETE SET NULL, nullable
+    - `created_at` — `TIMESTAMPTZ`, `server_default=now()`
+    - `updated_at` — `TIMESTAMPTZ`, `server_default=now()`, updated on write
+  - Unique constraint: `(project_id, doc_type)`
+
+### 10b — SQLAlchemy model
+
+- [x] Add `ProjectDocument` model to `backend/db/models.py` following the `ProjectSettings` pattern (UUID PK, FK with cascade, `_utcnow` default, relationship back to `Repository`)
+
+### 10c — Repository
+
+- [x] Create `backend/db/repositories/project_documents.py` extending `BaseRepository[ProjectDocument]`:
+  - `list_by_project(project_id) → list[ProjectDocument]`
+  - `get_by_type(project_id, doc_type) → ProjectDocument | None`
+  - `upsert(project_id, doc_type, content, title, agent_id) → ProjectDocument` — INSERT … ON CONFLICT (project_id, doc_type) DO UPDATE
+
+### 10d — Agent write tool (`write_architecture_doc`)
+
+- [x] Add `write_architecture_doc` to `backend/tools/executors/meta.py` (or a new `docs.py` executor):
+  - Parameters: `doc_type: str`, `content: str`, `title: str | None`
+  - Guard: only callable by `role == "manager"` agents — raise `ToolExecutionError(PERMISSION_DENIED)` otherwise
+  - Upserts via `ProjectDocumentRepository.upsert()`
+  - After write: broadcast `DOCUMENT_UPDATED` WebSocket event (see 10e)
+- [x] Register `write_architecture_doc` in `backend/tools/loop_registry.py`
+- [x] Add entry to `backend/tools/tool_descriptions.json` with `doc_type` allowed values and Markdown content guidance
+- [x] Update manager system prompt block (`backend/prompts/blocks/`) to describe when and how to call `write_architecture_doc` (after significant architectural decisions, ADR discussions, etc.)
+
+### 10e — WebSocket event
+
+- [x] Add `DOCUMENT_UPDATED = "document_updated"` to `EventType` in `backend/websocket/events.py`
+- [x] Add `create_document_updated_event(project_id, doc_type, title)` factory in `backend/websocket/events.py`
+- [x] Add `broadcast_document_updated(project_id, doc_type, title)` to `backend/websocket/manager.py`
+
+### 10f — Backend read-only API
+
+- [x] Add Pydantic schemas to `backend/schemas/project_documents.py`:
+  - `ProjectDocumentResponse` — `id`, `doc_type`, `title`, `content`, `updated_by_agent_id`, `updated_at`
+  - `ProjectDocumentListResponse` — list of `ProjectDocumentResponse`
+- [x] Add endpoints to `backend/api/v1/repositories.py` (or a new `documents.py` router):
+  - `GET /repositories/{repository_id}/documents` — returns `ProjectDocumentListResponse` (all docs for project, content omitted for list view)
+  - `GET /repositories/{repository_id}/documents/{doc_type}` — returns full `ProjectDocumentResponse`; `doc_type` path param is URL-encoded for ADR slugs
+  - Both require `require_project_access()` (any member can read); no POST/PATCH/DELETE for users
+
+### 10g — Frontend — Architecture page
+
+> **No user editing.** The page is strictly read-only for users. Documents are written exclusively by the manager agent via `write_architecture_doc`. Do not add a textarea, markdown editor, or any save/edit button.
+
+- [x] Rename "Artifacts" nav label to "Architecture" in `frontend/src/components/Workspace/Sidebar.tsx`
+- [x] Create `frontend/src/components/Architecture/ArchitecturePage.tsx`:
+  - On mount: `GET /repositories/{id}/documents` to populate tab list
+  - Tabs for each doc_type: "Source of Truth", "arc42-lite", "C4 Diagrams", "ADRs"
+  - Render content as read-only with `react-markdown` (install if not already present); show empty-state placeholder when `content` is null
+  - Subscribe to WS `document_updated` events — on match for current project, re-fetch and re-render the updated document without page reload
+- [x] Floating conversation bar (bottom-right overlay on Architecture page only):
+  - Collapsed "Chat with Manager" button; expands to a compact chat input
+  - On send: POST to existing message-send API targeting the manager agent's channel (reuse existing channel resolution logic)
+  - Collapses back after send; does not replace the main WorkspacePage chat
+- [x] Update `App.tsx` to render `ArchitecturePage` for the `artifacts` view
 
 ## Product positioning tasks
 

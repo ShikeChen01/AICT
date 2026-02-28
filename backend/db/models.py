@@ -80,6 +80,9 @@ class Repository(Base):
     memberships = relationship(
         "RepositoryMembership", back_populates="repository", cascade="all, delete-orphan"
     )
+    documents = relationship(
+        "ProjectDocument", back_populates="project", cascade="all, delete-orphan"
+    )
 
 
 # Backwards compatibility
@@ -459,4 +462,41 @@ class MessageAttachment(Base):
     __table_args__ = (
         Index("ix_msg_attachments_message", "message_id"),
         Index("ix_msg_attachments_attachment", "attachment_id"),
+    )
+
+
+# ── Phase 10: Project Documents ──────────────────────────────────────
+
+
+class ProjectDocument(Base):
+    """Manager-agent-writable architecture document. Read-only for users via REST.
+
+    Well-known doc_type values:
+      'architecture_source_of_truth' — single canonical architecture description
+      'arc42_lite'                   — arc42-lite template content
+      'c4_diagrams'                  — C4 model diagrams (Markdown + PlantUML/Mermaid)
+      'adr/<slug>'                   — individual Architecture Decision Records
+    """
+
+    __tablename__ = "project_documents"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    )
+    doc_type = Column(String(100), nullable=False)
+    title = Column(String(255), nullable=True)
+    content = Column(Text, nullable=True)
+    updated_by_agent_id = Column(
+        Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    project = relationship("Repository", back_populates="documents")
+    updated_by_agent = relationship("Agent", foreign_keys=[updated_by_agent_id])
+
+    __table_args__ = (
+        Index("ix_project_documents_project", "project_id", "updated_at"),
+        # unique constraint handled at migration level
     )

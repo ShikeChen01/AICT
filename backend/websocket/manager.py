@@ -25,6 +25,7 @@ from backend.websocket.events import (
     create_agent_text_event,
     create_agent_tool_call_event,
     create_agent_tool_result_event,
+    create_document_updated_event,
     create_sandbox_log_event,
     create_task_created_event,
     create_task_update_event,
@@ -46,6 +47,7 @@ class Channel(str, Enum):
     BACKEND_LOGS = "backend_logs"
     WORKFLOW = "workflow"
     USAGE = "usage"
+    DOCUMENTS = "documents"
     ALL = "all"
 
 
@@ -70,6 +72,7 @@ class ConnectionInfo:
                 Channel.BACKEND_LOGS,
                 Channel.WORKFLOW,
                 Channel.USAGE,
+                Channel.DOCUMENTS,
             ])
 
     def unsubscribe(self, channel: Channel) -> None:
@@ -399,6 +402,20 @@ class WebSocketManager:
             created_at=created_at,
         )
         return await self.broadcast(event, Channel.USAGE, project_id)
+
+    async def broadcast_document_updated(
+        self,
+        project_id: UUID,
+        doc_type: str,
+        title: str,
+    ) -> int:
+        """Broadcast document_updated event so the Architecture page re-fetches the doc."""
+        event = create_document_updated_event(
+            project_id=project_id,
+            doc_type=doc_type,
+            title=title,
+        )
+        return await self.broadcast(event, Channel.DOCUMENTS, project_id)
 
     async def broadcast_agent_stopped(
         self,

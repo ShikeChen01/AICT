@@ -286,12 +286,58 @@ async def destroy_sandbox(
         raise HTTPException(status_code=404, detail="Sandbox not found")
 
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _docker.destroy_container, sandbox_id)
-    await loop.run_in_executor(None, _docker.remove_volume, s.volume_name)
-    _ports.release(s.host_port)
-    _pool.remove(sandbox_id)
+    errors: list[str] = []
+    try:
+        await loop.run_in_executor(None, _docker.destroy_container, sandbox_id)
+    except Exception as exc:
+        errors.append(f"container destroy: {exc}")
+    try:
+        await loop.run_in_executor(None, _docker.remove_volume, s.volume_name)
+    except Exception as exc:
+        errors.append(f"volume remove: {exc}")
+    finally:
+        _ports.release(s.host_port)
+        _pool.remove(sandbox_id)
 
+    if errors:
+        print(f"[pool-manager] destroy_sandbox {sandbox_id} completed with errors: {errors}")
     return JSONResponse({"ok": True, "sandbox_id": sandbox_id})
+
+
+# ── Debug / observability ─────────────────────────────────────────────────────
+
+
+@app.get("/pool/debug")
+async def pool_debug(_: None = Depends(require_master_token)) -> JSONResponse:
+    """Return pool state + per-container memory snapshot for ops visibility."""
+    sandboxes = _pool.all()
+    loop = asyncio.get_event_loop()
+
+    container_stats = {}
+    for s in sandboxes:
+        try:
+            mem_mb = await loop.run_in_executor(None, _docker.get_container_memory_mb, s.sandbox_id)
+            container_stats[s.sandbox_id] = {
+                "status": s.status,
+                "host_port": s.host_port,
+                "assigned_agent_id": s.assigned_agent_id,
+                "memory_mb": mem_mb,
+                "idle_seconds": round(s.idle_seconds(), 1),
+                "health_failures": s.health_failures,
+            }
+        except Exception as exc:
+            container_stats[s.sandbox_id] = {"error": str(exc)}
+
+    return JSONResponse({
+        "max_containers": config.MAX_CONTAINERS,
+        "container_count": len(sandboxes),
+        "assigned": sum(1 for s in sandboxes if s.status == "assigned"),
+        "idle": sum(1 for s in sandboxes if s.status == "idle"),
+        "unhealthy": sum(1 for s in sandboxes if s.status == "unhealthy"),
+        "ports_used": len([s for s in sandboxes]),
+        "port_range": f"{config.PORT_RANGE_START}-{config.PORT_RANGE_END}",
+        "containers": container_stats,
+    })
 
 
 # ── Session helpers (main entry point for backend) ────────────────────────────

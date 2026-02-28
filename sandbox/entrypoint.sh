@@ -19,6 +19,10 @@ done
 
 export DISPLAY="${DISPLAY_NUM}"
 
+# Start a minimal window manager so Chrome windows are properly composited
+echo "[sandbox] Starting openbox window manager..."
+openbox --sm-disable &
+
 echo "[sandbox] Starting sandbox server on port ${PORT:-8080}..."
 exec python3 -m uvicorn main:app \
     --host 0.0.0.0 \

@@ -696,5 +696,54 @@
       "required": []
     },
     "allowed_roles": ["*"]
+  },
+  {
+    "name": "write_architecture_doc",
+    "description": "Write or update a project architecture document (manager only).",
+    "detailed_description": [
+      "Writes a Markdown architecture document to the project's document store.",
+      "Only the manager agent can call this tool. Users see documents read-only on",
+      "the Architecture page in the frontend; the page updates in real-time after each write.",
+      "",
+      "Call this after significant architectural decisions, ADR discussions, or when",
+      "the source-of-truth description needs updating.",
+      "",
+      "doc_type (required) — identifies which document to write. Well-known values:",
+      "  'architecture_source_of_truth' — the canonical description of the system",
+      "  'arc42_lite'                   — arc42-lite template (12 sections, condensed)",
+      "  'c4_diagrams'                  — C4 model in Mermaid or PlantUML fenced blocks",
+      "  'adr/<slug>'                   — an ADR, e.g. 'adr/001-use-postgresql'",
+      "",
+      "content (required) — full Markdown content. Write the complete document each",
+      "call; this is a full replace, not a patch.",
+      "",
+      "title (optional) — human-readable title displayed in the frontend tab.",
+      "",
+      "Example:",
+      "  write_architecture_doc(",
+      "    doc_type='adr/002-event-sourcing',",
+      "    title='ADR 002 — Event Sourcing',",
+      "    content='# ADR 002 — Event Sourcing\\n\\n## Status\\nAccepted\\n...'",
+      "  )"
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "doc_type": {
+          "type": "string",
+          "description": "Document type. Well-known: 'architecture_source_of_truth', 'arc42_lite', 'c4_diagrams', 'adr/<slug>'."
+        },
+        "content": {
+          "type": "string",
+          "description": "Full Markdown content. Replaces any previous content for this doc_type."
+        },
+        "title": {
+          "type": "string",
+          "description": "Optional human-readable title shown in the frontend tab."
+        }
+      },
+      "required": ["doc_type", "content"]
+    },
+    "allowed_roles": ["manager"]
   }
 ]

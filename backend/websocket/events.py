@@ -45,6 +45,9 @@ class EventType(str, Enum):
     # Agent lifecycle
     AGENT_STOPPED = "agent_stopped"
 
+    # Architecture documents (Phase 10)
+    DOCUMENT_UPDATED = "document_updated"
+
 
 class WebSocketEvent(BaseModel):
     """Base WebSocket event structure."""
@@ -459,6 +462,22 @@ class UsageUpdatePayload(BaseModel):
     output_tokens: int
     estimated_cost_usd: float
     created_at: str
+
+
+def create_document_updated_event(
+    project_id: UUID,
+    doc_type: str,
+    title: str,
+) -> WebSocketEvent:
+    """Create document_updated event emitted after write_architecture_doc completes."""
+    return WebSocketEvent(
+        type=EventType.DOCUMENT_UPDATED,
+        data={
+            "project_id": str(project_id),
+            "doc_type": doc_type,
+            "title": title,
+        },
+    )
 
 
 def create_usage_update_event(

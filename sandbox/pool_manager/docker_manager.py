@@ -113,3 +113,16 @@ class DockerManager:
             vol.remove(force=True)
         except NotFound:
             pass
+
+    # ── Stats ─────────────────────────────────────────────────────────────────
+
+    def get_container_memory_mb(self, sandbox_id: str) -> float | None:
+        """Return RSS memory usage in MB for a running container, or None if unavailable."""
+        try:
+            c = self._client.containers.get(f"sandbox-{sandbox_id}")
+            raw = c.stats(stream=False)
+            mem_usage = raw["memory_stats"].get("usage", 0)
+            cache = raw["memory_stats"].get("stats", {}).get("cache", 0)
+            return round((mem_usage - cache) / (1024 * 1024), 2)
+        except (NotFound, KeyError):
+            return None

@@ -367,7 +367,9 @@ export type WSEventType =
   | 'agent_message'
   | 'system_message'
   // Real-time LLM usage stream
-  | 'usage_update';
+  | 'usage_update'
+  // Architecture documents (Phase 10)
+  | 'document_updated';
 
 export interface WSEvent<T = unknown> {
   type: WSEventType;
@@ -548,6 +550,34 @@ export interface AgentStreamBuffer {
   chunks: StreamChunk[];
   isStreaming: boolean;
   lastActivity: number;
+}
+
+// ─── Architecture Documents (Phase 10) ───────────────────────────────
+
+export interface ProjectDocument {
+  id: UUID;
+  project_id: UUID;
+  doc_type: string;
+  title: string | null;
+  content: string | null;
+  updated_by_agent_id: UUID | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectDocumentSummary {
+  id: UUID;
+  project_id: UUID;
+  doc_type: string;
+  title: string | null;
+  updated_by_agent_id: UUID | null;
+  updated_at: string;
+}
+
+export interface DocumentUpdatedData {
+  project_id: UUID;
+  doc_type: string;
+  title: string;
 }
 
 // ─── API Response ────────────────────────────────────────────────────

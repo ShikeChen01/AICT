@@ -51,6 +51,7 @@ from backend.tools.executors.agents import (
     run_interrupt_agent,
 )
 from backend.tools.executors.meta import run_sleep, run_get_project_metadata
+from backend.tools.executors.docs import run_write_architecture_doc
 
 # Re-export for backward-compat with loop.py imports
 __all__ = [
@@ -99,6 +100,7 @@ _TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
     "remove_agent": run_remove_agent,
     "describe_tool": None,  # assigned below after _TOOLS is built
     "get_project_metadata": run_get_project_metadata,
+    "write_architecture_doc": run_write_architecture_doc,
 }
 
 

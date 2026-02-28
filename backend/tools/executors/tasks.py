@@ -20,7 +20,7 @@ async def run_list_tasks(ctx: RunContext, tool_input: dict) -> str:
             f"{t.id} | [{t.status}] {t.title} | assigned={t.assigned_agent_id}"
             for t in tasks
         )
-        or "No tasks."
+        or "No tasks. You can ask Manager for more tasks or end the session by using the 'end' tool."
     )
 
 

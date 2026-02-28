@@ -1,7 +1,0 @@
-ENV: 'development'
-PYTHONPATH: '/app'
-DATABASE_URL: 'postgresql+asyncpg://aict:6Ct2CUHas6T9RHAKW0faFtrBKCinSDmz@10.128.0.5:5432/aict'
-DB_SSL_MODE: 'require'
-API_TOKEN: 'change-me-in-production'
-CLAUDE_API_KEY: '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'
-GEMINI_API_KEY: 'AIzaSyD-oHDD7IjWJlm0clAJgYkLpm9PC1-GW3c'
