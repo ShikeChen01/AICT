@@ -400,6 +400,25 @@ class WebSocketManager:
         )
         return await self.broadcast(event, Channel.USAGE, project_id)
 
+    async def broadcast_agent_stopped(
+        self,
+        project_id: UUID,
+        agent_id: UUID,
+        display_name: str,
+    ) -> int:
+        """Broadcast agent_stopped event so all clients update agent status immediately."""
+        from backend.websocket.events import EventType, WebSocketEvent
+
+        event = WebSocketEvent(
+            type=EventType.AGENT_STOPPED,
+            data={
+                "agent_id": str(agent_id),
+                "project_id": str(project_id),
+                "display_name": display_name,
+            },
+        )
+        return await self.broadcast(event, Channel.AGENTS, project_id)
+
     async def broadcast_to_project(
         self,
         project_id: UUID,

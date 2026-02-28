@@ -1,645 +1,142 @@
 """Tool registry for the universal agent loop.
 
-Defines RunContext (injected into every tool executor), LoopTool (wrapper
-carrying name, schema, allowed roles, and executor), all executor functions,
-and helpers to derive tool defs / handler maps by agent role.
+Builds the _TOOLS list from tool_descriptions.json and maps each tool name to
+its executor function. All executor implementations live in backend/tools/executors/.
 
-Tool metadata (name, description, schema, roles) lives in tool_descriptions.json.
-Adding a new tool: add an entry there, write an executor here, map it in _TOOL_EXECUTORS.
+Adding a new tool:
+  1. Add the entry to tool_descriptions.json (name, description, schema, roles).
+  2. Write the executor in the appropriate executors/ module.
+  3. Map name -> executor in _TOOL_EXECUTORS below.
 """
 
 from __future__ import annotations
 
-import asyncio
-import base64
 import json
-import subprocess
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Awaitable, Callable
-from uuid import UUID
+from typing import Callable
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from backend.tools.base import (
+    LoopTool,
+    RunContext,
+    ToolExecutor,
+    truncate_tool_output,
+    parse_tool_uuid,
+)
+from backend.tools.executors.messaging import run_send_message, run_broadcast_message
+from backend.tools.executors.memory import run_update_memory, run_read_history, run_list_sessions
+from backend.tools.executors.tasks import (
+    run_list_tasks,
+    run_get_task_details,
+    run_create_task,
+    run_assign_task,
+    run_update_task_status,
+    run_abort_task,
+)
+from backend.tools.executors.sandbox import (
+    run_execute_command,
+    run_sandbox_start_session,
+    run_sandbox_end_session,
+    run_sandbox_health,
+    run_sandbox_screenshot,
+    run_sandbox_mouse_move,
+    run_sandbox_mouse_location,
+    run_sandbox_keyboard_press,
+    run_sandbox_record_screen,
+    run_sandbox_end_record_screen,
+)
+from backend.tools.executors.agents import (
+    run_spawn_engineer,
+    run_list_agents,
+    run_remove_agent,
+    run_interrupt_agent,
+)
+from backend.tools.executors.meta import run_sleep, run_get_project_metadata
 
-from backend.config import settings
-from backend.core.constants import USER_AGENT_ID
-from backend.db.models import Agent, AgentMessage, Repository
-from backend.db.repositories.messages import AgentMessageRepository
-from backend.schemas.task import TaskCreate
-from backend.services.agent_service import AgentService
-from backend.services.message_service import MessageService
-from backend.services.session_service import SessionService
-from backend.services.task_service import TaskService
-from backend.logging.my_logger import get_logger
-
-logger = get_logger(__name__)
-
-
-def _get_sandbox_service():
-    """Return the VM sandbox service."""
-    from backend.services.sandbox_service import SandboxService
-    return SandboxService()
-
-MAX_TOOL_RESULT_CHARS = 12000
-
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
-
-
-def truncate_tool_output(text: str) -> str:
-    if len(text) <= MAX_TOOL_RESULT_CHARS:
-        return text
-    return text[:MAX_TOOL_RESULT_CHARS] + "\n[output truncated]"
-
-
-def parse_tool_uuid(tool_input: dict, field_name: str, *, required: bool = True) -> UUID | None:
-    raw_value = tool_input.get(field_name)
-    if raw_value is None or (isinstance(raw_value, str) and raw_value.strip() == ""):
-        if required:
-            raise RuntimeError(f"Invalid tool input: '{field_name}' is required and must be a UUID.")
-        return None
-    try:
-        return UUID(str(raw_value))
-    except (TypeError, ValueError, AttributeError) as exc:
-        raise RuntimeError(f"Invalid UUID for '{field_name}': {raw_value!r}") from exc
-
-
-# ---------------------------------------------------------------------------
-# Runtime context
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class RunContext:
-    """Runtime context injected into every tool executor for a single agent session."""
-
-    db: AsyncSession
-    agent: Agent
-    project: Repository
-    session_id: UUID
-    message_service: MessageService
-    session_service: SessionService
-    task_service: TaskService
-    agent_service: AgentService
-    agent_msg_repo: AgentMessageRepository
-    emit_agent_message: Callable[[object], None] | None = field(default=None)
+# Re-export for backward-compat with loop.py imports
+__all__ = [
+    "RunContext",
+    "LoopTool",
+    "ToolExecutor",
+    "truncate_tool_output",
+    "parse_tool_uuid",
+    "get_tool_defs_for_role",
+    "get_handlers_for_role",
+    "validate_tool_input",
+]
 
 
 # ---------------------------------------------------------------------------
-# Tool wrapper type
+# Tool executor map
 # ---------------------------------------------------------------------------
 
-ToolExecutor = Callable[[RunContext, dict], Awaitable[str]]
-
-
-@dataclass
-class LoopTool:
-    """Descriptor for a single loop tool.
-
-    allowed_roles: list of role strings, or ["*"] to grant to all roles.
-    execute: None for the special 'end' tool, which the loop handles separately.
-    """
-
-    name: str
-    description: str
-    input_schema: dict
-    allowed_roles: list[str]
-    execute: ToolExecutor | None = field(default=None)
-
-
-# ---------------------------------------------------------------------------
-# Tool executors — one function per tool
-# ---------------------------------------------------------------------------
-
-
-async def _run_send_message(ctx: RunContext, tool_input: dict) -> str:
-    from backend.workers.message_router import get_message_router
-
-    target_agent_id = parse_tool_uuid(tool_input, "target_agent_id")
-    msg = await ctx.message_service.send(
-        from_agent_id=ctx.agent.id,
-        target_agent_id=target_agent_id,
-        project_id=ctx.project.id,
-        content=str(tool_input["content"]),
-    )
-    await ctx.db.flush()
-    if target_agent_id == USER_AGENT_ID:
-        if ctx.emit_agent_message:
-            ctx.emit_agent_message(msg)
-    else:
-        get_message_router().notify(target_agent_id)
-    return f"Message sent to {target_agent_id}"
-
-
-async def _run_broadcast_message(ctx: RunContext, tool_input: dict) -> str:
-    await ctx.message_service.broadcast(
-        from_agent_id=ctx.agent.id,
-        project_id=ctx.project.id,
-        content=str(tool_input["content"]),
-    )
-    await ctx.db.flush()
-    return "Broadcast sent."
-
-
-async def _run_update_memory(ctx: RunContext, tool_input: dict) -> str:
-    content = tool_input.get("content")
-    if not content:
-        raise ValueError(
-            "Missing required parameter: 'content' (string). "
-            "Provide the memory text you want to persist."
-        )
-    ctx.agent.memory = {"content": str(content)}
-    await ctx.db.flush()
-    return "Memory updated."
-
-
-async def _run_read_history(ctx: RunContext, tool_input: dict) -> str:
-    limit = int(tool_input.get("limit", 20))
-    offset = int(tool_input.get("offset", 0))
-    session_filter = parse_tool_uuid(tool_input, "session_id", required=False)
-
-    if session_filter is not None:
-        q = (
-            select(AgentMessage)
-            .where(AgentMessage.agent_id == ctx.agent.id)
-            .where(AgentMessage.session_id == session_filter)
-            .order_by(AgentMessage.created_at.asc())
-            .limit(limit)
-            .offset(offset)
-        )
-    else:
-        # Default: current session, newest first
-        q = (
-            select(AgentMessage)
-            .where(AgentMessage.agent_id == ctx.agent.id)
-            .where(AgentMessage.session_id == ctx.session_id)
-            .order_by(AgentMessage.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-
-    res = await ctx.db.execute(q)
-    rows = list(res.scalars().all())
-    if not rows:
-        return "No history."
-
-    # Group by session_id to insert boundary markers
-    lines: list[str] = []
-    current_session: object = None
-    for m in rows:
-        if m.session_id != current_session:
-            current_session = m.session_id
-            ts = m.created_at.strftime("%Y-%m-%d") if m.created_at else "unknown"
-            lines.append(f"--- Session {m.session_id} (started {ts}) ---")
-        ts_full = m.created_at.strftime("%Y-%m-%d %H:%M:%S") if m.created_at else ""
-        lines.append(f"[session:{str(m.session_id)[:8]}] [{ts_full}] [{m.role}] {m.content}")
-
-    return "\n".join(lines)
-
-
-async def _run_list_sessions(ctx: RunContext, tool_input: dict) -> str:
-    from backend.db.models import AgentSession
-    from sqlalchemy import func
-
-    limit = int(tool_input.get("limit", 20))
-
-    # Count messages per session
-    count_q = (
-        select(AgentMessage.session_id, func.count(AgentMessage.id).label("msg_count"))
-        .where(AgentMessage.agent_id == ctx.agent.id)
-        .group_by(AgentMessage.session_id)
-    )
-    count_res = await ctx.db.execute(count_q)
-    msg_counts: dict = {row[0]: row[1] for row in count_res.all()}
-
-    sessions_q = (
-        select(AgentSession)
-        .where(AgentSession.agent_id == ctx.agent.id)
-        .order_by(AgentSession.started_at.desc())
-        .limit(limit)
-    )
-    sess_res = await ctx.db.execute(sessions_q)
-    sessions = list(sess_res.scalars().all())
-
-    if not sessions:
-        return "No sessions."
-
-    lines: list[str] = []
-    for s in sessions:
-        started = s.started_at.strftime("%Y-%m-%d %H:%M:%S") if s.started_at else "?"
-        ended = s.ended_at.strftime("%Y-%m-%d %H:%M:%S") if s.ended_at else "running"
-        count = msg_counts.get(s.id, 0)
-        lines.append(f"{s.id} | {started} | {ended} | {s.status} | {count} messages")
-
-    return "\n".join(lines)
-
-
-async def _run_sleep(ctx: RunContext, tool_input: dict) -> str:
-    duration = max(0, min(int(tool_input.get("duration_seconds", 0)), 3600))
-    await asyncio.sleep(duration)
-    return f"Slept for {duration} seconds."
-
-
-async def _run_list_tasks(ctx: RunContext, tool_input: dict) -> str:
-    status = tool_input.get("status")
-    tasks = (
-        await ctx.task_service.list_by_status(ctx.project.id, status)
-        if status
-        else await ctx.task_service.list_by_project(ctx.project.id)
-    )
-    return (
-        "\n".join(f"{t.id} | [{t.status}] {t.title} | assigned={t.assigned_agent_id}" for t in tasks)
-        or "No tasks."
-    )
-
-
-async def _run_get_task_details(ctx: RunContext, tool_input: dict) -> str:
-    task = await ctx.task_service.get(parse_tool_uuid(tool_input, "task_id"))
-    return (
-        f"id={task.id}\n"
-        f"title={task.title}\n"
-        f"description={task.description}\n"
-        f"status={task.status}\n"
-        f"assigned_agent_id={task.assigned_agent_id}\n"
-        f"git_branch={task.git_branch}\n"
-        f"pr_url={task.pr_url}"
-    )
-
-
-async def _run_execute_command(ctx: RunContext, tool_input: dict) -> str:
-    command = str(tool_input["command"])
-    timeout = int(tool_input.get("timeout", 120))
-    svc = _get_sandbox_service()
-    result = await svc.execute_command(ctx.db, ctx.agent, command, timeout=timeout)
-    parts: list[str] = [f"Sandbox: {ctx.agent.sandbox_id}"]
-    if result.truncated:
-        parts.append("[output truncated]")
-    if result.exit_code is None and not result.stdout.strip():
-        parts.append(
-            f"[command timed out after {timeout}s — no output received. "
-            "The sandbox may still be starting up. Try again in a few seconds.]"
-        )
-    else:
-        parts.append(result.stdout)
-    if result.exit_code is not None:
-        parts.append(f"Exit Code: {result.exit_code}")
-    return "\n".join(parts).strip()
-
-
-async def _run_start_sandbox(ctx: RunContext, tool_input: dict) -> str:
-    svc = _get_sandbox_service()
-    meta = await svc.ensure_running_sandbox(ctx.db, ctx.agent)
-    return meta.message or f"Sandbox ready: {meta.sandbox_id}"
-
-
-# ── Sandbox tool executors ──────────────────────────────────────────────────
-
-
-async def _run_sandbox_start_session(ctx: RunContext, tool_input: dict) -> str:
-    svc = _get_sandbox_service()
-    meta = await svc.ensure_running_sandbox(ctx.db, ctx.agent)
-    return meta.message or f"Sandbox ready: {meta.sandbox_id}"
-
-
-async def _run_sandbox_end_session(ctx: RunContext, tool_input: dict) -> str:
-    if not ctx.agent.sandbox_id:
-        return "No active sandbox to end."
-    svc = _get_sandbox_service()
-    await svc.close_sandbox(ctx.db, ctx.agent)
-    return "Sandbox session ended. Container returned to pool."
-
-
-async def _run_sandbox_health(ctx: RunContext, tool_input: dict) -> str:
-    svc = _get_sandbox_service()
-    try:
-        data = await svc.sandbox_health(ctx.agent)
-        return (
-            f"status={data.get('status')} "
-            f"uptime={data.get('uptime_seconds')}s "
-            f"display={data.get('display')}"
-        )
-    except Exception as exc:
-        detail = str(exc) or repr(exc)
-        return f"Health check failed: {type(exc).__name__}: {detail}"
-
-
-async def _run_sandbox_screenshot(ctx: RunContext, tool_input: dict) -> str:
-    if not ctx.agent.sandbox_id:
-        await _run_sandbox_start_session(ctx, {})
-    svc = _get_sandbox_service()
-    try:
-        img_bytes = await svc.take_screenshot(ctx.agent)
-        b64 = base64.b64encode(img_bytes).decode()
-        return f"Screenshot captured ({len(img_bytes)} bytes). Base64 JPEG:\n{b64[:200]}...[truncated for display]"
-    except Exception as exc:
-        return f"Screenshot failed: {exc}"
-
-
-async def _run_sandbox_mouse_move(ctx: RunContext, tool_input: dict) -> str:
-    x = int(tool_input["x"])
-    y = int(tool_input["y"])
-    svc = _get_sandbox_service()
-    try:
-        await svc.mouse_move(ctx.agent, x, y)
-        return f"Mouse moved to ({x}, {y})"
-    except Exception as exc:
-        return f"Mouse move failed: {exc}"
-
-
-async def _run_sandbox_mouse_location(ctx: RunContext, tool_input: dict) -> str:
-    svc = _get_sandbox_service()
-    try:
-        loc = await svc.mouse_location(ctx.agent)
-        return f"Mouse at x={loc.get('x')}, y={loc.get('y')}"
-    except Exception as exc:
-        return f"Mouse location failed: {exc}"
-
-
-async def _run_sandbox_keyboard_press(ctx: RunContext, tool_input: dict) -> str:
-    keys = tool_input.get("keys")
-    text = tool_input.get("text")
-    if not keys and not text:
-        return "Error: provide 'keys' or 'text'."
-    svc = _get_sandbox_service()
-    try:
-        await svc.keyboard_press(ctx.agent, keys=keys, text=text)
-        return f"Keyboard input sent: keys={keys!r} text={text!r}"
-    except Exception as exc:
-        return f"Keyboard press failed: {exc}"
-
-
-async def _run_sandbox_record_screen(ctx: RunContext, tool_input: dict) -> str:
-    svc = _get_sandbox_service()
-    try:
-        data = await svc.start_recording(ctx.agent)
-        return f"Recording started. Status: {data.get('status')}"
-    except Exception as exc:
-        return f"Start recording failed: {exc}"
-
-
-async def _run_sandbox_end_record_screen(ctx: RunContext, tool_input: dict) -> str:
-    svc = _get_sandbox_service()
-    try:
-        video_bytes = await svc.stop_recording(ctx.agent)
-        b64 = base64.b64encode(video_bytes).decode()
-        return f"Recording stopped ({len(video_bytes)} bytes). Base64 MP4:\n{b64[:200]}...[truncated for display]"
-    except Exception as exc:
-        return f"Stop recording failed: {exc}"
-
-
-async def _run_list_branches(ctx: RunContext, tool_input: dict) -> str:
-    repo_path = settings.code_repo_path
-    try:
-        subprocess.check_output(
-            ["git", "-C", repo_path, "rev-parse", "--is-inside-work-tree"],
-            text=True,
-            stderr=subprocess.STDOUT,
-        )
-    except subprocess.CalledProcessError as exc:
-        detail = (exc.output or "").strip()
-        raise RuntimeError(detail or f"Git repository not initialized at {repo_path}.") from exc
-    try:
-        output = subprocess.check_output(
-            ["git", "-C", repo_path, "branch", "--list"],
-            text=True,
-            stderr=subprocess.PIPE,
-        )
-    except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or "").strip()
-        raise RuntimeError(detail or f"Failed to list branches in repository: {repo_path}") from exc
-    return output.strip() or "No branches."
-
-
-async def _run_view_diff(ctx: RunContext, tool_input: dict) -> str:
-    base = str(tool_input.get("base", "main"))
-    head = str(tool_input.get("head", "HEAD"))
-    output = subprocess.check_output(
-        ["git", "-C", settings.code_repo_path, "diff", f"{base}...{head}"],
-        text=True,
-    )
-    return output.strip() or "No diff."
-
-
-async def _run_create_task(ctx: RunContext, tool_input: dict) -> str:
-    if ctx.agent.role != "manager":
-        raise RuntimeError("Only manager can create tasks")
-    task = await ctx.task_service.create(
-        ctx.project.id,
-        TaskCreate(
-            title=str(tool_input["title"]),
-            description=tool_input.get("description"),
-            critical=int(tool_input.get("critical", 5)),
-            urgent=int(tool_input.get("urgent", 5)),
-            status="backlog",
-        ),
-        created_by_id=ctx.agent.id,
-    )
-    await ctx.db.flush()
-    return f"Task created: {task.id}"
-
-
-async def _run_assign_task(ctx: RunContext, tool_input: dict) -> str:
-    if ctx.agent.role != "manager":
-        raise RuntimeError("Only manager can assign tasks")
-    task = await ctx.task_service.assign(
-        parse_tool_uuid(tool_input, "task_id"),
-        parse_tool_uuid(tool_input, "agent_id"),
-    )
-    await ctx.db.flush()
-    return f"Task assigned: {task.id} -> {task.assigned_agent_id}"
-
-
-async def _run_update_task_status(ctx: RunContext, tool_input: dict) -> str:
-    task = await ctx.task_service.get(parse_tool_uuid(tool_input, "task_id"))
-    if ctx.agent.role == "engineer" and task.assigned_agent_id != ctx.agent.id:
-        raise RuntimeError("Engineers can only update their own tasks")
-    task = await ctx.task_service.update_status(task.id, str(tool_input["status"]))
-    await ctx.db.flush()
-    return f"Task status updated: {task.id} -> {task.status}"
-
-
-async def _run_abort_task(ctx: RunContext, tool_input: dict) -> str:
-    if ctx.agent.role != "engineer":
-        raise RuntimeError("Only engineers can abort tasks")
-    if ctx.agent.current_task_id is None:
-        raise RuntimeError("No active task to abort")
-    task = await ctx.task_service.update_status(ctx.agent.current_task_id, "aborted")
-    ctx.agent.current_task_id = None
-    await ctx.message_service.send(
-        from_agent_id=ctx.agent.id,
-        target_agent_id=task.created_by_id or USER_AGENT_ID,
-        project_id=ctx.project.id,
-        content=f"Task '{task.title}' aborted: {tool_input.get('reason', '')}",
-        message_type="system",
-    )
-    await ctx.db.flush()
-    return "Task aborted."
-
-
-async def _run_interrupt_agent(ctx: RunContext, tool_input: dict) -> str:
-    if ctx.agent.role not in {"manager", "cto"}:
-        raise RuntimeError("Only manager/cto can interrupt")
-    from backend.workers.worker_manager import get_worker_manager
-
-    target_id = parse_tool_uuid(tool_input, "target_agent_id")
-    get_worker_manager().interrupt_agent(target_id)
-    return f"Interrupted agent {target_id}"
-
-
-async def _run_spawn_engineer(ctx: RunContext, tool_input: dict) -> str:
-    if ctx.agent.role not in {"manager", "cto"}:
-        raise RuntimeError("Only manager/cto can spawn engineers")
-    engineer = await ctx.agent_service.spawn_engineer(
-        ctx.project.id,
-        display_name=str(tool_input["display_name"]),
-        seniority=str(tool_input["seniority"]) if tool_input.get("seniority") else None,
-    )
-    await ctx.db.flush()
-    from backend.workers.worker_manager import get_worker_manager
-    from backend.workers.message_router import get_message_router
-
-    await get_worker_manager().spawn_worker(engineer.id, engineer.project_id)
-    get_message_router().notify(engineer.id)
-    return (
-        f"Engineer spawned: {engineer.id}\n"
-        f"The engineer is now awake. Send it a message or assign a task to give it work."
-    )
-
-
-async def _run_list_agents(ctx: RunContext, tool_input: dict) -> str:
-    res = await ctx.db.execute(select(Agent).where(Agent.project_id == ctx.project.id))
-    rows = list(res.scalars().all())
-    return "\n".join(f"{a.id} | {a.display_name} | {a.role} | {a.status}" for a in rows)
-
-
-async def _run_remove_agent(ctx: RunContext, tool_input: dict) -> str:
-    if ctx.agent.role != "manager":
-        raise RuntimeError("Only manager can remove agents")
-
-    target_id = parse_tool_uuid(tool_input, "agent_id")
-    reason = str(tool_input.get("reason", "")).strip()
-
-    res = await ctx.db.execute(select(Agent).where(Agent.id == target_id))
-    target = res.scalar_one_or_none()
-    if target is None:
-        return f"Error: agent {target_id} not found."
-    if target.project_id != ctx.project.id:
-        return "Error: cannot remove an agent from a different project."
-    if target.role in ("manager", "cto"):
-        return f"Error: cannot remove a {target.role} — only engineers can be removed."
-
-    display_name = target.display_name
-
-    # Close sandbox before stopping the worker
-    if target.sandbox_id:
-        try:
-            svc = _get_sandbox_service()
-            await svc.close_sandbox(ctx.db, target)
-        except Exception as exc:
-            logger.warning("Failed to close sandbox for agent %s: %s", target_id, exc)
-
-    from backend.workers.worker_manager import get_worker_manager
-    await get_worker_manager().remove_worker(target_id)
-
-    removed = await ctx.agent_service.remove_agent(target_id, ctx.project.id)
-    await ctx.db.flush()
-
-    log_suffix = f" Reason: {reason}" if reason else ""
-    logger.info("Manager %s removed agent %s (%s).%s", ctx.agent.id, target_id, display_name, log_suffix)
-    return (
-        f"Agent '{display_name}' ({target_id}) has been permanently removed from the project."
-        f"{' Reason: ' + reason if reason else ''}"
-    )
-
-
-async def _run_create_branch(ctx: RunContext, tool_input: dict) -> str:
-    if ctx.agent.role not in {"cto", "engineer"}:
-        raise RuntimeError("Only cto/engineer can create branches")
-    repo_path = settings.code_repo_path
-    subprocess.check_output(["git", "-C", repo_path, "checkout", "main"], text=True)
-    subprocess.check_output(
-        ["git", "-C", repo_path, "checkout", "-b", str(tool_input["branch_name"])],
-        text=True,
-    )
-    return f"Branch created: {tool_input['branch_name']}"
-
-
-async def _run_get_project_metadata(ctx: RunContext, _input: dict) -> str:
-    from backend.db.models import ProjectSettings, User, Task
-    from sqlalchemy import func
-
-    settings_row = await ctx.db.execute(
-        select(ProjectSettings).where(ProjectSettings.project_id == ctx.project.id)
-    )
-    project_settings = settings_row.scalar_one_or_none()
-
-    owner_row = await ctx.db.execute(
-        select(User).where(User.id == ctx.project.owner_id)
-    )
-    owner = owner_row.scalar_one_or_none()
-
-    agent_rows = await ctx.db.execute(
-        select(Agent.role, Agent.status, func.count(Agent.id))
-        .where(Agent.project_id == ctx.project.id)
-        .group_by(Agent.role, Agent.status)
-    )
-    agent_counts = {f"{role}:{status}": count for role, status, count in agent_rows}
-
-    task_rows = await ctx.db.execute(
-        select(Task.status, func.count(Task.id))
-        .where(Task.project_id == ctx.project.id)
-        .group_by(Task.status)
-    )
-    task_counts = {status: count for status, count in task_rows}
-
-    metadata = {
-        "project": {
-            "id": str(ctx.project.id),
-            "name": ctx.project.name,
-            "description": ctx.project.description,
-            "code_repo_url": ctx.project.code_repo_url,
-            "code_repo_path": ctx.project.code_repo_path,
-            "spec_repo_path": ctx.project.spec_repo_path,
-            "settings": {
-                "max_engineers": project_settings.max_engineers if project_settings else None,
-            },
-            "agents": agent_counts,
-            "tasks": task_counts,
-        },
-        "owner": {
-            "display_name": owner.display_name if owner else None,
-            "email": owner.email if owner else None,
-            "github_token": owner.github_token if owner else None,
-        } if owner else None,
-    }
-    return json.dumps(metadata, indent=2)
-
-
-async def _run_create_pull_request(ctx: RunContext, tool_input: dict) -> str:
-    if ctx.agent.role not in {"cto", "engineer"}:
-        raise RuntimeError("Only cto/engineer can create PRs")
-    from backend.services.git_service import GitService
-
-    current_branch = subprocess.check_output(
-        ["git", "-C", settings.code_repo_path, "rev-parse", "--abbrev-ref", "HEAD"],
-        text=True,
-    ).strip()
-    svc = GitService(settings.code_repo_path)
-    pr = svc.create_pr(ctx.agent.role, current_branch, "main")
-    return f"PR created: {pr.pr_url}"
+_TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
+    "end": None,
+    "send_message": run_send_message,
+    "broadcast_message": run_broadcast_message,
+    "update_memory": run_update_memory,
+    "read_history": run_read_history,
+    "list_sessions": run_list_sessions,
+    "sleep": run_sleep,
+    "list_tasks": run_list_tasks,
+    "get_task_details": run_get_task_details,
+    "execute_command": run_execute_command,
+    "sandbox_start_session": run_sandbox_start_session,
+    "sandbox_end_session": run_sandbox_end_session,
+    "sandbox_health": run_sandbox_health,
+    "sandbox_screenshot": run_sandbox_screenshot,
+    "sandbox_mouse_move": run_sandbox_mouse_move,
+    "sandbox_mouse_location": run_sandbox_mouse_location,
+    "sandbox_keyboard_press": run_sandbox_keyboard_press,
+    "sandbox_record_screen": run_sandbox_record_screen,
+    "sandbox_end_record_screen": run_sandbox_end_record_screen,
+    "create_task": run_create_task,
+    "assign_task": run_assign_task,
+    "update_task_status": run_update_task_status,
+    "abort_task": run_abort_task,
+    "interrupt_agent": run_interrupt_agent,
+    "spawn_engineer": run_spawn_engineer,
+    "list_agents": run_list_agents,
+    "remove_agent": run_remove_agent,
+    "describe_tool": None,  # assigned below after _TOOLS is built
+    "get_project_metadata": run_get_project_metadata,
+}
 
 
 # ---------------------------------------------------------------------------
-# Tool registry — built from tool_descriptions.json + executor map
-#
-# Adding a new tool:
-#   1. Add the entry to tool_descriptions.json (name, description, schema, roles)
-#   2. Write the executor function above
-#   3. Map name → executor in _TOOL_EXECUTORS below
+# Build _TOOLS from tool_descriptions.json
 # ---------------------------------------------------------------------------
 
+_RAW_TOOLS: list[dict] = json.loads(
+    (Path(__file__).parent / "tool_descriptions.json").read_text(encoding="utf-8")
+)
+
+
+def _normalize_detailed_description(raw: str | list[str]) -> str:
+    if isinstance(raw, list):
+        return "\n".join(raw)
+    return raw
+
+
+_TOOL_DETAILS: dict[str, str] = {
+    t["name"]: _normalize_detailed_description(t["detailed_description"])
+    for t in _RAW_TOOLS
+}
+
+_TOOLS: list[LoopTool] = [
+    LoopTool(
+        name=t["name"],
+        description=t["description"],
+        input_schema=t["input_schema"],
+        allowed_roles=t["allowed_roles"],
+        execute=_TOOL_EXECUTORS.get(t["name"]),
+    )
+    for t in _RAW_TOOLS
+]
+
+
+# ---------------------------------------------------------------------------
+# describe_tool — defined here because it needs access to _TOOLS/_TOOL_DETAILS
+# ---------------------------------------------------------------------------
 
 def _role_has_tool(tool: LoopTool, role: str) -> bool:
     return "*" in tool.allowed_roles or role in tool.allowed_roles
@@ -683,74 +180,15 @@ async def _run_describe_tool(ctx: RunContext, tool_input: dict) -> str:
     return "\n".join(lines)
 
 
-_TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
-    "end": None,
-    "send_message": _run_send_message,
-    "broadcast_message": _run_broadcast_message,
-    "update_memory": _run_update_memory,
-    "read_history": _run_read_history,
-    "list_sessions": _run_list_sessions,
-    "sleep": _run_sleep,
-    "list_tasks": _run_list_tasks,
-    "get_task_details": _run_get_task_details,
-    "execute_command": _run_execute_command,
-    "start_sandbox": _run_start_sandbox,
-    "list_branches": _run_list_branches,
-    "view_diff": _run_view_diff,
-    "create_task": _run_create_task,
-    "assign_task": _run_assign_task,
-    "update_task_status": _run_update_task_status,
-    "abort_task": _run_abort_task,
-    "interrupt_agent": _run_interrupt_agent,
-    "spawn_engineer": _run_spawn_engineer,
-    "list_agents": _run_list_agents,
-    "remove_agent": _run_remove_agent,
-    "describe_tool": _run_describe_tool,
-    "get_project_metadata": _run_get_project_metadata,
-    "create_branch": _run_create_branch,
-    "create_pull_request": _run_create_pull_request,
-    # VM sandbox tools
-    "sandbox_start_session": _run_sandbox_start_session,
-    "sandbox_end_session": _run_sandbox_end_session,
-    "sandbox_health": _run_sandbox_health,
-    "sandbox_screenshot": _run_sandbox_screenshot,
-    "sandbox_mouse_move": _run_sandbox_mouse_move,
-    "sandbox_mouse_location": _run_sandbox_mouse_location,
-    "sandbox_keyboard_press": _run_sandbox_keyboard_press,
-    "sandbox_record_screen": _run_sandbox_record_screen,
-    "sandbox_end_record_screen": _run_sandbox_end_record_screen,
-}
-
-_RAW_TOOLS: list[dict] = json.loads(
-    (Path(__file__).parent / "tool_descriptions.json").read_text(encoding="utf-8")
-)
-
-_TOOLS: list[LoopTool] = [
-    LoopTool(
-        name=t["name"],
-        description=t["description"],
-        input_schema=t["input_schema"],
-        allowed_roles=t["allowed_roles"],
-        execute=_TOOL_EXECUTORS.get(t["name"]),
-    )
-    for t in _RAW_TOOLS
-]
-
-def _normalize_detailed_description(raw: str | list[str]) -> str:
-    """Join list of lines into one string; leave string as-is (e.g. from older JSON)."""
-    if isinstance(raw, list):
-        return "\n".join(raw)
-    return raw
-
-
-_TOOL_DETAILS: dict[str, str] = {
-    t["name"]: _normalize_detailed_description(t["detailed_description"])
-    for t in _RAW_TOOLS
-}
+# Patch describe_tool executor now that _TOOLS is built
+for _t in _TOOLS:
+    if _t.name == "describe_tool":
+        _t.execute = _run_describe_tool
+_TOOL_EXECUTORS["describe_tool"] = _run_describe_tool
 
 
 # ---------------------------------------------------------------------------
-# Public API for loop.py
+# Public API consumed by loop.py
 # ---------------------------------------------------------------------------
 
 
@@ -764,10 +202,10 @@ def get_tool_defs_for_role(role: str) -> list[dict]:
 
 
 def validate_tool_input(tool_name: str, tool_input: dict) -> None:
-    """Check *tool_input* against the tool's ``input_schema``.
+    """Check tool_input against the tool's input_schema.
 
-    Raises :class:`ValueError` with an actionable message listing every
-    missing required parameter so the LLM can self-correct.
+    Raises ValueError with an actionable message listing every missing required
+    parameter so the LLM can self-correct.
     """
     tool = next((t for t in _TOOLS if t.name == tool_name), None)
     if tool is None:

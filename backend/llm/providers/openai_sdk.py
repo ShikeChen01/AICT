@@ -22,10 +22,16 @@ logger = get_logger(__name__)
 # o-series reasoning models: o1, o1-mini, o1-preview, o3, o3-mini, o3-pro, o4-mini, etc.
 # These models have restrictions: no temperature support, use developer role, max_completion_tokens.
 _O_SERIES_RE = re.compile(r"^o\d", re.IGNORECASE)
+_GPT5_SERIES_RE = re.compile(r"^gpt-5(\.|-|$)", re.IGNORECASE)
 
 
 def _is_o_series(model: str) -> bool:
     return bool(_O_SERIES_RE.match(model.strip()))
+
+
+def _requires_max_completion_tokens(model: str) -> bool:
+    normalized = model.strip()
+    return bool(_O_SERIES_RE.match(normalized) or _GPT5_SERIES_RE.match(normalized))
 
 
 class OpenAISDKProvider(BaseLLMProvider):
@@ -36,6 +42,7 @@ class OpenAISDKProvider(BaseLLMProvider):
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         o_series = _is_o_series(request.model)
+        requires_max_completion_tokens = _requires_max_completion_tokens(request.model)
         messages = self._build_messages(request.system_prompt, request.messages, o_series=o_series)
 
         payload: dict[str, Any] = {
@@ -50,7 +57,7 @@ class OpenAISDKProvider(BaseLLMProvider):
 
         # o-series uses max_completion_tokens (includes reasoning tokens in the budget).
         # Standard models use the legacy max_tokens parameter.
-        if o_series:
+        if requires_max_completion_tokens:
             payload["max_completion_tokens"] = request.max_tokens
         else:
             payload["max_tokens"] = request.max_tokens

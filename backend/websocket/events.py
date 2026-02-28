@@ -42,6 +42,9 @@ class EventType(str, Enum):
     # LLM usage (real-time cost/token stream)
     USAGE_UPDATE = "usage_update"
 
+    # Agent lifecycle
+    AGENT_STOPPED = "agent_stopped"
+
 
 class WebSocketEvent(BaseModel):
     """Base WebSocket event structure."""

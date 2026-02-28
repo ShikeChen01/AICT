@@ -97,6 +97,15 @@ class LLMService:
             if settings.gemini_api_key:
                 return "google"
         if (
+            "kimi" in normalized
+            or "moonshot" in normalized
+            or normalized.startswith("k2")
+            or normalized.startswith("kimi-k2")
+            or normalized.startswith("moonshot-v1")
+        ):
+            if settings.moonshot_api_key:
+                return "kimi"
+        if (
             "gpt" in normalized
             or "chatgpt" in normalized
             or "openai" in normalized
@@ -110,6 +119,8 @@ class LLMService:
             return "anthropic"
         if settings.gemini_api_key:
             return "google"
+        if settings.moonshot_api_key:
+            return "kimi"
         if settings.openai_api_key:
             return "openai"
         return "none"

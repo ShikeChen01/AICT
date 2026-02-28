@@ -204,21 +204,11 @@ Your responsibilities:
 
 def _get_tools_for_role(role: str) -> list[AgentTool]:
     """Return the list of tools available to an agent role."""
-    from backend.tools.registry import get_manager_tools, get_cto_tools, get_engineer_tools
+    from backend.tools.loop_registry import get_tool_defs_for_role
 
-    tool_map = {
-        "manager": get_manager_tools,
-        "cto": get_cto_tools,
-        "engineer": get_engineer_tools,
-    }
-    getter = tool_map.get(role)
-    if not getter:
-        return []
-
-    tools = getter()
     return [
-        AgentTool(name=t.name, description=getattr(t, "description", None))
-        for t in tools
+        AgentTool(name=t["name"], description=t.get("description"))
+        for t in get_tool_defs_for_role(role)
     ]
 
 
@@ -243,6 +233,10 @@ class InterruptResponse(BaseModel):
     message: str = "Agent interrupted."
 
 
+class StopResponse(BaseModel):
+    message: str = "Agent stopped."
+
+
 class WakeResponse(BaseModel):
     message: str = "Agent woken."
 
@@ -262,12 +256,39 @@ async def interrupt_agent(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Force-end the agent's current session (user action). Same as interrupt_agent tool."""
+    """Force-end the agent's current session (agent-to-agent action)."""
     await _ensure_agent_access(db, agent_id, current_user.id)
     from backend.workers.worker_manager import get_worker_manager
 
     get_worker_manager().interrupt_agent(agent_id)
     return InterruptResponse()
+
+
+@router.post("/{agent_id}/stop", response_model=StopResponse)
+async def stop_agent(
+    agent_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Emergency stop: immediately halt the agent's running loop (user action).
+
+    Interrupts the worker and broadcasts an agent_stopped WebSocket event so all
+    connected clients update the agent's status without polling.
+    """
+    agent = await _ensure_agent_access(db, agent_id, current_user.id)
+    from backend.websocket.manager import ws_manager
+    from backend.workers.worker_manager import get_worker_manager
+
+    get_worker_manager().interrupt_agent(agent_id)
+    try:
+        await ws_manager.broadcast_agent_stopped(
+            project_id=agent.project_id,
+            agent_id=agent.id,
+            display_name=agent.display_name,
+        )
+    except Exception:
+        pass
+    return StopResponse()
 
 
 @router.post("/{agent_id}/wake", response_model=WakeResponse)

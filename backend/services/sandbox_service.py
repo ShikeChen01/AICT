@@ -4,10 +4,7 @@ self-hosted VM pool manager.
 
 This module provides:
   - PoolManagerClient: thin REST client for the VM pool manager (port 9090)
-  - SandboxService: drop-in replacement for E2BService
-
-SandboxService stores sandbox_id on the Agent model (same field as E2B),
-so the database schema and existing session logic are unchanged.
+  - SandboxService: manages sandbox lifecycle for all agents
 """
 
 from __future__ import annotations
@@ -31,7 +28,7 @@ logger = get_logger(__name__)
 
 @dataclass(slots=True)
 class SandboxMetadata:
-    """Returned by SandboxService methods — mirrors E2BService.SandboxMetadata."""
+    """Returned by SandboxService lifecycle methods."""
 
     sandbox_id: str
     agent_id: str
@@ -105,12 +102,7 @@ class PoolManagerClient:
 
 
 class SandboxService:
-    """
-    Manages sandbox lifecycle for agents using the self-hosted VM pool.
-
-    Equivalent interface to E2BService so callers can be swapped via the
-    sandbox_vm_enabled feature flag.
-    """
+    """Manages sandbox lifecycle for agents using the self-hosted VM pool."""
 
     def __init__(self) -> None:
         self._pool = PoolManagerClient()
@@ -172,7 +164,6 @@ class SandboxService:
             auth_token=auth_token,
         )
 
-        # Persist sandbox_id on the agent row (same field used by E2B)
         prev_id = agent.sandbox_id
         restarted = bool(prev_id and prev_id != sandbox_id)
         agent.sandbox_id = sandbox_id

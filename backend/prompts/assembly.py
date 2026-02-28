@@ -325,14 +325,21 @@ class PromptAssembly:
         self, name: str, exc: Exception, tool_use_id: str
     ) -> None:
         """Append a tool execution failure with structured, actionable content."""
-        error_type = type(exc).__name__
-        error_detail = str(exc)
+        from backend.tools.result import ToolExecutionError
+
+        if isinstance(exc, ToolExecutionError):
+            error_code = exc.error_code
+            error_detail = exc.args[0] if exc.args else str(exc)
+            hint = exc.hint or f"Call describe_tool('{name}') for full parameter details."
+        else:
+            error_code = type(exc).__name__
+            error_detail = str(exc)
+            hint = f"Review the error and retry with corrected parameters. Call describe_tool('{name}') if the schema is unclear."
+
         content = (
-            f"[Tool Error]\n"
+            f"[ERROR: {error_code}] {error_detail}\n"
             f"tool: {name}\n"
-            f"error: {error_type}: {error_detail}\n"
-            f"next_action: Review the error above and retry with corrected parameters. "
-            f"If the schema is unclear, call describe_tool('{name}') for full parameter details."
+            f"hint: {hint}"
         )
         content = self._enforce_tool_result_budget(content)
         self.messages.append(

@@ -359,6 +359,14 @@ export async function interruptAgent(
   return request<AgentInterruptResponse>('POST', `/agents/${agentId}/interrupt`, body);
 }
 
+export interface AgentStopResponse {
+  message: string;
+}
+
+export async function stopAgent(agentId: string): Promise<AgentStopResponse> {
+  return request<AgentStopResponse>('POST', `/agents/${agentId}/stop`);
+}
+
 export async function wakeAgent(
   agentId: string,
   body: AgentWakeRequest = {}

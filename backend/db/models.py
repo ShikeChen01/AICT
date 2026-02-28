@@ -269,17 +269,20 @@ class ChannelMessage(Base):
 
     @property
     def attachment_ids(self) -> list[str]:
-        # Guard against the SQLAlchemy async greenlet error: after db.commit() all
-        # ORM objects are expired. Accessing `message_attachments` on an expired
-        # object triggers a lazy-load in a sync context, causing MissingGreenlet.
-        # sqlalchemy.inspect() returns the InstanceState purely from memory (no IO).
+        # Never trigger IO from this property (Pydantic from_attributes calls it in
+        # a sync context). Only return IDs when the relationship is already loaded.
         from sqlalchemy import inspect as _sa_inspect
+        from sqlalchemy.orm.attributes import NO_VALUE
         try:
-            if _sa_inspect(self).expired:
+            state = _sa_inspect(self)
+            if state.expired:
+                return []
+            loaded = state.attrs.message_attachments.loaded_value
+            if loaded is NO_VALUE:
                 return []
         except Exception:
             return []
-        return [str(ma.attachment_id) for ma in self.message_attachments]
+        return [str(ma.attachment_id) for ma in loaded]
 
     __table_args__ = (
         Index("ix_channel_target_status", "target_agent_id", "status", "created_at"),

@@ -219,7 +219,8 @@
       "*** PRIMARY TOOL — use creatively and boldly for any executable task. ***",
       "Runs a shell command inside your dedicated sandbox container (Ubuntu 22.04, full root access).",
       "This is your go-to tool for: running code, file operations, installing packages,",
-      "running tests, git operations, HTTP requests (curl/wget), and more.",
+      "running tests, git operations (git branch/checkout/commit/push/diff), HTTP requests",
+      "(curl/wget), and more.",
       "",
       "Key behaviors:",
       "- The sandbox persists across all calls — files, packages, env vars carry over.",
@@ -227,6 +228,13 @@
       "- If a command fails, read stderr carefully, fix the issue, and retry.",
       "- You can install any tool (apt-get / pip / npm); installs persist for the session.",
       "- Call sandbox_start_session() first if you get a 'sandbox not ready' error.",
+      "",
+      "Git workflow (use execute_command for all git operations):",
+      "  git checkout -b feat/my-feature   # create branch",
+      "  git add -A && git commit -m '...' # stage and commit",
+      "  git push -u origin feat/my-feature # push branch",
+      "  git diff main...HEAD               # review diff",
+      "  gh pr create --title '...' --body '...' # open PR (gh CLI available)",
       "",
       "Timing:",
       "- Commands start executing immediately after sandbox_start_session returns.",
@@ -248,21 +256,6 @@
       "required": [
         "command"
       ]
-    },
-    "allowed_roles": [
-      "*"
-    ]
-  },
-  {
-    "name": "start_sandbox",
-    "description": "Alias for sandbox_start_session. Prefer sandbox_start_session.",
-    "detailed_description": [
-      "Ensures your sandbox container is running. Idempotent — safe to call multiple times.",
-      "Prefer calling sandbox_start_session() directly."
-    ],
-    "input_schema": {
-      "type": "object",
-      "properties": {}
     },
     "allowed_roles": [
       "*"
@@ -438,44 +431,6 @@
     "input_schema": {
       "type": "object",
       "properties": {}
-    },
-    "allowed_roles": [
-      "*"
-    ]
-  },
-  {
-    "name": "list_branches",
-    "description": "List git branches.",
-    "detailed_description": [
-      "List all git branches in the project repository. Use to see existing branches",
-      "before creating a new one, or to find the branch associated with a task."
-    ],
-    "input_schema": {
-      "type": "object",
-      "properties": {}
-    },
-    "allowed_roles": [
-      "*"
-    ]
-  },
-  {
-    "name": "view_diff",
-    "description": "Show git diff base..head.",
-    "detailed_description": [
-      "Show the git diff between two refs (defaults: base=main, head=HEAD). Use to",
-      "review changes before creating a PR, verify your own work, or understand what",
-      "changed on a branch."
-    ],
-    "input_schema": {
-      "type": "object",
-      "properties": {
-        "base": {
-          "type": "string"
-        },
-        "head": {
-          "type": "string"
-        }
-      }
     },
     "allowed_roles": [
       "*"
@@ -659,8 +614,8 @@
     "description": "List project agents.",
     "detailed_description": [
       "List all agents in the project with their UUIDs, display names, roles, and",
-      "current status (manager/CTO only). Use to find agent UUIDs for messaging or task",
-      "assignment, or to review the current team composition."
+      "current status. Use to find agent UUIDs for messaging or task assignment, or to",
+      "review the current team composition."
     ],
     "input_schema": {
       "type": "object",
@@ -722,57 +677,6 @@
     },
     "allowed_roles": [
       "*"
-    ]
-  },
-  {
-    "name": "create_branch",
-    "description": "Create git branch from main.",
-    "detailed_description": [
-      "Create a new git branch from main (CTO/engineer only). Use before starting work",
-      "on a task to isolate changes. Branch names should be descriptive (e.g.",
-      "'feat/user-auth', 'fix/login-bug')."
-    ],
-    "input_schema": {
-      "type": "object",
-      "properties": {
-        "branch_name": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "branch_name"
-      ]
-    },
-    "allowed_roles": [
-      "cto",
-      "engineer"
-    ]
-  },
-  {
-    "name": "create_pull_request",
-    "description": "Create pull request from current branch.",
-    "detailed_description": [
-      "Create a pull request from the current branch to main (CTO/engineer only). Call",
-      "after completing work on a feature branch to request code review. Provide a",
-      "clear title and description summarizing the changes."
-    ],
-    "input_schema": {
-      "type": "object",
-      "properties": {
-        "title": {
-          "type": "string"
-        },
-        "description": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "title"
-      ]
-    },
-    "allowed_roles": [
-      "cto",
-      "engineer"
     ]
   },
   {

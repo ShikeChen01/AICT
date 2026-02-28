@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAgents } from '../../hooks';
 import { useOptionalAgentStreamContext } from '../../contexts/AgentStreamContext';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import type { AgentLogData } from '../../types';
 import { Badge, Button } from '../ui';
+import { stopAgent } from '../../api/client';
 
 interface AgentsPanelProps {
   projectId: string;
@@ -20,12 +21,14 @@ function statusDotClass(statusLabel: string): string {
 }
 
 export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: AgentsPanelProps) {
-  const { agents, isLoading, error } = useAgents(projectId);
+  const { agents, isLoading, error, refreshAgents } = useAgents(projectId);
   const { subscribe } = useWebSocket(projectId);
   const streamContext = useOptionalAgentStreamContext();
   const getBuffer = streamContext?.getBuffer;
   const [agentBuffers, setAgentBuffers] = useState<Record<string, string[]>>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [stoppingIds, setStoppingIds] = useState<Set<string>>(new Set());
+  const [stopToast, setStopToast] = useState<string | null>(null);
 
   const rows = useMemo(() => {
     return agents.map((agent) => {
@@ -38,6 +41,33 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
   }, [agents]);
 
   const effectiveExpandedId = selectedAgentId ?? expandedId;
+
+  const handleStop = useCallback(async (agentId: string, displayName: string) => {
+    setStoppingIds((prev) => new Set(prev).add(agentId));
+    try {
+      await stopAgent(agentId);
+      setStopToast(`Agent "${displayName}" stopped.`);
+      setTimeout(() => setStopToast(null), 3000);
+      void refreshAgents();
+    } catch {
+      setStopToast(`Failed to stop "${displayName}".`);
+      setTimeout(() => setStopToast(null), 3000);
+    } finally {
+      setStoppingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(agentId);
+        return next;
+      });
+    }
+  }, [refreshAgents]);
+
+  // Refresh agent list when the server broadcasts agent_stopped
+  useEffect(() => {
+    const unsub = subscribe('agent_stopped', () => {
+      void refreshAgents();
+    });
+    return unsub;
+  }, [subscribe, refreshAgents]);
 
   useEffect(() => {
     if (streamContext) return;
@@ -63,6 +93,11 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
 
   return (
     <aside className="h-full min-h-0 w-full min-w-0 bg-transparent flex flex-col overflow-hidden">
+      {stopToast && (
+        <div className="m-2 rounded-lg border border-gray-200 bg-gray-800 px-3 py-2 text-xs text-white shadow-lg">
+          {stopToast}
+        </div>
+      )}
       {error && (
         <div className="m-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
           {error.message}
@@ -104,7 +139,29 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
                     {agent.role}
                   </Badge>
                 </button>
-                <span className="text-[11px] text-gray-500 uppercase">{agent.statusLabel}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-gray-500 uppercase">{agent.statusLabel}</span>
+                  {agent.status === 'running' && (
+                    <button
+                      type="button"
+                      title={`Stop ${agent.display_name}`}
+                      disabled={stoppingIds.has(agent.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleStop(agent.id, agent.display_name);
+                      }}
+                      className="flex items-center justify-center w-5 h-5 rounded text-red-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 transition-colors"
+                    >
+                      {stoppingIds.has(agent.id) ? (
+                        <span className="w-2.5 h-2.5 border border-red-400 border-t-transparent rounded-full animate-spin block" />
+                      ) : (
+                        <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
+                          <rect x="2" y="2" width="8" height="8" rx="1" />
+                        </svg>
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="mt-2 flex items-center gap-3 text-xs text-gray-600">

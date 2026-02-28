@@ -129,58 +129,58 @@ Goal: “allow images to flow through… save images as binary in db”.
     - [ ] Gemini inlineData parts
   - [ ] Fallback behavior: when model is text-only, return actionable error or require user-provided description mode
 
-## Phase 7 — Tooling & loop cleanup (merged Phase 7 + 8)
+## Phase 7 — Tooling & loop cleanup (merged Phase 7 + 8) ✅
 
 Goal: delete the legacy LangGraph tool layer, rename ambiguous sandbox naming, remove redundant git tools, introduce structured tool results and error taxonomy, and split the monolithic registry.
 
 ### 7a — Delete legacy LangGraph tool layer
 
-- [ ] Delete dead tool files: `backend/tools/e2b.py`, `e2b_tool.py`, `files.py`, `git.py`, `git_tool.py`, `tasks.py`, `task_tool.py`, `agents.py`, `sandbox_vm.py`, `context.py`, `registry.py`
-- [ ] Delete `backend/services/e2b_service.py` (fully replaced by `SandboxService`)
-- [ ] Remove all `from e2b import AsyncSandbox` and E2B SDK references across the codebase
-- [ ] Audit `backend/api_internal/files.py` — if it uses `E2BService`, rewrite to use `SandboxService` or delete
+- [x] Delete dead tool files: `backend/tools/e2b.py`, `e2b_tool.py`, `files.py`, `git.py`, `git_tool.py`, `tasks.py`, `task_tool.py`, `agents.py`, `sandbox_vm.py`, `context.py`, `registry.py`
+- [x] Delete `backend/services/e2b_service.py` (fully replaced by `SandboxService`)
+- [x] Remove all `from e2b import AsyncSandbox` and E2B SDK references across the codebase
+- [x] Audit `backend/api_internal/files.py` — rewrote to use `SandboxService`
 - [ ] Remove `e2b` from dependency list (`requirements.txt`)
 
 ### 7b — Rename sandbox layer for clarity
 
-- [ ] Remove all E2B terminology from `sandbox_service.py` comments and log messages
-- [ ] Deduplicate: `_run_start_sandbox` and `_run_sandbox_start_session` in `loop_registry.py` are near-identical — collapse into one tool entry
-- [ ] Audit `tool_descriptions.json` for any residual E2B references in descriptions/detailed_descriptions and update them
+- [x] Remove all E2B terminology from `sandbox_service.py` comments and log messages
+- [x] Deduplicate: `_run_start_sandbox` alias removed; `sandbox_start_session` is the single entry point
+- [x] Audit `tool_descriptions.json` for residual E2B references — cleaned
 
 ### 7c — Remove dedicated git tools; promote `execute_command`
 
-- [ ] Remove from `loop_registry.py`: `_run_list_branches`, `_run_view_diff`, `_run_create_branch`, `_run_create_pull_request` and their `_TOOL_EXECUTORS` entries (these run `subprocess` against the **host**, not the sandbox)
-- [ ] Remove from `tool_descriptions.json`: `list_branches`, `view_diff`, `create_branch`, `create_pull_request`
-- [ ] Keep `GitService` only for the API layer (repo import, GitHub webhook endpoints) — not callable from agent tools
-- [ ] Update `backend/prompts/blocks/` to tell engineers: "use `execute_command` for all git operations — git is available in your sandbox"
-- [ ] If PR creation via GitHub API is still needed as an agent action, replace the removed tool with a single `create_pull_request` that takes `branch_name` as input and calls `GitService.create_pr()` — no host-side `subprocess` calls
+- [x] Remove from `loop_registry.py`: `_run_list_branches`, `_run_view_diff`, `_run_create_branch`, `_run_create_pull_request` and `subprocess` import
+- [x] Remove from `tool_descriptions.json`: `list_branches`, `view_diff`, `create_branch`, `create_pull_request`, `start_sandbox` alias
+- [x] Keep `GitService` only for the API layer — not callable from agent tools
+- [x] Updated `backend/prompts/blocks/tool_io_engineer.md` with full git workflow via `execute_command`
 
 ### 7d — Structured tool results & error taxonomy
 
-- [ ] Define `ToolResult` dataclass in `backend/tools/result.py`: `success: bool`, `output: str`, `error_code: str | None`, `hint: str | None`
-  - Error codes: `INVALID_INPUT`, `PERMISSION_DENIED`, `SANDBOX_TIMEOUT`, `SANDBOX_UNAVAILABLE`, `NOT_FOUND`, `PROVIDER_ERROR`
-- [ ] Define `ToolExecutionError(error_code, message, hint)` exception class
-- [ ] Refactor all executors to `raise ToolExecutionError` instead of returning `"Error: ..."` strings
-- [ ] Update loop dispatch in `backend/workers/loop.py` to format results as `[OK] output` vs `[ERROR: code] message. Hint: hint`
-- [ ] Update `PromptAssembly.append_tool_error` / `append_tool_result` to use `ToolResult`
-- [ ] Update `backend/prompts/blocks/tool_io_base.md` with the new error format so the LLM knows how to parse and act on errors
+- [x] `backend/tools/result.py`: `ToolExecutionError(message, error_code, hint)` with standard codes
+- [x] `backend/tools/base.py`: `parse_tool_uuid` now raises `ToolExecutionError` instead of bare `RuntimeError`
+- [x] All executors raise `ToolExecutionError` instead of returning `"Error: ..."` strings
+- [x] `PromptAssembly.append_tool_error` formats `[ERROR: code] message. Hint: ...` for `ToolExecutionError`
+- [x] `backend/prompts/blocks/tool_io_base.md` updated with error code taxonomy
 
 ### 7e — Split `loop_registry.py` into domain modules
 
-- [ ] `backend/tools/executors/messaging.py` — `send_message`, `broadcast_message`
-- [ ] `backend/tools/executors/memory.py` — `update_memory`, `read_history`, `list_sessions`
-- [ ] `backend/tools/executors/tasks.py` — `create_task`, `assign_task`, `update_task_status`, `abort_task`, `list_tasks`, `get_task_details`
-- [ ] `backend/tools/executors/sandbox.py` — `execute_command`, all `sandbox_*` tools
-- [ ] `backend/tools/executors/agents.py` — `spawn_engineer`, `list_agents`, `remove_agent`, `interrupt_agent`
-- [ ] `backend/tools/executors/meta.py` — `describe_tool`, `get_project_metadata`, `sleep`
-- [ ] `backend/tools/loop_registry.py` becomes a slim registry: `RunContext`, `LoopTool`, `ToolResult`, role filtering, `_TOOL_EXECUTORS` map, and public API (`get_tool_defs_for_role`, `get_handlers_for_role`, `validate_tool_input`)
+- [x] `backend/tools/base.py` — `RunContext`, `LoopTool`, `ToolExecutor`, shared helpers
+- [x] `backend/tools/executors/messaging.py` — `send_message`, `broadcast_message`
+- [x] `backend/tools/executors/memory.py` — `update_memory`, `read_history`, `list_sessions`
+- [x] `backend/tools/executors/tasks.py` — `create_task`, `assign_task`, `update_task_status`, `abort_task`, `list_tasks`, `get_task_details`
+- [x] `backend/tools/executors/sandbox.py` — `execute_command`, all `sandbox_*` tools
+- [x] `backend/tools/executors/agents.py` — `spawn_engineer`, `list_agents`, `remove_agent`, `interrupt_agent`
+- [x] `backend/tools/executors/meta.py` — `get_project_metadata`, `sleep`
+- [x] `backend/tools/loop_registry.py` slim registry: builds `_TOOLS`, hosts `describe_tool`, exports public API
 
 ### 7f — Emergency stop button (frontend)
 
-- [ ] `POST /api/v1/agents/{id}/stop` endpoint — calls `worker_manager.interrupt_agent()` and sets agent status to `idle`
-- [ ] Frontend: render a "Stop" button whenever an agent's status is `running`; disable/hide when `idle`
-- [ ] Emit a WS event (`agent_stopped`) so all connected clients update agent status in real time without polling
-- [ ] Show a confirmation toast: "Agent stopped." with the agent display name
+- [x] `POST /api/v1/agents/{id}/stop` endpoint — interrupts worker, broadcasts `agent_stopped` WS event
+- [x] `EventType.AGENT_STOPPED` added to `backend/websocket/events.py`
+- [x] `ws_manager.broadcast_agent_stopped()` in `backend/websocket/manager.py`
+- [x] Frontend: red Stop button (square icon) shown on running agents; spinner while stopping
+- [x] Toast confirmation: `Agent "X" stopped.` auto-dismisses after 3s
+- [x] Agent list auto-refreshes on `agent_stopped` WS event
 
 ## Phase 9 — Sandbox enhancements + pressure tests
 

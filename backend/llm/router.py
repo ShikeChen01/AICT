@@ -31,7 +31,13 @@ class ProviderRouter:
             return "anthropic"
         if "gemini" in normalized_model or "google" in normalized_model:
             return "google"
-        if "kimi" in normalized_model or "moonshot" in normalized_model:
+        if (
+            "kimi" in normalized_model
+            or "moonshot" in normalized_model
+            or normalized_model.startswith("k2")
+            or normalized_model.startswith("kimi-k2")
+            or normalized_model.startswith("moonshot-v1")
+        ):
             return "kimi"
         if (
             "gpt" in normalized_model
@@ -52,6 +58,11 @@ class ProviderRouter:
                 "Model %r did not match any known provider; falling back to google", model
             )
             return "google"
+        if settings.moonshot_api_key:
+            logger.warning(
+                "Model %r did not match any known provider; falling back to kimi", model
+            )
+            return "kimi"
         if settings.openai_api_key:
             logger.warning(
                 "Model %r did not match any known provider; falling back to openai", model
