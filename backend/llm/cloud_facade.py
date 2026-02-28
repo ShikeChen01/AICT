@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from backend.config import settings
-from backend.llm.contracts import LLMMessage, LLMRequest, LLMResponse, LLMTool, LLMToolCall
+from backend.llm.contracts import ImagePart, LLMMessage, LLMRequest, LLMResponse, LLMTool, LLMToolCall
 from backend.llm.router import ProviderRouter
 from backend.llm.tool_name_adapter import (
     denormalize_response_tool_calls,
@@ -50,12 +50,16 @@ class CloudLLMFacade:
                 for tc in msg.get("tool_calls", []) or []
                 if isinstance(tc, dict)
             ]
+            # Phase 6: image_parts may be stored directly as ImagePart objects in the dict.
+            raw_image_parts = msg.get("image_parts") or []
+            image_parts = [ip for ip in raw_image_parts if isinstance(ip, ImagePart)]
             canonical_messages.append(
                 LLMMessage(
                     role=role,
                     content=str(msg.get("content", "") or ""),
                     tool_calls=tool_calls,
                     tool_use_id=str(msg.get("tool_use_id", "") or ""),
+                    image_parts=image_parts,
                 )
             )
 

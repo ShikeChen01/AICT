@@ -7,6 +7,7 @@ import type {
   Task,
   TaskCreate,
   TaskUpdate,
+  Attachment,
   ChannelMessage,
   ChannelMessageSend,
   Agent,
@@ -164,6 +165,56 @@ export async function sendMessage(body: ChannelMessageSend): Promise<ChannelMess
     body,
     REQUEST_TIMEOUT_MS
   );
+}
+
+// ─── Attachments (Phase 6) ───────────────────────────────────────────
+
+/** Upload a single image file and return its metadata (no binary in response). */
+export async function uploadAttachment(
+  projectId: string,
+  file: File
+): Promise<Attachment> {
+  const formData = new FormData();
+  formData.append('project_id', projectId);
+  formData.append('file', file);
+
+  const headers: Record<string, string> = {};
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 30_000);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/attachments`, {
+      method: 'POST',
+      headers,
+      body: formData,
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Upload failed (${response.status}): ${text}`);
+  }
+  return response.json() as Promise<Attachment>;
+}
+
+/** Fetch raw image bytes for an attachment and return a Blob (use URL.createObjectURL). */
+export async function fetchAttachmentBlob(attachmentId: string): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+  const response = await fetch(`${API_BASE}/attachments/${attachmentId}/data`, { headers });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch attachment ${attachmentId}: ${response.status}`);
+  }
+  return response.blob();
 }
 
 export async function getMessages(

@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     openai_api_key: str = ""
     moonshot_api_key: str = ""
-    moonshot_base_url: str = "https://api.moonshot.cn/v1"
+    moonshot_base_url: str = "https://api.moonshot.ai/v1"
     manager_model_default: str = "claude-sonnet-4-6"
     cto_model_default: str = "claude-opus-4-6"
     engineer_junior_model: str = "gpt-5.2"
@@ -110,9 +110,15 @@ LLM_MODEL_PRICING: dict[str, dict[str, float]] = {
     "gemini-2.5-pro":          {"input":  1.25, "output":  5.00},
     "gemini-2.0-flash":        {"input":  0.10, "output":  0.40},
     "gemini-2.0-flash-lite":   {"input":  0.075,"output":  0.30},
-    # Moonshot / Kimi (OpenAI-compatible)
+    # Moonshot / Kimi (OpenAI-compatible — api.moonshot.ai/v1)
+    # kimi-k2 family (prefix match covers -turbo-preview, -0905-preview, -0711-preview variants)
+    "kimi-k2-thinking":        {"input":  0.15, "output":  2.50},
+    "kimi-k2-turbo":           {"input":  0.15, "output":  2.50},
     "kimi-k2":                 {"input":  0.15, "output":  2.50},
-    "moonshot-v1-8k":          {"input":  0.30, "output":  0.30},
-    "moonshot-v1-32k":         {"input":  0.30, "output":  0.30},
-    "moonshot-v1-128k":        {"input":  0.30, "output":  0.30},
+    # kimi-k2.5 multimodal
+    "kimi-k2.5":               {"input":  0.15, "output":  2.50},
+    # legacy moonshot-v1 models
+    "moonshot-v1-8k":          {"input":  0.12, "output":  0.12},
+    "moonshot-v1-32k":         {"input":  0.24, "output":  0.24},
+    "moonshot-v1-128k":        {"input":  1.00, "output":  1.00},
 }

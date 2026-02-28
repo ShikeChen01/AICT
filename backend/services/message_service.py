@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.constants import USER_AGENT_ID
+from backend.db.repositories.attachments import AttachmentRepository
 from backend.db.repositories.messages import ChannelMessageRepository
 
 
@@ -17,6 +18,7 @@ class MessageService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self._channel_repo = ChannelMessageRepository(session)
+        self._attachment_repo = AttachmentRepository(session)
 
     async def send(
         self,
@@ -27,6 +29,7 @@ class MessageService:
         *,
         message_type: str = "normal",
         from_user_id: UUID | None = None,
+        attachment_ids: list[UUID] | None = None,
     ) -> "ChannelMessage":
         """Send a message from one agent to another (or user to agent). Writes to DB with status=sent."""
         msg = await self._channel_repo.create_message(
@@ -38,6 +41,14 @@ class MessageService:
             message_type=message_type,
             broadcast=False,
         )
+        # Phase 6: link pre-uploaded attachments to this message
+        if attachment_ids:
+            for position, att_id in enumerate(attachment_ids):
+                await self._attachment_repo.link_to_message(
+                    message_id=msg.id,
+                    attachment_id=att_id,
+                    position=position,
+                )
         return msg
 
     async def send_user_to_agent(
@@ -46,10 +57,12 @@ class MessageService:
         project_id: UUID,
         content: str,
         user_id: UUID | None = None,
+        attachment_ids: list[UUID] | None = None,
     ) -> "ChannelMessage":
         """Send a message from the user (USER_AGENT_ID) to an agent.
 
         ``user_id`` is the real authenticated user FK for attribution (from_user_id).
+        ``attachment_ids`` links pre-uploaded image attachments to this message.
         """
         return await self.send(
             from_agent_id=USER_AGENT_ID,
@@ -57,6 +70,7 @@ class MessageService:
             project_id=project_id,
             content=content,
             from_user_id=user_id,
+            attachment_ids=attachment_ids,
         )
 
     async def list_conversation(

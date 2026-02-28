@@ -257,12 +257,29 @@ export interface ChannelMessage {
   status: 'sent' | 'received';
   broadcast: boolean;
   created_at: string;
+  // Phase 6: IDs of linked image attachments (empty for text-only messages)
+  attachment_ids: string[];
 }
 
 export interface ChannelMessageSend {
   project_id: UUID;
   target_agent_id: UUID;
   content: string;
+  // Phase 6: pre-uploaded attachment IDs to link to this message
+  attachment_ids?: string[];
+}
+
+// ─── Attachments (Phase 6) ───────────────────────────────────────────
+
+export interface Attachment {
+  id: UUID;
+  project_id: UUID;
+  uploaded_by_user_id: UUID | null;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  sha256: string;
+  created_at: string;
 }
 
 // ─── Repository ──────────────────────────────────────────────────────

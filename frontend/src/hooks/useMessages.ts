@@ -20,7 +20,7 @@ interface UseMessagesReturn {
   messages: ChannelMessage[];
   loading: boolean;
   error: string | null;
-  send: (content: string) => Promise<ChannelMessage | null>;
+  send: (content: string, attachmentIds?: string[]) => Promise<ChannelMessage | null>;
   refresh: () => Promise<void>;
 }
 
@@ -78,25 +78,30 @@ export function useMessages({
         project_id: latestActivity.project_id,
         from_agent_id: latestActivity.agent_id,
         target_agent_id: USER_AGENT_ID,
+        from_user_id: null,
         content: latestActivity.content,
         message_type: 'normal',
         status: 'received',
         broadcast: false,
         created_at: latestActivity.timestamp,
+        attachment_ids: [],
       };
       setMessages((prev) => sortByCreatedAtAsc([...prev, incomingMessage]));
     }
   }, [projectId, agentId, streamContext]);
 
   const send = useCallback(
-    async (content: string): Promise<ChannelMessage | null> => {
-      if (!projectId || !agentId || !content.trim()) return null;
+    async (content: string, attachmentIds?: string[]): Promise<ChannelMessage | null> => {
+      if (!projectId || !agentId) return null;
+      const trimmed = content.trim();
+      if (!trimmed && (!attachmentIds || attachmentIds.length === 0)) return null;
       setError(null);
       try {
         const msg = await sendMessage({
           project_id: projectId,
           target_agent_id: agentId,
-          content: content.trim(),
+          content: trimmed || ' ',
+          ...(attachmentIds && attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
         });
         setMessages((prev) => sortByCreatedAtAsc([...prev, msg]));
         return msg;

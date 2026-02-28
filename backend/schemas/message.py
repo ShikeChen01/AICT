@@ -14,6 +14,8 @@ class ChannelMessageSend(BaseModel):
     project_id: UUID
     target_agent_id: UUID = Field(..., description="Agent to send the message to")
     content: str = Field(..., min_length=1)
+    # Phase 6: optional list of pre-uploaded attachment IDs to link to this message
+    attachment_ids: list[UUID] = Field(default_factory=list)
 
 
 class ChannelMessageResponse(BaseModel):
@@ -29,6 +31,8 @@ class ChannelMessageResponse(BaseModel):
     status: str  # 'sent' | 'received'
     broadcast: bool
     created_at: datetime
+    # Phase 6: attachment IDs linked to this message (loaded via ORM selectin)
+    attachment_ids: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 from anthropic import APIStatusError, AsyncAnthropic
@@ -99,12 +100,20 @@ class AnthropicSDKProvider(BaseLLMProvider):
         resolved_tool_use_ids: set[str] = set()
         for msg in messages:
             if msg.role == "user":
-                api_messages.append(
-                    {
-                        "role": "user",
-                        "content": [{"type": "text", "text": msg.content or ""}],
-                    }
-                )
+                content_blocks: list[dict[str, Any]] = []
+                # Images must come before the text block per Anthropic's spec.
+                for img in msg.image_parts:
+                    b64 = base64.b64encode(img.data).decode()
+                    content_blocks.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": img.media_type,
+                            "data": b64,
+                        },
+                    })
+                content_blocks.append({"type": "text", "text": msg.content or ""})
+                api_messages.append({"role": "user", "content": content_blocks})
                 continue
 
             if msg.role == "assistant":

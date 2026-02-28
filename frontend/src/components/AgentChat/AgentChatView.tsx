@@ -2,12 +2,13 @@
  * AgentChatView — conversation with an agent: stream + message history + input.
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AgentSelector } from './AgentSelector';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
 import { useMessages, useAgentStream, useAgents } from '../../hooks';
 import { Panel } from '../ui';
+import { uploadAttachment } from '../../api/client';
 
 interface AgentChatViewProps {
   projectId: string;
@@ -26,6 +27,7 @@ export function AgentChatView({
     agentId: selectedAgentId,
   });
   const { isStreaming } = useAgentStream(selectedAgentId);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedAgentId && agents.length > 0) {
@@ -34,10 +36,27 @@ export function AgentChatView({
   }, [agents, selectedAgentId, onSelectAgent]);
 
   const handleSend = useCallback(
-    async (content: string) => {
-      await send(content);
+    async (content: string, files?: File[]) => {
+      setUploadError(null);
+      let attachmentIds: string[] = [];
+
+      // Upload images first, collect their IDs
+      if (files && files.length > 0) {
+        try {
+          const uploads = await Promise.all(
+            files.map((file) => uploadAttachment(projectId, file))
+          );
+          attachmentIds = uploads.map((a) => a.id);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Upload failed';
+          setUploadError(msg);
+          return;
+        }
+      }
+
+      await send(content, attachmentIds.length > 0 ? attachmentIds : undefined);
     },
-    [send]
+    [projectId, send]
   );
 
   const effectiveAgentId = selectedAgentId ?? (agents[0]?.id ?? null);
@@ -61,9 +80,9 @@ export function AgentChatView({
           <MessageList messages={messages} isLoading={loading} agents={agents} />
         </div>
 
-        {error && (
+        {(error || uploadError) && (
           <div className="px-4 py-2 bg-red-50 text-sm text-red-700">
-            {error}
+            {uploadError ?? error}
           </div>
         )}
 

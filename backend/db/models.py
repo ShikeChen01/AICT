@@ -18,6 +18,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     Uuid,
@@ -258,6 +259,27 @@ class ChannelMessage(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     project = relationship("Repository", back_populates="channel_messages")
+    # Phase 6: linked attachments (selectin avoids N+1 for list queries)
+    message_attachments = relationship(
+        "MessageAttachment",
+        lazy="selectin",
+        order_by="MessageAttachment.position",
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def attachment_ids(self) -> list[str]:
+        # Guard against the SQLAlchemy async greenlet error: after db.commit() all
+        # ORM objects are expired. Accessing `message_attachments` on an expired
+        # object triggers a lazy-load in a sync context, causing MissingGreenlet.
+        # sqlalchemy.inspect() returns the InstanceState purely from memory (no IO).
+        from sqlalchemy import inspect as _sa_inspect
+        try:
+            if _sa_inspect(self).expired:
+                return []
+        except Exception:
+            return []
+        return [str(ma.attachment_id) for ma in self.message_attachments]
 
     __table_args__ = (
         Index("ix_channel_target_status", "target_agent_id", "status", "created_at"),
@@ -368,4 +390,70 @@ class LLMUsageEvent(Base):
         Index("ix_llm_usage_project_time", "project_id", "created_at"),
         Index("ix_llm_usage_agent", "agent_id"),
         Index("ix_llm_usage_session", "session_id"),
+    )
+
+
+# ── Phase 6: Attachments ─────────────────────────────────────────────
+
+
+ALLOWED_ATTACHMENT_MIME_TYPES = frozenset({
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+})
+MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+class Attachment(Base):
+    """Binary image blob stored directly in Postgres (bytea).
+
+    Capped at 10 MB per file; only image/* MIME types accepted.
+    SHA-256 hash stored for integrity checking.
+    """
+
+    __tablename__ = "attachments"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    )
+    uploaded_by_user_id = Column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    filename = Column(String(255), nullable=False)
+    mime_type = Column(String(100), nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    data = Column(LargeBinary, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    message_links = relationship(
+        "MessageAttachment", back_populates="attachment", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_attachments_project", "project_id", "created_at"),
+    )
+
+
+class MessageAttachment(Base):
+    """Junction table: channel_message ↔ attachment (supports multiple images per message)."""
+
+    __tablename__ = "message_attachments"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    message_id = Column(
+        Uuid, ForeignKey("channel_messages.id", ondelete="CASCADE"), nullable=False
+    )
+    attachment_id = Column(
+        Uuid, ForeignKey("attachments.id", ondelete="CASCADE"), nullable=False
+    )
+    position = Column(Integer, default=0, nullable=False)
+
+    attachment = relationship("Attachment", back_populates="message_links")
+
+    __table_args__ = (
+        Index("ix_msg_attachments_message", "message_id"),
+        Index("ix_msg_attachments_attachment", "attachment_id"),
     )

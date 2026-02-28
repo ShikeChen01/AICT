@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 import httpx
@@ -38,7 +39,16 @@ class GeminiProviderAdapter(BaseLLMProvider):
         issued_function_names_by_id: dict[str, str] = {}
         for msg in request.messages:
             if msg.role == "user":
-                contents.append({"role": "user", "parts": [{"text": msg.content or ""}]})
+                parts: list[dict[str, Any]] = [{"text": msg.content or ""}]
+                for img in msg.image_parts:
+                    b64 = base64.b64encode(img.data).decode()
+                    parts.append({
+                        "inlineData": {
+                            "mimeType": img.media_type,
+                            "data": b64,
+                        }
+                    })
+                contents.append({"role": "user", "parts": parts})
             elif msg.role == "assistant":
                 parts: list[dict[str, Any]] = []
                 if msg.content:

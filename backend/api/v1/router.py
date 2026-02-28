@@ -5,6 +5,7 @@ Aggregated v1 API router.
 from fastapi import APIRouter
 
 from backend.api.v1.agents import router as agents_router
+from backend.api.v1.attachments import router as attachments_router
 from backend.api.v1.auth import router as auth_router
 from backend.api.v1.diagnostics import router as diagnostics_router
 from backend.api.v1.messages import router as messages_router
@@ -29,6 +30,7 @@ async def worker_health():
 
 # Include feature routers
 api_router.include_router(agents_router)
+api_router.include_router(attachments_router)
 api_router.include_router(auth_router)
 api_router.include_router(diagnostics_router)
 api_router.include_router(messages_router)

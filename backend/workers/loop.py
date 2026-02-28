@@ -11,9 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.constants import USER_AGENT_ID
 from backend.db.models import Agent, Repository, Task
+from backend.db.repositories.attachments import AttachmentRepository
 from backend.db.repositories.llm_usage import LLMUsageRepository
 from backend.db.repositories.messages import AgentMessageRepository
 from backend.db.repositories.project_settings import ProjectSettingsRepository
+from backend.llm.contracts import ImagePart
 from backend.llm.model_resolver import resolve_model
 from backend.llm.pricing import estimate_cost_usd
 from backend.prompts.assembly import PromptAssembly
@@ -33,6 +35,31 @@ from backend.workers.message_router import get_message_router
 from backend.logging.my_logger import get_logger
 
 logger = get_logger(__name__)
+
+# Vision-capable model name prefixes (conservative whitelist).
+# Any model whose name starts with one of these is assumed to support image inputs.
+_VISION_CAPABLE_PREFIXES = (
+    "gpt-4o",
+    "gpt-4.1",
+    "gpt-5",
+    "gpt-oss",
+    "o1",
+    "o3",
+    "o4",
+    "claude-3",
+    "claude-sonnet",
+    "claude-opus",
+    "claude-haiku",
+    "gemini",
+    "kimi-k2.5",
+)
+
+
+def _model_supports_vision(model: str) -> bool:
+    """Return True if the model is known to accept image inputs."""
+    m = model.lower()
+    return any(m.startswith(p) for p in _VISION_CAPABLE_PREFIXES)
+
 
 MAX_ITERATIONS = 1000
 MAX_LOOPBACKS = 3
@@ -204,6 +231,11 @@ async def run_inner_loop(
         unread, agent_by_id, USER_AGENT_ID, assignment_context,
     )
 
+    # Phase 6: load image attachments for unread messages (if any)
+    _attachment_repo = AttachmentRepository(db)
+    _unread_ids = [m.id for m in unread if m.id is not None]
+    _attachments_by_msg = await _attachment_repo.get_for_messages(_unread_ids)
+
     history = await agent_msg_repo.list_last_n_sessions(
         agent.id, session_id, n_sessions=5
     )
@@ -224,12 +256,59 @@ async def run_inner_loop(
     # Phase 4: usage repo for token tracking + rate limiting
     usage_repo = LLMUsageRepository(db)
 
+    # Resolve model early so vision capability check is available before building messages.
+    resolved_model = resolve_model(
+        agent.role,
+        seniority=getattr(agent, "tier", None),
+        model_override=agent.model,
+        project_model_overrides=model_overrides,
+    )
+
     pa = PromptAssembly(agent, project, memory_content, prompt_overrides=prompt_overrides)
     pa.load_history(
         history,
         new_messages_text,
         known_tool_names=set(handlers.keys()),
     )
+
+    # Phase 6: attach image parts to the initial user message when attachments exist.
+    if _attachments_by_msg and new_messages_text:
+        all_image_parts: list[ImagePart] = []
+        for msg in unread:
+            for att in _attachments_by_msg.get(msg.id, []):
+                all_image_parts.append(ImagePart(data=att.data, media_type=att.mime_type))
+        if all_image_parts:
+            if _model_supports_vision(resolved_model):
+                # Find and patch the last user message in pa.messages with image parts.
+                for _i in range(len(pa.messages) - 1, -1, -1):
+                    if pa.messages[_i].get("role") == "user":
+                        pa.messages[_i] = {**pa.messages[_i], "image_parts": all_image_parts}
+                        break
+                logger.info(
+                    "Agent %s: attached %d image part(s) from %d message attachment(s)",
+                    agent.id,
+                    len(all_image_parts),
+                    sum(len(v) for v in _attachments_by_msg.values()),
+                )
+            else:
+                # Text-only model: append a note so the agent knows images were sent.
+                note = (
+                    f"\n[System: User attached {len(all_image_parts)} image(s) "
+                    f"but model '{resolved_model}' does not support vision. "
+                    "Ask the user to describe the image(s) in text.]"
+                )
+                for _i in range(len(pa.messages) - 1, -1, -1):
+                    if pa.messages[_i].get("role") == "user":
+                        pa.messages[_i] = {
+                            **pa.messages[_i],
+                            "content": pa.messages[_i].get("content", "") + note,
+                        }
+                        break
+                logger.info(
+                    "Agent %s: model '%s' is text-only — injected vision-unavailable note",
+                    agent.id,
+                    resolved_model,
+                )
 
     if new_messages_text:
         await agent_msg_repo.create_message(
@@ -262,12 +341,6 @@ async def run_inner_loop(
         agent.role,
         session_id,
         len(unread),
-    )
-    resolved_model = resolve_model(
-        agent.role,
-        seniority=getattr(agent, "tier", None),
-        model_override=agent.model,
-        project_model_overrides=model_overrides,
     )
 
     summarization_injected = False

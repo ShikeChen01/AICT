@@ -43,6 +43,7 @@ async def send_message(
         project_id=body.project_id,
         content=body.content,
         user_id=current_user.id,
+        attachment_ids=body.attachment_ids or None,
     )
     await db.commit()
     logger.info(
@@ -62,7 +63,14 @@ async def send_message(
             body.target_agent_id,
             exc,
         )
-    return ChannelMessageResponse.model_validate(msg)
+    response = ChannelMessageResponse.model_validate(msg)
+    # After commit the ORM object is expired, so attachment_ids safely returns [].
+    # Patch it with the IDs from the request body (we know them without a DB round-trip).
+    if body.attachment_ids:
+        response = response.model_copy(
+            update={"attachment_ids": [str(a) for a in body.attachment_ids]}
+        )
+    return response
 
 
 @router.get("", response_model=list[ChannelMessageResponse])

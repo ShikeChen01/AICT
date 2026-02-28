@@ -104,8 +104,8 @@ if [ ! -f "${SSL_DIR}/server.crt" ]; then
     # Postgres requires key to be readable only by owner
     chmod 600 "${SSL_DIR}/server.key"
     chmod 644 "${SSL_DIR}/server.crt"
-    # Postgres runs as uid 999 (postgres user in the alpine image)
-    chown 999:999 "${SSL_DIR}/server.key" "${SSL_DIR}/server.crt"
+    # Postgres runs as uid 70 (postgres user in the Alpine image)
+    chown 70:70 "${SSL_DIR}/server.key" "${SSL_DIR}/server.crt"
     log "SSL certificate generated (valid 10 years)."
 else
     log "SSL certificate already exists."

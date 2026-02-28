@@ -34,18 +34,18 @@ Source: `tmp/todo.txt` (expanded into an implementable roadmap).
   - [x] Add deterministic “topic switch summarization” hooks (trigger + output target) so context compression isn’t ad-hoc.
   - [x] Ensure tool-call transcripts and error surfaces stay within budget without losing critical debugging information.
 
-## Phase 1 — Infra: self-host Postgres (VM) to cut cost
+## Phase 1 — Infra: self-host Postgres (VM) to cut cost ✅
 
-- [ ] Add VM Postgres deployment assets (Docker/Compose)
-  - [ ] Create `infra/postgres/docker-compose.yml` (Postgres 15/16, volume, healthcheck)
-  - [ ] Create `infra/postgres/README.md` (setup, backup, restore drill, upgrade notes)
-- [ ] Secure Cloud Run → VM connectivity
-  - [ ] Serverless VPC Connector for Cloud Run egress
-  - [ ] Static egress IP via Cloud NAT (or equivalent) and VM firewall allowlist
-  - [ ] Require SSL/TLS for DB connections; document `DATABASE_URL` / SSL parameters
-- [ ] Update docs and verify runtime behavior
-  - [ ] Update `docs/deployment.md` to reflect VM Postgres topology and ops
-  - [ ] Validate Alembic migrations still run correctly on deploy/startup
+- [x] Add VM Postgres deployment assets (Docker/Compose)
+  - [x] Create `infra/postgres/docker-compose.yml` (Postgres 15/16, volume, healthcheck)
+  - [x] Create `infra/postgres/README.md` (setup, backup, restore drill, upgrade notes)
+- [x] Secure Cloud Run → VM connectivity
+  - [x] Serverless VPC Connector for Cloud Run egress
+  - [x] Static egress IP via Cloud NAT (or equivalent) and VM firewall allowlist
+  - [x] Require SSL/TLS for DB connections; document `DATABASE_URL` / SSL parameters
+- [x] Update docs and verify runtime behavior
+  - [x] Update `docs/deployment.md` to reflect VM Postgres topology and ops
+  - [x] Validate Alembic migrations still run correctly on deploy/startup
 
 ## Phase 2 — Multi-user access + attribution ✅
 
@@ -129,34 +129,58 @@ Goal: “allow images to flow through… save images as binary in db”.
     - [ ] Gemini inlineData parts
   - [ ] Fallback behavior: when model is text-only, return actionable error or require user-provided description mode
 
-## Phase 7 — Streaming + messaging upgrades
+## Phase 7 — Tooling & loop cleanup (merged Phase 7 + 8)
 
-Goals: “abstract the messaging system”, “structured streaming”, “filter by category”, “agent messaging maybe unnecessary”.
+Goal: delete the legacy LangGraph tool layer, rename ambiguous sandbox naming, remove redundant git tools, introduce structured tool results and error taxonomy, and split the monolithic registry.
 
-- [ ] Structured WS event schema (backward compatible)
-  - [ ] Extend `backend/websocket/events.py` payloads with `category`, `severity`, `source`, `correlation_id`
-  - [ ] Frontend: extend `ActivityFeed` filtering beyond `log_type`
-- [ ] Decide chat semantics (important)
-  - [ ] Option: treat streamed `agent_text` as the canonical assistant reply (platform-style)
-  - [ ] Option: keep explicit `agent_message` writes for “final answers”
-  - [ ] Implement whichever is chosen in `frontend/src/hooks/useMessages.ts` and the backend loop/router
-- [ ] Decide persistence boundary for “activity logs”
-  - [ ] Option: activity logs are ephemeral (frontend-only, filterable, not persisted)
-  - [ ] Option: activity logs are persisted (auditable/history, but higher DB/storage cost)
-  - [ ] Implement the chosen boundary consistently (DB schema + WS + UI expectations)
-- [ ] Re-evaluate agent “send message” capability
-  - [ ] If frontend monitoring replaces explicit agent chat sends, restrict or repurpose `send_message` tool to avoid redundant DB writes.
-- [ ] END tool batching rule (explicit decision)
-  - [ ] Current behavior forbids `end` mixed with other tools; if you want to allow it, change loop semantics + prompt docs + tests
+### 7a — Delete legacy LangGraph tool layer
 
-## Phase 8 — Subagent pattern + async tooling
+- [ ] Delete dead tool files: `backend/tools/e2b.py`, `e2b_tool.py`, `files.py`, `git.py`, `git_tool.py`, `tasks.py`, `task_tool.py`, `agents.py`, `sandbox_vm.py`, `context.py`, `registry.py`
+- [ ] Delete `backend/services/e2b_service.py` (fully replaced by `SandboxService`)
+- [ ] Remove all `from e2b import AsyncSandbox` and E2B SDK references across the codebase
+- [ ] Audit `backend/api_internal/files.py` — if it uses `E2BService`, rewrite to use `SandboxService` or delete
+- [ ] Remove `e2b` from dependency list (`requirements.txt`)
 
-- [ ] Define the “subagent” abstraction you want
-  - [ ] Option A: current “spawn engineers” is the subagent pattern → improve ergonomics (scoping, retries, assignments)
-  - [ ] Option B: ephemeral in-session subagents with scoped toolsets and bounded context (requires DB + UI support)
-- [ ] Async tooling safety model
-  - [ ] Decide whether tools remain strictly sequential (current) or allow safe concurrent tool classes
-  - [ ] Add timeouts, cancellation, and idempotency guidance at the tool contract boundary
+### 7b — Rename sandbox layer for clarity
+
+- [ ] Remove all E2B terminology from `sandbox_service.py` comments and log messages
+- [ ] Deduplicate: `_run_start_sandbox` and `_run_sandbox_start_session` in `loop_registry.py` are near-identical — collapse into one tool entry
+- [ ] Audit `tool_descriptions.json` for any residual E2B references in descriptions/detailed_descriptions and update them
+
+### 7c — Remove dedicated git tools; promote `execute_command`
+
+- [ ] Remove from `loop_registry.py`: `_run_list_branches`, `_run_view_diff`, `_run_create_branch`, `_run_create_pull_request` and their `_TOOL_EXECUTORS` entries (these run `subprocess` against the **host**, not the sandbox)
+- [ ] Remove from `tool_descriptions.json`: `list_branches`, `view_diff`, `create_branch`, `create_pull_request`
+- [ ] Keep `GitService` only for the API layer (repo import, GitHub webhook endpoints) — not callable from agent tools
+- [ ] Update `backend/prompts/blocks/` to tell engineers: "use `execute_command` for all git operations — git is available in your sandbox"
+- [ ] If PR creation via GitHub API is still needed as an agent action, replace the removed tool with a single `create_pull_request` that takes `branch_name` as input and calls `GitService.create_pr()` — no host-side `subprocess` calls
+
+### 7d — Structured tool results & error taxonomy
+
+- [ ] Define `ToolResult` dataclass in `backend/tools/result.py`: `success: bool`, `output: str`, `error_code: str | None`, `hint: str | None`
+  - Error codes: `INVALID_INPUT`, `PERMISSION_DENIED`, `SANDBOX_TIMEOUT`, `SANDBOX_UNAVAILABLE`, `NOT_FOUND`, `PROVIDER_ERROR`
+- [ ] Define `ToolExecutionError(error_code, message, hint)` exception class
+- [ ] Refactor all executors to `raise ToolExecutionError` instead of returning `"Error: ..."` strings
+- [ ] Update loop dispatch in `backend/workers/loop.py` to format results as `[OK] output` vs `[ERROR: code] message. Hint: hint`
+- [ ] Update `PromptAssembly.append_tool_error` / `append_tool_result` to use `ToolResult`
+- [ ] Update `backend/prompts/blocks/tool_io_base.md` with the new error format so the LLM knows how to parse and act on errors
+
+### 7e — Split `loop_registry.py` into domain modules
+
+- [ ] `backend/tools/executors/messaging.py` — `send_message`, `broadcast_message`
+- [ ] `backend/tools/executors/memory.py` — `update_memory`, `read_history`, `list_sessions`
+- [ ] `backend/tools/executors/tasks.py` — `create_task`, `assign_task`, `update_task_status`, `abort_task`, `list_tasks`, `get_task_details`
+- [ ] `backend/tools/executors/sandbox.py` — `execute_command`, all `sandbox_*` tools
+- [ ] `backend/tools/executors/agents.py` — `spawn_engineer`, `list_agents`, `remove_agent`, `interrupt_agent`
+- [ ] `backend/tools/executors/meta.py` — `describe_tool`, `get_project_metadata`, `sleep`
+- [ ] `backend/tools/loop_registry.py` becomes a slim registry: `RunContext`, `LoopTool`, `ToolResult`, role filtering, `_TOOL_EXECUTORS` map, and public API (`get_tool_defs_for_role`, `get_handlers_for_role`, `validate_tool_input`)
+
+### 7f — Emergency stop button (frontend)
+
+- [ ] `POST /api/v1/agents/{id}/stop` endpoint — calls `worker_manager.interrupt_agent()` and sets agent status to `idle`
+- [ ] Frontend: render a "Stop" button whenever an agent's status is `running`; disable/hide when `idle`
+- [ ] Emit a WS event (`agent_stopped`) so all connected clients update agent status in real time without polling
+- [ ] Show a confirmation toast: "Agent stopped." with the agent display name
 
 ## Phase 9 — Sandbox enhancements + pressure tests
 
@@ -190,7 +214,7 @@ Goal: “per project, a single source of truth… manager-only write… template
 
 ## Coverage check: each `tmp/todo.txt` item mapped
 
-- **self host Postgres / set up selfhosting postgres** → Phase 1
+- **self host Postgres / set up selfhosting postgres** → Phase 1 ✅
 - **configurable model selection (frontend, project-level, defaults in config)** → Phase 3 ✅
 - **configurable prompt per model/project** → Phase 3 ✅
 - **API limit monitor / monitor token usage / safeguards** → Phase 4 ✅
@@ -198,10 +222,10 @@ Goal: “per project, a single source of truth… manager-only write… template
 - **multiple users** → Phase 2 ✅
 - **integrate Kimi2.5** → Phase 5
 - **images flow + store binary in DB** → Phase 6
-- **async tooling** → Phase 8
-- **abstract messaging system / structured streaming / category filtering** → Phase 7
-- **no need to let agent send message if frontend monitors** → Phase 7 (decision + implementation)
-- **subagent pattern** → Phase 8
+- **async tooling** → Phase 7 (7d/7e)
+- **abstract messaging system / structured streaming / category filtering** → Phase 7 (tooling cleanup supersedes old Phase 7)
+- **no need to let agent send message if frontend monitors** → Phase 7 (7c prompt update)
+- **subagent pattern** → Phase 7 (7e agent executor module)
 - **agent roles stored** → already present in DB (`agents.role`, `agents.tier`); remaining work is making UI/prompts/APIs use it consistently
 - **add git chromium to sandbox** → Phase 9
 - **pressure tests** → Phase 9
@@ -210,7 +234,7 @@ Goal: “per project, a single source of truth… manager-only write… template
 - **agent didn’t see human input within session** → Phase 0
 - **chatgpt models not wired to correct SDK** → Phase 0
 - **summarize context immediately on topic switch** → Phase 0 (prompt system hardening) + explicit UX trigger (also listed in “Missing” because it wasn’t in `tmp/todo.txt`)
-- **END tool can be called with other tools** → Phase 7 (explicit decision + change)
+- **END tool can be called with other tools** → Phase 7 (7d loop semantics update)
 - **remove CTO from picture** → ADR-006 already aligns; implement as UI defaults + optional role (platform not workflow)
 
 ## Architectural decisions this should explicitly outline (ADR-worthy)

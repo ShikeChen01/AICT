@@ -6,6 +6,26 @@ from typing import Any, Literal
 
 MessageRole = Literal["user", "assistant", "tool"]
 
+# MIME types accepted for image parts across all providers.
+SUPPORTED_IMAGE_MIME_TYPES = frozenset({
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+})
+
+
+@dataclass(slots=True)
+class ImagePart:
+    """A single image included in a multimodal LLM message.
+
+    ``data`` holds raw bytes (loaded from the DB attachment).
+    ``media_type`` must be one of the supported image MIME types.
+    """
+
+    data: bytes
+    media_type: str  # 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+
 
 @dataclass(slots=True)
 class LLMTool:
@@ -29,6 +49,8 @@ class LLMMessage:
     content: str = ""
     tool_calls: list[LLMToolCall] = field(default_factory=list)
     tool_use_id: str = ""
+    # Phase 6: optional multimodal image parts (user messages only)
+    image_parts: list[ImagePart] = field(default_factory=list)
 
 
 @dataclass(slots=True)

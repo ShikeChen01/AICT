@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 // Cloud Run backend (dev). Override with VITE_BACKEND_URL env var if needed.
-const BACKEND_URL = process.env.VITE_BACKEND_URL || 'https://aict-backend-dev-hqp7acew3q-ue.a.run.app'
+const BACKEND_URL = process.env.VITE_BACKEND_URL || 'https://aict-backend-dev-hqp7acew3q-uc.a.run.app'
 const WS_BACKEND_URL = BACKEND_URL.replace('https://', 'wss://').replace('http://', 'ws://')
 
 // https://vite.dev/config/

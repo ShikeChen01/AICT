@@ -10,6 +10,8 @@ class KimiSDKProvider(OpenAISDKProvider):
 
     name = "kimi"
 
-    def __init__(self, api_key: str, base_url: str = "https://api.moonshot.cn/v1"):
-        # Bypass parent __init__ and build the client directly with base_url
+    def __init__(self, api_key: str, base_url: str = "https://api.moonshot.ai/v1"):
+        # Bypass parent __init__ and build the client directly with base_url.
+        # Kimi models do not support temperature restrictions like OpenAI o-series,
+        # so the parent OpenAISDKProvider.complete() logic applies as-is.
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
