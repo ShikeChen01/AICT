@@ -28,6 +28,7 @@ from backend.db.repositories.messages import AgentMessageRepository
 from backend.db.repositories.project_settings import ProjectSettingsRepository
 from backend.llm.contracts import ImagePart
 from backend.llm.model_resolver import resolve_provider
+from backend.tools.executors.sandbox import ScreenshotResult
 from backend.llm.pricing import estimate_cost_usd
 from backend.prompts.assembly import PromptAssembly
 from backend.websocket.manager import Channel, ws_manager
@@ -703,6 +704,7 @@ async def run_inner_loop(
 
         # --- Execute each non-END tool, persist tool result, append to prompt ---
         active_handlers = thinking_handlers if (thinking_enabled and thinking_stage == "thinking") else handlers
+        pending_screenshot_parts: list[ImagePart] = []
         for tc in non_end_calls:
             name = tc.get("name", "")
             tool_input = tc.get("input") or {}
@@ -715,9 +717,8 @@ async def run_inner_loop(
                 if handler is None:
                     raise RuntimeError(f"Unknown tool '{name}'")
                 validate_tool_input(name, tool_input)
-                result_text = await handler(ctx, tool_input)
+                raw_result = await handler(ctx, tool_input)
             except Exception as exc:
-                # Tool failed or unknown: inject error text into prompt and persist as tool result; then continue to next tool.
                 result_text = truncate_tool_output(f"Tool '{name}' failed: {exc}")
                 pa.append_tool_error(name, exc, tool_use_id)
                 if emit_tool_result:
@@ -736,11 +737,24 @@ async def run_inner_loop(
                 )
                 continue
 
-            result_text = truncate_tool_output(result_text)
+            # Handle ScreenshotResult: inject image as vision content for the LLM.
+            if isinstance(raw_result, ScreenshotResult):
+                result_text = f"Screenshot captured ({len(raw_result.image_bytes)} bytes). The image is attached below for your inspection."
+                if _model_supports_vision(resolved_model):
+                    pending_screenshot_parts.append(
+                        ImagePart(data=raw_result.image_bytes, media_type=raw_result.media_type)
+                    )
+                else:
+                    result_text += (
+                        f"\n[Warning: model '{resolved_model}' does not support vision. "
+                        "You cannot view the screenshot. Consider using a vision-capable model.]"
+                    )
+            else:
+                result_text = truncate_tool_output(raw_result)
+
             if emit_tool_result:
                 emit_tool_result(name, result_text)
             pa.append_tool_result(name, result_text, tool_use_id)
-            # Allow summarization to be injected again if context is still high after update_memory.
             if name == "update_memory" and summarization_injected:
                 summarization_injected = False
             tool_input_stored = {"__tool_use_id__": tool_use_id, **tool_input}
@@ -754,6 +768,19 @@ async def run_inner_loop(
                 tool_name=name,
                 tool_input=tool_input_stored,
                 tool_output=result_text,
+            )
+
+        # After processing all tool calls, inject any pending screenshot images
+        # into the last tool-result message as image_parts so the LLM can see them.
+        if pending_screenshot_parts:
+            for _i in range(len(pa.messages) - 1, -1, -1):
+                if pa.messages[_i].get("role") == "tool":
+                    pa.messages[_i]["image_parts"] = pending_screenshot_parts
+                    break
+            logger.info(
+                "Agent %s: injected %d screenshot image_part(s) into conversation",
+                agent.id,
+                len(pending_screenshot_parts),
             )
 
         # --- Agent called only END: record synthetic tool result and end session normally ---

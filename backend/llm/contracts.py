@@ -49,7 +49,7 @@ class LLMMessage:
     content: str = ""
     tool_calls: list[LLMToolCall] = field(default_factory=list)
     tool_use_id: str = ""
-    # Phase 6: optional multimodal image parts (user messages only)
+    # Multimodal image parts (user messages and tool results with screenshots)
     image_parts: list[ImagePart] = field(default_factory=list)
 
 

@@ -37,6 +37,7 @@ import type {
   PromptBlockConfig,
   PromptBlockConfigItem,
   UpdateAgentRequest,
+  PromptMeta,
 } from '../types';
 
 // ─── Configuration ───────────────────────────────────────────────────
@@ -514,6 +515,10 @@ export async function saveTemplateBlocks(templateId: string, blocks: PromptBlock
 
 export async function getDefaultBlocks(baseRole: string): Promise<PromptBlockConfigItem[]> {
   return request<PromptBlockConfigItem[]>('GET', `/prompt-blocks/defaults/${baseRole}`);
+}
+
+export async function getPromptMeta(): Promise<PromptMeta> {
+  return request<PromptMeta>('GET', '/prompt-blocks/meta');
 }
 
 // ─── Document Versioning ─────────────────────────────────────────────

@@ -139,6 +139,24 @@ export interface UpdateAgentRequest {
   display_name?: string;
 }
 
+export interface BlockMetaInfo {
+  kind: 'system' | 'conditional' | 'conversation';
+  max_chars: number | null;
+  truncation: string;
+}
+
+export interface BudgetEntry {
+  tokens: number;
+  pct: number;
+}
+
+export interface PromptMeta {
+  context_window_tokens: number;
+  conversation_budget_tokens: number;
+  budgets: Record<string, BudgetEntry>;
+  block_registry: Record<string, BlockMetaInfo>;
+}
+
 export interface AgentTaskQueueItem {
   id: UUID;
   title: string;

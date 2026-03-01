@@ -80,20 +80,31 @@ class GeminiProviderAdapter(BaseLLMProvider):
                         tool_use_id,
                     )
                     continue
-                contents.append(
+                tool_parts: list[dict[str, Any]] = [
                     {
-                        "role": "user",
-                        "parts": [
-                            {
-                                "functionResponse": {
-                                    **({"id": tool_use_id} if tool_use_id else {}),
-                                    "name": function_name,
-                                    "response": {"result": str(msg.content or "")},
-                                }
-                            }
-                        ],
+                        "functionResponse": {
+                            **({"id": tool_use_id} if tool_use_id else {}),
+                            "name": function_name,
+                            "response": {"result": str(msg.content or "")},
+                        }
                     }
-                )
+                ]
+                contents.append({"role": "user", "parts": tool_parts})
+                # Gemini functionResponse parts don't support inline images.
+                # Inject a follow-up user message with the screenshot image(s).
+                if msg.image_parts:
+                    img_parts: list[dict[str, Any]] = [
+                        {"text": "[Screenshot from sandbox display]"},
+                    ]
+                    for img in msg.image_parts:
+                        b64 = base64.b64encode(img.data).decode()
+                        img_parts.append({
+                            "inlineData": {
+                                "mimeType": img.media_type,
+                                "data": b64,
+                            }
+                        })
+                    contents.append({"role": "user", "parts": img_parts})
 
         if not contents:
             # Avoid 400 when all prior messages are filtered out (e.g., orphan tool results only).

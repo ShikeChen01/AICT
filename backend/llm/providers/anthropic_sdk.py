@@ -147,6 +147,19 @@ class AnthropicSDKProvider(BaseLLMProvider):
                     )
                     continue
                 resolved_tool_use_ids.add(tool_use_id)
+                # Anthropic tool_result supports multimodal content blocks
+                tool_content: list[dict[str, Any]] = []
+                for img in msg.image_parts:
+                    b64 = base64.b64encode(img.data).decode()
+                    tool_content.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": img.media_type,
+                            "data": b64,
+                        },
+                    })
+                tool_content.append({"type": "text", "text": str(msg.content or "")})
                 api_messages.append(
                     {
                         "role": "user",
@@ -154,7 +167,7 @@ class AnthropicSDKProvider(BaseLLMProvider):
                             {
                                 "type": "tool_result",
                                 "tool_use_id": tool_use_id,
-                                "content": str(msg.content or ""),
+                                "content": tool_content,
                             }
                         ],
                     }

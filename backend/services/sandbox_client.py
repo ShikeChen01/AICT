@@ -212,6 +212,42 @@ class SandboxClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def mouse_click(
+        self,
+        sandbox_id: str,
+        x: int | None = None,
+        y: int | None = None,
+        button: int = 1,
+        click_type: str = "single",
+    ) -> dict[str, Any]:
+        conn = self._get_conn(sandbox_id)
+        payload: dict[str, Any] = {"button": button, "click_type": click_type}
+        if x is not None:
+            payload["x"] = x
+        if y is not None:
+            payload["y"] = y
+        resp = await conn.http().post("/mouse/click", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def mouse_scroll(
+        self,
+        sandbox_id: str,
+        x: int | None = None,
+        y: int | None = None,
+        direction: str = "down",
+        clicks: int = 3,
+    ) -> dict[str, Any]:
+        conn = self._get_conn(sandbox_id)
+        payload: dict[str, Any] = {"direction": direction, "clicks": clicks}
+        if x is not None:
+            payload["x"] = x
+        if y is not None:
+            payload["y"] = y
+        resp = await conn.http().post("/mouse/scroll", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
     async def mouse_location(self, sandbox_id: str) -> dict[str, Any]:
         conn = self._get_conn(sandbox_id)
         resp = await conn.http().get("/mouse/location")

@@ -19,6 +19,14 @@ from backend.db.repositories.agent_templates import (
     _build_block_defs_for_role,
 )
 from backend.db.session import get_db
+from backend.prompts.assembly import (
+    BLOCK_REGISTRY,
+    _CONTEXT_WINDOW_TOKENS,
+    _CONVERSATION_BUDGET_TOKENS,
+    _HISTORY_BUDGET_TOKENS,
+    _TOOL_RESULT_BUDGET_TOKENS,
+    _INCOMING_MSG_BUDGET_TOKENS,
+)
 
 router = APIRouter(prefix="/prompt-blocks", tags=["prompt-blocks"])
 
@@ -193,3 +201,48 @@ async def get_default_blocks(
     if base_role not in valid_roles:
         raise HTTPException(status_code=400, detail=f"base_role must be one of: {valid_roles}")
     return _build_block_defs_for_role(base_role)
+
+
+# ── Meta endpoint ──────────────────────────────────────────────────────────────
+
+class BlockMetaResponse(BaseModel):
+    kind: str
+    max_chars: int | None
+    truncation: str
+
+
+class BudgetEntry(BaseModel):
+    tokens: int
+    pct: float
+
+
+class PromptMetaResponse(BaseModel):
+    context_window_tokens: int
+    conversation_budget_tokens: int
+    budgets: dict[str, BudgetEntry]
+    block_registry: dict[str, BlockMetaResponse]
+
+
+@router.get("/meta", response_model=PromptMetaResponse)
+async def get_prompt_meta(
+    current_user: User | None = Depends(get_current_user),
+):
+    """Return context window budget constants and block registry metadata.
+
+    Used by the frontend Prompt Builder dashboard to show per-block token
+    estimates and context allocation breakdown.
+    """
+    conv = _CONVERSATION_BUDGET_TOKENS
+    return PromptMetaResponse(
+        context_window_tokens=_CONTEXT_WINDOW_TOKENS,
+        conversation_budget_tokens=conv,
+        budgets={
+            "history": BudgetEntry(tokens=_HISTORY_BUDGET_TOKENS, pct=round(_HISTORY_BUDGET_TOKENS / conv, 4)),
+            "tool_results": BudgetEntry(tokens=_TOOL_RESULT_BUDGET_TOKENS, pct=round(_TOOL_RESULT_BUDGET_TOKENS / conv, 4)),
+            "incoming_messages": BudgetEntry(tokens=_INCOMING_MSG_BUDGET_TOKENS, pct=round(_INCOMING_MSG_BUDGET_TOKENS / conv, 4)),
+        },
+        block_registry={
+            key: BlockMetaResponse(kind=meta.kind, max_chars=meta.max_chars, truncation=meta.truncation)
+            for key, meta in BLOCK_REGISTRY.items()
+        },
+    )

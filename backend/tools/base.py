@@ -7,7 +7,7 @@ import them without creating circular dependencies with loop_registry.py.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,7 +66,7 @@ class RunContext:
     emit_agent_message: Callable[[object], None] | None = field(default=None)
 
 
-ToolExecutor = Callable[[RunContext, dict], Awaitable[str]]
+ToolExecutor = Callable[[RunContext, dict], Awaitable[str | Any]]
 
 
 @dataclass

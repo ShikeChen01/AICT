@@ -185,5 +185,18 @@ class OpenAISDKProvider(BaseLLMProvider):
                         "content": str(msg.content or ""),
                     }
                 )
+                # OpenAI tool results don't support inline images.
+                # Inject a follow-up user message with the image(s).
+                if msg.image_parts:
+                    parts: list[dict[str, Any]] = [
+                        {"type": "text", "text": "[Screenshot from sandbox display]"},
+                    ]
+                    for img in msg.image_parts:
+                        b64 = base64.b64encode(img.data).decode()
+                        parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{img.media_type};base64,{b64}"},
+                        })
+                    api_messages.append({"role": "user", "content": parts})
 
         return api_messages

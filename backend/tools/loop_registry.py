@@ -40,6 +40,8 @@ from backend.tools.executors.sandbox import (
     run_sandbox_health,
     run_sandbox_screenshot,
     run_sandbox_mouse_move,
+    run_sandbox_mouse_click,
+    run_sandbox_mouse_scroll,
     run_sandbox_mouse_location,
     run_sandbox_keyboard_press,
     run_sandbox_record_screen,
@@ -77,6 +79,8 @@ _run_sandbox_end_session = run_sandbox_end_session
 _run_sandbox_health = run_sandbox_health
 _run_sandbox_screenshot = run_sandbox_screenshot
 _run_sandbox_mouse_move = run_sandbox_mouse_move
+_run_sandbox_mouse_click = run_sandbox_mouse_click
+_run_sandbox_mouse_scroll = run_sandbox_mouse_scroll
 _run_sandbox_mouse_location = run_sandbox_mouse_location
 _run_sandbox_keyboard_press = run_sandbox_keyboard_press
 _run_sandbox_record_screen = run_sandbox_record_screen
@@ -103,6 +107,8 @@ _TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
     "sandbox_health": run_sandbox_health,
     "sandbox_screenshot": run_sandbox_screenshot,
     "sandbox_mouse_move": run_sandbox_mouse_move,
+    "sandbox_mouse_click": run_sandbox_mouse_click,
+    "sandbox_mouse_scroll": run_sandbox_mouse_scroll,
     "sandbox_mouse_location": run_sandbox_mouse_location,
     "sandbox_keyboard_press": run_sandbox_keyboard_press,
     "sandbox_record_screen": run_sandbox_record_screen,

@@ -257,6 +257,34 @@ class SandboxService:
             raise SandboxNotFoundError(str(agent.id))
         return await self._client.mouse_move(agent.sandbox_id, x, y)
 
+    async def mouse_click(
+        self,
+        agent: Agent,
+        x: int | None = None,
+        y: int | None = None,
+        button: int = 1,
+        click_type: str = "single",
+    ) -> dict:
+        if not agent.sandbox_id:
+            raise SandboxNotFoundError(str(agent.id))
+        return await self._client.mouse_click(
+            agent.sandbox_id, x=x, y=y, button=button, click_type=click_type,
+        )
+
+    async def mouse_scroll(
+        self,
+        agent: Agent,
+        x: int | None = None,
+        y: int | None = None,
+        direction: str = "down",
+        clicks: int = 3,
+    ) -> dict:
+        if not agent.sandbox_id:
+            raise SandboxNotFoundError(str(agent.id))
+        return await self._client.mouse_scroll(
+            agent.sandbox_id, x=x, y=y, direction=direction, clicks=clicks,
+        )
+
     async def mouse_location(self, agent: Agent) -> dict:
         if not agent.sandbox_id:
             raise SandboxNotFoundError(str(agent.id))

@@ -78,6 +78,70 @@ async def mouse_move(body: MouseMoveRequest) -> JSONResponse:
     return JSONResponse({"ok": True, "x": body.x, "y": body.y})
 
 
+class MouseClickRequest(BaseModel):
+    x: int | None = None
+    y: int | None = None
+    button: int = 1         # 1=left, 2=middle, 3=right
+    click_type: str = "single"  # "single", "double", "triple"
+
+
+@router.post("/mouse/click")
+async def mouse_click(body: MouseClickRequest) -> JSONResponse:
+    """Click at optional (x, y) or at current position."""
+    cmd: list[str] = ["xdotool"]
+    if body.x is not None and body.y is not None:
+        cmd += ["mousemove", str(body.x), str(body.y)]
+        move_result = await _run(cmd)
+        if move_result.returncode != 0:
+            raise HTTPException(status_code=500, detail=move_result.stderr.decode()[:300])
+
+    repeat = {"single": "1", "double": "2", "triple": "3"}.get(body.click_type, "1")
+    click_cmd = ["xdotool", "click", "--repeat", repeat, "--delay", "80", str(body.button)]
+    result = await _run(click_cmd)
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail=result.stderr.decode()[:300])
+
+    loc = await _run(["xdotool", "getmouselocation"])
+    parts = {}
+    if loc.returncode == 0:
+        for token in loc.stdout.decode().split():
+            if ":" in token:
+                k, v = token.split(":", 1)
+                parts[k] = v
+
+    return JSONResponse({
+        "ok": True,
+        "x": int(parts.get("x", body.x or 0)),
+        "y": int(parts.get("y", body.y or 0)),
+        "button": body.button,
+        "click_type": body.click_type,
+    })
+
+
+class MouseScrollRequest(BaseModel):
+    x: int | None = None
+    y: int | None = None
+    direction: str = "down"  # "up", "down", "left", "right"
+    clicks: int = 3
+
+
+@router.post("/mouse/scroll")
+async def mouse_scroll(body: MouseScrollRequest) -> JSONResponse:
+    """Scroll at optional (x, y) or at current position."""
+    if body.x is not None and body.y is not None:
+        move_result = await _run(["xdotool", "mousemove", str(body.x), str(body.y)])
+        if move_result.returncode != 0:
+            raise HTTPException(status_code=500, detail=move_result.stderr.decode()[:300])
+
+    # xdotool click: button 4=scroll-up, 5=scroll-down, 6=scroll-left, 7=scroll-right
+    button_map = {"up": "4", "down": "5", "left": "6", "right": "7"}
+    btn = button_map.get(body.direction, "5")
+    result = await _run(["xdotool", "click", "--repeat", str(body.clicks), "--delay", "50", btn])
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail=result.stderr.decode()[:300])
+    return JSONResponse({"ok": True, "direction": body.direction, "clicks": body.clicks})
+
+
 @router.get("/mouse/location")
 async def mouse_location() -> JSONResponse:
     """Return current mouse cursor position."""

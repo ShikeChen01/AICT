@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import dataclass
 
 from backend.tools.base import RunContext
 from backend.tools.result import ToolExecutionError
+
+
+@dataclass
+class ScreenshotResult:
+    """Wraps screenshot bytes so the loop can inject them as vision image_parts."""
+    image_bytes: bytes
+    media_type: str = "image/jpeg"
 
 
 def _get_sandbox_service():
@@ -70,14 +78,15 @@ async def run_sandbox_health(ctx: RunContext, tool_input: dict) -> str:
         ) from exc
 
 
-async def run_sandbox_screenshot(ctx: RunContext, tool_input: dict) -> str:
+async def run_sandbox_screenshot(ctx: RunContext, tool_input: dict) -> str | ScreenshotResult:
+    """Capture a screenshot; returns ScreenshotResult so the loop can inject the
+    image into the LLM conversation as a vision image_part."""
     if not ctx.agent.sandbox_id:
         await run_sandbox_start_session(ctx, {})
     svc = _get_sandbox_service()
     try:
         img_bytes = await svc.take_screenshot(ctx.agent)
-        b64 = base64.b64encode(img_bytes).decode()
-        return f"Screenshot captured ({len(img_bytes)} bytes). Base64 JPEG:\n{b64[:200]}...[truncated for display]"
+        return ScreenshotResult(image_bytes=img_bytes, media_type="image/jpeg")
     except Exception as exc:
         raise ToolExecutionError(
             f"Screenshot failed: {exc}",
@@ -96,6 +105,39 @@ async def run_sandbox_mouse_move(ctx: RunContext, tool_input: dict) -> str:
     except Exception as exc:
         raise ToolExecutionError(
             f"Mouse move failed: {exc}",
+            error_code=ToolExecutionError.SANDBOX_UNAVAILABLE,
+        ) from exc
+
+
+async def run_sandbox_mouse_click(ctx: RunContext, tool_input: dict) -> str:
+    x = tool_input.get("x")
+    y = tool_input.get("y")
+    button = int(tool_input.get("button", 1))
+    click_type = tool_input.get("click_type", "single")
+    svc = _get_sandbox_service()
+    try:
+        result = await svc.mouse_click(ctx.agent, x=x, y=y, button=button, click_type=click_type)
+        pos = result or {}
+        return f"Mouse clicked at ({pos.get('x', x)}, {pos.get('y', y)}) button={button} type={click_type}"
+    except Exception as exc:
+        raise ToolExecutionError(
+            f"Mouse click failed: {exc}",
+            error_code=ToolExecutionError.SANDBOX_UNAVAILABLE,
+        ) from exc
+
+
+async def run_sandbox_mouse_scroll(ctx: RunContext, tool_input: dict) -> str:
+    x = tool_input.get("x")
+    y = tool_input.get("y")
+    direction = tool_input.get("direction", "down")
+    clicks = int(tool_input.get("clicks", 3))
+    svc = _get_sandbox_service()
+    try:
+        await svc.mouse_scroll(ctx.agent, x=x, y=y, direction=direction, clicks=clicks)
+        return f"Scrolled {direction} {clicks} click(s) at ({x}, {y})"
+    except Exception as exc:
+        raise ToolExecutionError(
+            f"Mouse scroll failed: {exc}",
             error_code=ToolExecutionError.SANDBOX_UNAVAILABLE,
         ) from exc
 
