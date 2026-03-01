@@ -20,9 +20,8 @@ import {
   EyeOff,
   Save,
   Loader2,
-  Plus,
 } from 'lucide-react';
-import { listAgentBlocks, saveAgentBlocks, resetAgentBlock, getDefaultBlocks } from '../../api/client';
+import { listAgentBlocks, saveAgentBlocks, resetAgentBlock } from '../../api/client';
 import type { PromptBlockConfig, PromptBlockConfigItem } from '../../types';
 import { Button } from '../ui';
 
@@ -180,9 +179,8 @@ interface PromptBlockEditorProps {
   baseRole: 'manager' | 'cto' | 'worker';
 }
 
-export function PromptBlockEditor({ agentId, baseRole }: PromptBlockEditorProps) {
+export function PromptBlockEditor({ agentId }: PromptBlockEditorProps) {
   const [blocks, setBlocks] = useState<EditableBlock[]>([]);
-  const [originalBlocks, setOriginalBlocks] = useState<PromptBlockConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -193,7 +191,6 @@ export function PromptBlockEditor({ agentId, baseRole }: PromptBlockEditorProps)
     setError(null);
     try {
       const data = await listAgentBlocks(agentId);
-      setOriginalBlocks(data);
       setBlocks(data.map(blockFromConfig));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load blocks');
@@ -263,7 +260,6 @@ export function PromptBlockEditor({ agentId, baseRole }: PromptBlockEditorProps)
         enabled: b.enabled,
       }));
       const saved = await saveAgentBlocks(agentId, payload);
-      setOriginalBlocks(saved);
       setBlocks(saved.map(blockFromConfig));
       setSuccess(true);
       setTimeout(() => setSuccess(false), 2000);

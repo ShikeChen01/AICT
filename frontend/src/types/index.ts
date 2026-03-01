@@ -427,7 +427,8 @@ export type WSEventType =
   // Real-time LLM usage stream
   | 'usage_update'
   // Architecture documents (Phase 10)
-  | 'document_updated';
+  | 'document_updated'
+  | 'agent_stopped';
 
 export interface WSEvent<T = unknown> {
   type: WSEventType;

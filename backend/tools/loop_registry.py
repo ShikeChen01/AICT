@@ -33,6 +33,7 @@ from backend.tools.executors.tasks import (
     run_abort_task,
 )
 from backend.tools.executors.sandbox import (
+    _get_sandbox_service,
     run_execute_command,
     run_sandbox_start_session,
     run_sandbox_end_session,
@@ -66,6 +67,20 @@ __all__ = [
     "get_thinking_phase_handlers",
     "validate_tool_input",
 ]
+
+# Underscore-prefixed aliases for test backward-compatibility
+_run_execute_command = run_execute_command
+_run_spawn_engineer = run_spawn_engineer
+_run_sandbox_start_session = run_sandbox_start_session
+_run_start_sandbox = run_sandbox_start_session
+_run_sandbox_end_session = run_sandbox_end_session
+_run_sandbox_health = run_sandbox_health
+_run_sandbox_screenshot = run_sandbox_screenshot
+_run_sandbox_mouse_move = run_sandbox_mouse_move
+_run_sandbox_mouse_location = run_sandbox_mouse_location
+_run_sandbox_keyboard_press = run_sandbox_keyboard_press
+_run_sandbox_record_screen = run_sandbox_record_screen
+_run_sandbox_end_record_screen = run_sandbox_end_record_screen
 
 
 # ---------------------------------------------------------------------------

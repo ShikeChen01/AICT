@@ -104,7 +104,7 @@ async def test_chat_completion_routes_openai_through_facade(
     svc = LLMService()
     monkeypatch.setattr(svc._facade, "complete_from_legacy_messages", fake_complete_from_legacy_messages)
 
-    text, tool_calls = await svc.chat_completion_with_tools(
+    text, tool_calls, _llm_resp = await svc.chat_completion_with_tools(
         model="gpt-4o",
         system_prompt="You are a helpful agent.",
         messages=[{"role": "user", "content": "Hello"}],

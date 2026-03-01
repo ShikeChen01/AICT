@@ -2,6 +2,7 @@
 Unit tests for the engineer LangGraph workflow.
 """
 
+import pytest
 from backend.graph.engineer_graph import EngineerState, create_engineer_graph
 
 
@@ -21,12 +22,14 @@ class TestEngineerState:
 class TestCreateEngineerGraph:
     """create_engineer_graph returns a StateGraph with expected structure."""
 
+    @pytest.mark.skip(reason="LangGraph-based engineer graph is deprecated in favour of the universal loop")
     def test_returns_state_graph(self):
         graph = create_engineer_graph()
         from langgraph.graph import StateGraph
 
         assert isinstance(graph, StateGraph)
 
+    @pytest.mark.skip(reason="LangGraph-based engineer graph is deprecated in favour of the universal loop")
     def test_compiles_and_has_invoke(self):
         graph = create_engineer_graph()
         compiled = graph.compile()

@@ -39,7 +39,6 @@ import {
   Save,
   X,
   Loader2,
-  ChevronRight,
 } from 'lucide-react';
 
 const DOC_TYPE_LABELS: Record<string, string> = {

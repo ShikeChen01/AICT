@@ -79,6 +79,26 @@ def _model_supports_vision(model: str) -> bool:
     return any(m.startswith(p) for p in _VISION_CAPABLE_PREFIXES)
 
 
+def _default_model_for_agent(agent: Agent) -> str:
+    """Return the config-default model for an agent whose DB model field is empty.
+
+    This handles legacy agents created before the write-through migration.
+    """
+    from backend.config import settings
+    role = (agent.role or "").lower()
+    if role == "manager":
+        return settings.manager_model_default
+    if role == "cto":
+        return settings.cto_model_default
+    # Engineer: resolve by tier/seniority
+    tier = (getattr(agent, "tier", None) or "junior").lower()
+    if tier == "senior":
+        return settings.engineer_senior_model
+    if tier == "intermediate":
+        return settings.engineer_intermediate_model
+    return settings.engineer_junior_model
+
+
 # Safeguard: stop session after this many LLM turns (avoids runaway loops).
 MAX_ITERATIONS = 1000
 # If the agent replies with text only (no tool calls) this many times in a row, end session.
@@ -289,9 +309,10 @@ async def run_inner_loop(
 
     usage_repo = LLMUsageRepository(db)
 
-    # Read model and provider directly from DB (write-through, no fallback chain).
-    resolved_model = agent.model
-    resolved_provider = resolve_provider(agent.provider, agent.model)
+    # Read model from DB (write-through). Fall back to config defaults for legacy agents
+    # whose model field is empty (pre-migration or created without a template).
+    resolved_model = agent.model or _default_model_for_agent(agent)
+    resolved_provider = resolve_provider(agent.provider, resolved_model)
 
     # Determine thinking stage: None = thinking OFF, "thinking" = Stage 1, "execution" = Stage 2.
     thinking_enabled = getattr(agent, "thinking_enabled", False)

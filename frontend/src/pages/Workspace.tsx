@@ -10,15 +10,12 @@ import { useProjectContext } from '../contexts/ProjectContext';
 import { WorkspaceLayout } from '../components/Workspace';
 import { AgentChatView } from '../components/AgentChat';
 import { KanbanBoard } from '../components/Kanban';
-import { WorkflowGraph } from '../components/Workflow';
-import { ArtifactBrowser } from '../components/Artifacts';
+import { PromptBuilderPage } from '../components/PromptBuilder';
 import { ArchitecturePage } from '../components/Architecture/ArchitecturePage';
 import { AgentsPanel } from '../components/Agents';
 import { ActivityFeed } from '../components/ActivityFeed';
 import { AgentStream } from '../components/AgentChat/AgentStream';
 import { Panel } from '../components/ui';
-import type { Project } from '../types';
-
 export type WorkspaceView = 'workspace' | 'kanban' | 'workflow' | 'artifacts';
 
 interface WorkspacePageProps {
@@ -28,13 +25,9 @@ interface WorkspacePageProps {
 function WorkspaceContent({
   projectId,
   view,
-  project,
-  loading: projectsLoading,
 }: {
   projectId: string;
   view: WorkspaceView;
-  project: Project | undefined;
-  loading: boolean;
 }) {
   const {
     isConnected,
@@ -110,7 +103,7 @@ function WorkspaceContent({
       main = <KanbanBoard projectId={projectId} />;
       break;
     case 'workflow':
-      main = <WorkflowGraph projectId={projectId} />;
+      main = <PromptBuilderPage projectId={projectId} />;
       break;
     case 'artifacts':
       main = <ArchitecturePage projectId={projectId} />;
@@ -220,8 +213,6 @@ export function WorkspacePage({ view }: WorkspacePageProps) {
       <WorkspaceContent
         projectId={projectId}
         view={view}
-        project={project}
-        loading={loading}
       />
     </AgentStreamProvider>
   );

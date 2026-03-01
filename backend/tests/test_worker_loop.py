@@ -33,6 +33,17 @@ def _make_unread_msg(from_id, project_id, target_id, content="hi"):
     return m
 
 
+def _make_llm_response(model: str = "claude-test", provider: str = "anthropic") -> MagicMock:
+    """Build a minimal mock LLMResponse sufficient for loop.py's usage tracking."""
+    r = MagicMock()
+    r.model = model
+    r.provider = provider
+    r.input_tokens = 100
+    r.output_tokens = 50
+    r.request_id = "req-test"
+    return r
+
+
 def _make_ctx(session, agent) -> RunContext:
     """Build a minimal RunContext sufficient for sandbox/command tool tests."""
     return RunContext(
@@ -55,12 +66,14 @@ def test_parse_tool_uuid_valid_required() -> None:
 
 
 def test_parse_tool_uuid_invalid_value_raises_runtime_error() -> None:
-    with pytest.raises(RuntimeError, match="Invalid UUID for 'target_agent_id'"):
+    from backend.tools.result import ToolExecutionError
+    with pytest.raises(ToolExecutionError, match="Invalid UUID for 'target_agent_id'"):
         parse_tool_uuid({"target_agent_id": "not-a-uuid"}, "target_agent_id")
 
 
 def test_parse_tool_uuid_missing_required_raises_runtime_error() -> None:
-    with pytest.raises(RuntimeError, match="'target_agent_id' is required and must be a UUID"):
+    from backend.tools.result import ToolExecutionError
+    with pytest.raises(ToolExecutionError, match="'target_agent_id' is required and must be a UUID"):
         parse_tool_uuid({}, "target_agent_id")
 
 
@@ -77,7 +90,7 @@ async def test_execute_command_tool_uses_vm_sandbox(sample_engineer, session) ->
     shell_result = ShellResult(stdout="/home/user\n", exit_code=0)
     ctx = _make_ctx(session, sample_engineer)
 
-    with patch("backend.tools.loop_registry._get_sandbox_service") as mock_f:
+    with patch("backend.tools.executors.sandbox._get_sandbox_service") as mock_f:
         mock_svc = MagicMock()
         mock_svc.execute_command = AsyncMock(return_value=shell_result)
         mock_f.return_value = mock_svc
@@ -111,7 +124,7 @@ async def test_execute_command_tool_reports_sandbox_output(sample_engineer, sess
     shell_result = ShellResult(stdout="/home/user/project\n", exit_code=0)
     ctx = _make_ctx(session, sample_engineer)
 
-    with patch("backend.tools.loop_registry._get_sandbox_service") as mock_f:
+    with patch("backend.tools.executors.sandbox._get_sandbox_service") as mock_f:
         mock_svc = MagicMock()
         mock_svc.execute_command = AsyncMock(return_value=shell_result)
         mock_f.return_value = mock_svc
@@ -134,7 +147,7 @@ async def test_start_sandbox_tool_returns_ready_message(sample_engineer, session
     )
     ctx = _make_ctx(session, sample_engineer)
 
-    with patch("backend.tools.loop_registry._get_sandbox_service") as mock_f:
+    with patch("backend.tools.executors.sandbox._get_sandbox_service") as mock_f:
         mock_svc = MagicMock()
         mock_svc.ensure_running_sandbox = AsyncMock(return_value=meta)
         mock_f.return_value = mock_svc
@@ -189,7 +202,7 @@ async def test_run_inner_loop_uses_assignment_context_without_unread_messages(
         AsyncMock(),
     )
 
-    llm_call = AsyncMock(return_value=("", [{"name": "end", "input": {}, "id": "end-1"}]))
+    llm_call = AsyncMock(return_value=("", [{"name": "end", "input": {}, "id": "end-1"}], _make_llm_response()))
     monkeypatch.setattr(
         "backend.services.llm_service.LLMService.chat_completion_with_tools",
         llm_call,
@@ -238,7 +251,7 @@ async def test_run_inner_loop_resolves_model_from_role_and_seniority(
         AsyncMock(),
     )
 
-    llm_mock = AsyncMock(return_value=("", [{"name": "end", "input": {}, "id": "end-1"}]))
+    llm_mock = AsyncMock(return_value=("", [{"name": "end", "input": {}, "id": "end-1"}], _make_llm_response()))
     monkeypatch.setattr(
         "backend.services.llm_service.LLMService.chat_completion_with_tools",
         llm_mock,
@@ -294,7 +307,7 @@ async def test_run_inner_loop_normalizes_legacy_tool_name_in_history(
         AsyncMock(),
     )
 
-    llm_mock = AsyncMock(return_value=("", [{"name": "end", "input": {}, "id": "end-1"}]))
+    llm_mock = AsyncMock(return_value=("", [{"name": "end", "input": {}, "id": "end-1"}], _make_llm_response()))
     monkeypatch.setattr(
         "backend.services.llm_service.LLMService.chat_completion_with_tools",
         llm_mock,
@@ -390,7 +403,7 @@ async def test_max_loopbacks_emits_fallback_message(
     """When agent repeatedly produces text without tools, loop emits a fallback after MAX_LOOPBACKS."""
     unread = [_make_unread_msg(USER_AGENT_ID, sample_project.id, sample_manager.id, "hello")]
     # Always return text content with no tool calls → triggers loopback every iteration
-    _patch_loop_basics(monkeypatch, unread, llm_return=("some thinking text", []))
+    _patch_loop_basics(monkeypatch, unread, llm_return=("some thinking text", [], _make_llm_response()))
 
     sess = await SessionService(session).create_session(
         sample_manager.id, sample_project.id, trigger_message_id=None

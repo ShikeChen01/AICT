@@ -319,6 +319,18 @@ class PromptBlockConfigRepository(BaseRepository[PromptBlockConfig]):
             await self.session.flush()
         return block
 
+    async def ensure_agent_blocks(self, agent_id: UUID, role: str) -> list[PromptBlockConfig]:
+        """Return existing blocks for an agent, auto-seeding defaults if empty.
+
+        Covers agents created before the prompt-block system was introduced.
+        """
+        blocks = await self.list_for_agent(agent_id)
+        if blocks:
+            return blocks
+        role_map = {"manager": "manager", "cto": "cto", "engineer": "worker"}
+        base_role = role_map.get(role, "worker")
+        return await self.bulk_replace_agent_blocks(agent_id, _build_block_defs_for_role(base_role))
+
     @staticmethod
     def get_default_blocks_for_role(base_role: str) -> list[dict]:
         """Return the codebase default blocks for a given base_role (for the API)."""

@@ -25,7 +25,7 @@ import {
   deleteTemplate,
 } from '../../api/client';
 import type { AgentTemplate, CreateAgentTemplate } from '../../types';
-import { Button, Card, Input } from '../ui';
+import { Button, Input } from '../ui';
 
 // ── Model options ──────────────────────────────────────────────────────
 
@@ -119,7 +119,7 @@ function TemplateCard({ template, onSave, onDelete }: TemplateCardProps) {
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500 font-mono">{template.model}</span>
           {thinkingEnabled && (
-            <BrainCircuit className="w-4 h-4 text-purple-500" title="Thinking enabled" />
+            <BrainCircuit className="w-4 h-4 text-purple-500" aria-label="Thinking enabled" />
           )}
           {expanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
         </div>

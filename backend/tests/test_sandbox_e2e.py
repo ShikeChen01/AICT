@@ -444,9 +444,13 @@ class TestSandboxHealthExecutor:
             side_effect=httpx.ConnectError("Connection refused")
         )
 
-        with patch("backend.tools.loop_registry._get_sandbox_service", return_value=mock_svc):
-            result = await _run_sandbox_health(ctx, {})
+        from backend.tools.result import ToolExecutionError
 
+        with patch("backend.tools.executors.sandbox._get_sandbox_service", return_value=mock_svc):
+            with pytest.raises(ToolExecutionError) as exc_info:
+                await _run_sandbox_health(ctx, {})
+
+        result = str(exc_info.value)
         assert "Health check failed" in result
         # The error detail must be non-empty — this was the original bug
         after_colon = result.split("Health check failed:")[-1].strip()
@@ -467,9 +471,13 @@ class TestSandboxHealthExecutor:
             side_effect=httpx.ReadTimeout("Timed out waiting for server")
         )
 
-        with patch("backend.tools.loop_registry._get_sandbox_service", return_value=mock_svc):
-            result = await _run_sandbox_health(ctx, {})
+        from backend.tools.result import ToolExecutionError
 
+        with patch("backend.tools.executors.sandbox._get_sandbox_service", return_value=mock_svc):
+            with pytest.raises(ToolExecutionError) as exc_info:
+                await _run_sandbox_health(ctx, {})
+
+        result = str(exc_info.value)
         assert "Health check failed" in result
         after_colon = result.split("Health check failed:")[-1].strip()
         assert after_colon, "Timeout error message must be surfaced to the agent"
@@ -488,7 +496,7 @@ class TestSandboxHealthExecutor:
             "display": ":99",
         })
 
-        with patch("backend.tools.loop_registry._get_sandbox_service", return_value=mock_svc):
+        with patch("backend.tools.executors.sandbox._get_sandbox_service", return_value=mock_svc):
             result = await _run_sandbox_health(ctx, {})
 
         assert "ok" in result
@@ -520,7 +528,7 @@ class TestExecuteCommandExecutor:
             return_value=ShellResult(stdout="hello world\n", exit_code=0)
         )
 
-        with patch("backend.tools.loop_registry._get_sandbox_service", return_value=mock_svc):
+        with patch("backend.tools.executors.sandbox._get_sandbox_service", return_value=mock_svc):
             result = await _run_execute_command(ctx, {"command": "echo hello world"})
 
         assert "hello world" in result
@@ -548,7 +556,7 @@ class TestExecuteCommandExecutor:
             return_value=ShellResult(stdout="", exit_code=None)
         )
 
-        with patch("backend.tools.loop_registry._get_sandbox_service", return_value=mock_svc):
+        with patch("backend.tools.executors.sandbox._get_sandbox_service", return_value=mock_svc):
             result = await _run_execute_command(ctx, {"command": "echo hello"})
 
         # After fix: must include a timeout/no-output notice so the agent knows
@@ -579,6 +587,6 @@ class TestExecuteCommandExecutor:
             side_effect=RuntimeError("Shell execution failed: Connection refused")
         )
 
-        with patch("backend.tools.loop_registry._get_sandbox_service", return_value=mock_svc):
+        with patch("backend.tools.executors.sandbox._get_sandbox_service", return_value=mock_svc):
             with pytest.raises(RuntimeError, match="Shell execution failed"):
                 await _run_execute_command(ctx, {"command": "echo hello"})

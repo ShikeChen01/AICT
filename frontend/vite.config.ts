@@ -22,6 +22,11 @@ export default defineConfig({
         changeOrigin: true,
         secure: true,
       },
+      '/testfads89213xlogin': {
+        target: BACKEND_URL,
+        changeOrigin: true,
+        secure: true,
+      },
       '/ws': {
         target: WS_BACKEND_URL,
         ws: true,

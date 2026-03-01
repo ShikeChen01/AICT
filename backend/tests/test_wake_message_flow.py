@@ -29,9 +29,19 @@ def _reset_router():
     reset_message_router()
 
 
+def _make_llm_response(model: str = "claude-test", provider: str = "anthropic"):
+    r = MagicMock()
+    r.model = model
+    r.provider = provider
+    r.input_tokens = 100
+    r.output_tokens = 50
+    r.request_id = "req-test"
+    return r
+
+
 def _llm_end_mock(text: str = "Done.") -> AsyncMock:
     """Return a mock LLM that replies with text + end tool call."""
-    return AsyncMock(return_value=(text, [{"name": "end", "input": {}, "id": "end-1"}]))
+    return AsyncMock(return_value=(text, [{"name": "end", "input": {}, "id": "end-1"}], _make_llm_response()))
 
 
 async def _send_and_run(

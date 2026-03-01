@@ -25,9 +25,7 @@ import {
   Users,
   Gauge,
   DollarSign,
-  Settings2,
 } from 'lucide-react';
-import { AgentTemplatesSection } from '../components/Agents/AgentTemplatesSection';
 import {
   getProject,
   updateProject,
@@ -121,7 +119,7 @@ export function SettingsPage() {
   const navigate = useNavigate();
 
   const [project, setProject] = useState<Project | null>(null);
-  const [ps, setPs] = useState<ProjectSettings | null>(null);
+  const [, setPs] = useState<ProjectSettings | null>(null);
   const [usage, setUsage] = useState<ProjectUsageResponse | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -690,22 +688,6 @@ export function SettingsPage() {
           </div>
         </form>
 
-        {/* ── Agent Templates Section (outside main form) ─────────────── */}
-        {projectId && (
-          <section className="mt-8">
-            <Card className="p-6 space-y-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Settings2 className="w-5 h-5 text-gray-600" />
-                <h2 className="text-lg font-semibold text-gray-800">Agent Templates</h2>
-              </div>
-              <p className="text-sm text-gray-600">
-                Templates define default model, provider, and thinking settings for agents.
-                System defaults are created automatically; create custom worker templates for specialized roles.
-              </p>
-              <AgentTemplatesSection projectId={projectId} />
-            </Card>
-          </section>
-        )}
       </main>
     </div>
   );

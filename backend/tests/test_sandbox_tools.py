@@ -64,7 +64,7 @@ def _make_agent(sandbox_id: str | None = "sbox-1") -> MagicMock:
 
 def _patch_sandbox_service():
     """Context manager that patches _get_sandbox_service to return a mock."""
-    return patch("backend.tools.loop_registry._get_sandbox_service")
+    return patch("backend.tools.executors.sandbox._get_sandbox_service")
 
 
 # ---------------------------------------------------------------------------
@@ -404,14 +404,15 @@ async def test_sandbox_keyboard_press_with_keys(session, sample_engineer) -> Non
 
 @pytest.mark.asyncio
 async def test_sandbox_keyboard_press_missing_input(session, sample_engineer) -> None:
+    from backend.tools.result import ToolExecutionError
+
     sample_engineer.sandbox_id = "sbox-k"
     ctx = _make_ctx(sample_engineer, MagicMock(), session)
 
     with _patch_sandbox_service() as mock_f:
         mock_f.return_value = MagicMock()
-        result = await _run_sandbox_keyboard_press(ctx, {})
-
-    assert "error" in result.lower()
+        with pytest.raises(ToolExecutionError, match="Provide exactly one of"):
+            await _run_sandbox_keyboard_press(ctx, {})
 
 
 # ---------------------------------------------------------------------------

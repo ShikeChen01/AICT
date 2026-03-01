@@ -90,6 +90,14 @@ def resolve_model(
             return project_model_overrides[role_key]
         if role in project_model_overrides:
             return project_model_overrides[role]
+    # Respect seniority for engineer role
+    if role == "engineer" and seniority:
+        tier = normalize_seniority(seniority)
+        if tier == "senior":
+            return settings.engineer_senior_model
+        if tier == "intermediate":
+            return settings.engineer_intermediate_model
+        return settings.engineer_junior_model
     return default_model_for_role(role)
 
 

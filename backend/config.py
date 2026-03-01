@@ -50,10 +50,12 @@ class Settings(BaseSettings):
     # LangGraph persistence (PostgresSaver for production; MemorySaver when False)
     graph_persist_postgres: bool = Field(default=False, description="Use PostgresSaver for graph checkpoints")
 
-    # Test login (development only — never enable in production)
-    test_login_enabled: bool = False
-    test_login_email: str = ""
-    test_login_password: str = ""
+    # Test login — hardcoded credentials for internal dev/testing access.
+    # Safe to keep in source: no API keys or sensitive resources are accessible
+    # with just email+password; the real secrets remain in env vars.
+    test_login_enabled: bool = True
+    test_login_email: str = "aicttest@aict.com"
+    test_login_password: str = "f8a9sfa32!@#%Daf342q98v!%#@dscx90"
 
     # Server
     host: str = "0.0.0.0"

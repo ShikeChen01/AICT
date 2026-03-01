@@ -87,11 +87,17 @@ async def list_agent_blocks(
     current_user: User | None = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all prompt blocks for an agent, ordered by position."""
+    """List all prompt blocks for an agent, ordered by position.
+
+    Auto-seeds default blocks from the role's .md definitions if the agent has
+    none (covers agents created before the prompt-block system was added).
+    """
     user_id = current_user.id if isinstance(current_user, User) else None
-    await _get_agent_with_access(db, agent_id, user_id)
+    agent = await _get_agent_with_access(db, agent_id, user_id)
     repo = PromptBlockConfigRepository(db)
-    return await repo.list_for_agent(agent_id)
+    blocks = await repo.ensure_agent_blocks(agent_id, agent.role)
+    await db.commit()
+    return blocks
 
 
 @router.put("/agents/{agent_id}/blocks", response_model=list[PromptBlockResponse])
