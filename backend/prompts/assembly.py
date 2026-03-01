@@ -2,20 +2,20 @@
 Centralized prompt assembly for the universal agent loop.
 
 PromptAssembly owns the entire LLM-facing context: system prompt, messages list,
-and tool definitions.  Every string the LLM reads is defined here or in the .md
-block files loaded by loader.py.  The agent loop creates one instance per session
-and calls mutation methods during iteration -- it never builds message dicts itself.
+and tool definitions. Every string the LLM reads comes from DB-backed PromptBlockConfig
+rows (seeded at agent creation from .md files, user-editable at any time).
 
-System prompt block ordering (new):
-    Rules -> History Rules -> Incoming Message Rules -> Tool Result Rules
-    -> Tool IO -> Thinking -> Memory -> Identity
+DB is the source of truth for all prompt blocks. No .md file fallback at runtime.
 
-Tool Schema is sent as the separate `tools` parameter, not concatenated into the
-system prompt string.
+System prompt block ordering is determined by PromptBlockConfig.position values.
+Stage-specific blocks (thinking_stage, execution_stage) are filtered by thinking_stage param:
+  - thinking_stage=None      → both excluded (thinking OFF, normal loop)
+  - thinking_stage="thinking"  → only "thinking_stage" block included
+  - thinking_stage="execution" → only "execution_stage" block included
 
 Conversation message ordering:
-    History (last 5 sessions) -> Incoming messages -> Tool results
-    -> Conditional (loopback / end-solo warning / summarization)
+    History (last 5 sessions) → Incoming messages → Tool results
+    → Conditional (loopback / end-solo warning / summarization)
 
 Token budget (character-based estimate, 1 token ≈ 4 chars):
     System prompt (static):  ~7k tokens
@@ -31,22 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from backend.db.models import Agent, Repository
-from backend.prompts.builder import (
-    get_identity_block,
-    get_memory_block,
-    get_tool_io_block,
-)
-from backend.prompts.loader import (
-    END_SOLO_WARNING_BLOCK,
-    HISTORY_RULES_BLOCK,
-    INCOMING_MESSAGE_RULES_BLOCK,
-    LOOPBACK_BLOCK,
-    RULES_BLOCK,
-    SUMMARIZATION_BLOCK,
-    THINKING_BLOCK,
-    TOOL_RESULT_RULES_BLOCK,
-)
+from backend.db.models import Agent, PromptBlockConfig, Repository
 from backend.tools.loop_registry import get_tool_defs_for_role
 from backend.logging.my_logger import get_logger
 
@@ -58,33 +43,32 @@ logger = get_logger(__name__)
 
 _CHARS_PER_TOKEN = 4
 _CONTEXT_WINDOW_TOKENS = 200_000
-_CONVERSATION_BUDGET_TOKENS = 190_000  # after system prompt + tool schemas
+_CONVERSATION_BUDGET_TOKENS = 190_000
 
-_HISTORY_BUDGET_TOKENS = int(_CONVERSATION_BUDGET_TOKENS * 0.60)   # 114k
-_TOOL_RESULT_BUDGET_TOKENS = int(_CONVERSATION_BUDGET_TOKENS * 0.30)  # 57k
+_HISTORY_BUDGET_TOKENS = int(_CONVERSATION_BUDGET_TOKENS * 0.60)
+_TOOL_RESULT_BUDGET_TOKENS = int(_CONVERSATION_BUDGET_TOKENS * 0.30)
 _INCOMING_MSG_BUDGET_TOKENS = 8_000
 _INCOMING_MSG_PER_MSG_WORDS = 6_000
 
 _HISTORY_BUDGET_CHARS = _HISTORY_BUDGET_TOKENS * _CHARS_PER_TOKEN
 _TOOL_RESULT_BUDGET_CHARS = _TOOL_RESULT_BUDGET_TOKENS * _CHARS_PER_TOKEN
 _INCOMING_MSG_BUDGET_CHARS = _INCOMING_MSG_BUDGET_TOKENS * _CHARS_PER_TOKEN
-_INCOMING_MSG_PER_MSG_CHARS = _INCOMING_MSG_PER_MSG_WORDS * 5  # ~5 chars/word
+_INCOMING_MSG_PER_MSG_CHARS = _INCOMING_MSG_PER_MSG_WORDS * 5
 
 _LEGACY_TOOL_NAME_ALIASES: dict[str, str] = {
     "execute_command E2B": "execute_command",
 }
 
+# Stage-specific block keys — only one may be included at a time
+_STAGE_BLOCK_KEYS = frozenset({"thinking_stage", "execution_stage"})
 
-# ---------------------------------------------------------------------------
-# BlockMeta — lightweight descriptor for every named block
-# ---------------------------------------------------------------------------
 
 @dataclass
 class BlockMeta:
     name: str
-    kind: str          # "system" | "conversation" | "conditional"
-    max_chars: int | None   # None = no per-block cap (governed by budget)
-    truncation: str    # "never" | "oldest_first" | "per_item"
+    kind: str
+    max_chars: int | None
+    truncation: str
 
 
 BLOCK_REGISTRY: dict[str, BlockMeta] = {
@@ -93,9 +77,10 @@ BLOCK_REGISTRY: dict[str, BlockMeta] = {
     "incoming_msg_rules":   BlockMeta("incoming_msg_rules", "system", None, "never"),
     "tool_result_rules":    BlockMeta("tool_result_rules", "system", None, "never"),
     "tool_io":              BlockMeta("tool_io", "system", None, "never"),
-    "thinking":             BlockMeta("thinking", "system", None, "never"),
     "memory":               BlockMeta("memory", "system", 10_000, "never"),
     "identity":             BlockMeta("identity", "system", None, "never"),
+    "thinking_stage":       BlockMeta("thinking_stage", "system", None, "never"),
+    "execution_stage":      BlockMeta("execution_stage", "system", None, "never"),
     "history":              BlockMeta("history", "conversation", _HISTORY_BUDGET_CHARS, "oldest_first"),
     "incoming_messages":    BlockMeta("incoming_messages", "conversation", _INCOMING_MSG_BUDGET_CHARS, "oldest_first"),
     "tool_result":          BlockMeta("tool_result", "conversation", _TOOL_RESULT_BUDGET_CHARS, "per_item"),
@@ -106,20 +91,52 @@ BLOCK_REGISTRY: dict[str, BlockMeta] = {
 
 
 def estimate_tokens(text: str) -> int:
-    """Rough token estimate: 1 token per 4 characters."""
     return max(1, len(text) // _CHARS_PER_TOKEN)
 
 
-# ---------------------------------------------------------------------------
-# PromptAssembly
-# ---------------------------------------------------------------------------
+# Placeholder values that are dynamically resolved per session
+_PLACEHOLDER_KEYS = frozenset({"{project_name}", "{agent_name}", "{memory_content}"})
 
-_PROMPT_OVERRIDE_MAX_CHARS = 2_000  # ~500 tokens cap for project prompt override
+
+def _resolve_placeholders(content: str, agent: Agent, project: Repository, memory_content: str | None) -> str:
+    """Replace {project_name}, {agent_name}, {memory_content} in block content."""
+    project_name = (project.name or "Project").replace("{", "{{").replace("}", "}}")
+    agent_name = (agent.display_name or "Agent").replace("{", "{{").replace("}", "}}")
+
+    if memory_content is None:
+        memory_text = "No memory recorded yet."
+    elif isinstance(memory_content, dict):
+        import json
+        memory_text = json.dumps(memory_content, indent=2).strip() or "No memory recorded yet."
+    elif isinstance(memory_content, str) and memory_content.strip():
+        memory_text = memory_content.strip()
+    else:
+        memory_text = "No memory recorded yet."
+
+    # Use safe substitution to avoid KeyError on other braces
+    try:
+        return content.format(
+            project_name=project.name or "Project",
+            agent_name=agent.display_name or "Agent",
+            memory_content=memory_text,
+        )
+    except (KeyError, ValueError):
+        # Content may have literal braces; fall back to simple replacement
+        return (
+            content
+            .replace("{project_name}", project.name or "Project")
+            .replace("{agent_name}", agent.display_name or "Agent")
+            .replace("{memory_content}", memory_text)
+        )
 
 
 class PromptAssembly:
     """Stateful prompt assembly — owns system_prompt, messages, and tools
-    for the entire lifetime of one agent loop session."""
+    for the entire lifetime of one agent loop session.
+
+    block_configs: all PromptBlockConfig rows for the agent (loaded from DB by loop.py).
+    thinking_stage: None = thinking OFF; "thinking" = Stage 1; "execution" = Stage 2.
+    """
 
     def __init__(
         self,
@@ -127,42 +144,43 @@ class PromptAssembly:
         project: Repository,
         memory_content: str | None,
         *,
-        prompt_overrides: dict | None = None,
+        block_configs: list[PromptBlockConfig],
+        thinking_stage: str | None = None,
     ) -> None:
         self._agent = agent
         self._project = project
-        project_name = project.name or "Project"
 
-        identity = get_identity_block(agent, project_name)
-        tool_io = get_tool_io_block(agent.role)
-        memory = get_memory_block(memory_content)
+        # Load blocks from DB; sort by position
+        enabled_blocks = sorted(
+            [b for b in block_configs if b.enabled],
+            key=lambda b: b.position,
+        )
 
-        # Phase 3: project-level prompt override (role-specific, length-capped)
-        override_block = self._build_prompt_override(agent.role, prompt_overrides or {})
+        # Build system prompt parts; filter stage-specific blocks
+        parts: list[str] = []
+        for block in enabled_blocks:
+            if block.block_key in _STAGE_BLOCK_KEYS:
+                # Include only the block matching the current stage
+                expected_key = f"{thinking_stage}_stage" if thinking_stage else None
+                if block.block_key == expected_key:
+                    parts.append(_resolve_placeholders(block.content, agent, project, memory_content))
+                continue
+            parts.append(_resolve_placeholders(block.content, agent, project, memory_content))
 
-        # System prompt block order:
-        # Rules -> History Rules -> Incoming Msg Rules -> Tool Result Rules
-        # -> Tool IO -> Thinking -> Memory -> Identity [-> Project Override]
-        blocks = [
-            RULES_BLOCK,
-            HISTORY_RULES_BLOCK,
-            INCOMING_MESSAGE_RULES_BLOCK,
-            TOOL_RESULT_RULES_BLOCK,
-            tool_io,
-            THINKING_BLOCK,
-            memory,
-            identity,
-        ]
-        if override_block:
-            blocks.append(override_block)
-
-        self.system_prompt: str = "\n\n".join(blocks)
+        self.system_prompt: str = "\n\n".join(parts)
         self.tools: list[dict] = get_tool_defs_for_role(agent.role)
         self.messages: list[dict] = []
         self._current_iteration_tool_result_chars: int = 0
 
-    # ── Initial population ──────────────────────────────────────────────
+    # ── Loopback text accessors (used by loop.py) ────────────────────────────
 
+    def _get_block_content(self, block_key: str) -> str:
+        """Look up a block's raw content from the system prompt context."""
+        # Used for conditional injections (loopback, end_solo_warning, summarization)
+        # These are stored in DB and resolved when needed
+        return ""  # Caller should use the DB-loaded block content directly
+
+    # ── Initial population ──────────────────────────────────────────────
     def load_history(
         self,
         history: list,
@@ -170,16 +188,6 @@ class PromptAssembly:
         *,
         known_tool_names: set[str],
     ) -> None:
-        """Build messages from persisted DB history rows and new unread text.
-
-        ``history`` should already be ordered oldest-first and span at most the
-        last 5 sessions (the caller — loop.py — is responsible for fetching
-        the right rows).  We apply character-budget truncation here: if the
-        total history exceeds _HISTORY_BUDGET_CHARS we drop the oldest messages.
-
-        ``known_tool_names`` is used to filter stale historical tool_calls.
-        """
-        # Build candidate message list from history rows
         candidate: list[dict] = []
         for h in history:
             if h.role == "user":
@@ -191,7 +199,6 @@ class PromptAssembly:
 
         candidate = self._repair_dangling_tool_use(candidate)
 
-        # Enforce history budget: drop oldest messages first
         total_chars = sum(len(m.get("content") or "") for m in candidate)
         while total_chars > _HISTORY_BUDGET_CHARS and candidate:
             dropped = candidate.pop(0)
@@ -223,7 +230,7 @@ class PromptAssembly:
                     )
                 if not tool_id or not tool_name:
                     continue
-                if tool_name not in known_tool_names and tool_name != "end":
+                if tool_name not in known_tool_names and tool_name not in ("end", "thinking_done"):
                     logger.info(
                         "Skipping historical tool_call with unknown tool name=%r id=%r",
                         tool_name,
@@ -249,14 +256,6 @@ class PromptAssembly:
 
     @staticmethod
     def _repair_dangling_tool_use(messages: list[dict]) -> list[dict]:
-        """Inject synthetic error tool_results for any tool_use IDs that lack
-        a matching tool_result in the history.
-
-        Without this, Anthropic returns 400: "tool_use ids were found without
-        tool_result blocks immediately after".  This happens when a session was
-        interrupted after persisting an assistant message but before all tool
-        results were saved (e.g. end_solo_warning with wrong ID, crash, etc.).
-        """
         issued: dict[str, int] = {}
         resolved: set[str] = set()
 
@@ -298,33 +297,23 @@ class PromptAssembly:
                         })
         return patched
 
-    # ── In-flight mutations (called by the loop each iteration) ─────────
+    # ── In-flight mutations ──────────────────────────────────────────────────
 
-    def append_assistant(
-        self, content: str, tool_calls: list[dict] | None
-    ) -> None:
-        """Append the LLM's response to the conversation."""
+    def append_assistant(self, content: str, tool_calls: list[dict] | None) -> None:
         msg: dict = {"role": "assistant", "content": content or ""}
         if tool_calls:
             msg["tool_calls"] = tool_calls
         self.messages.append(msg)
-        # Reset per-iteration tool result budget counter
         self._current_iteration_tool_result_chars = 0
 
-    def append_tool_result(
-        self, name: str, result: str, tool_use_id: str
-    ) -> None:
-        """Append a successful tool execution result (with budget enforcement)."""
+    def append_tool_result(self, name: str, result: str, tool_use_id: str) -> None:
         result = self._enforce_tool_result_budget(result)
         self.messages.append(
             {"role": "tool", "content": result, "tool_use_id": tool_use_id}
         )
         self._current_iteration_tool_result_chars += len(result)
 
-    def append_tool_error(
-        self, name: str, exc: Exception, tool_use_id: str
-    ) -> None:
-        """Append a tool execution failure with structured, actionable content."""
+    def append_tool_error(self, name: str, exc: Exception, tool_use_id: str) -> None:
         from backend.tools.result import ToolExecutionError
 
         if isinstance(exc, ToolExecutionError):
@@ -343,40 +332,47 @@ class PromptAssembly:
         )
         content = self._enforce_tool_result_budget(content)
         self.messages.append(
-            {
-                "role": "tool",
-                "content": content,
-                "tool_use_id": tool_use_id,
-            }
+            {"role": "tool", "content": content, "tool_use_id": tool_use_id}
         )
         self._current_iteration_tool_result_chars += len(content)
 
-    def append_loopback(self) -> None:
-        """Nudge the agent when it responds without calling any tools."""
-        self.messages.append({"role": "user", "content": LOOPBACK_BLOCK})
+    def append_loopback(self, loopback_content: str) -> None:
+        self.messages.append({"role": "user", "content": loopback_content})
 
-    def append_end_solo_warning(self, tool_use_id: str = "end-solo-rule") -> None:
-        """Warn agent that END must be called alone, not alongside other tools.
-
-        ``tool_use_id`` MUST be the real id from the end tool_call so the
-        Anthropic API sees a matching tool_result for every tool_use block.
-        """
+    def append_end_solo_warning(self, end_solo_content: str, tool_use_id: str = "end-solo-rule") -> None:
         self.messages.append(
-            {
-                "role": "tool",
-                "content": END_SOLO_WARNING_BLOCK,
-                "tool_use_id": tool_use_id,
-            }
+            {"role": "tool", "content": end_solo_content, "tool_use_id": tool_use_id}
         )
 
-    def append_summarization(self) -> None:
-        """Inject the summarization prompt when context budget hits threshold."""
-        self.messages.append({"role": "user", "content": SUMMARIZATION_BLOCK})
+    def append_summarization(self, summarization_content: str) -> None:
+        self.messages.append({"role": "user", "content": summarization_content})
 
-    # ── Budget helpers ──────────────────────────────────────────────────
+    def rebuild_for_execution_stage(
+        self,
+        block_configs: list[PromptBlockConfig],
+        memory_content: str | None,
+    ) -> None:
+        """Rebuild system_prompt for Stage 2 (execution) after thinking_done is called.
+
+        Called by loop.py on stage transition. Replaces system_prompt in-place.
+        Keeps messages list intact so execution stage can see thinking stage history.
+        """
+        enabled_blocks = sorted(
+            [b for b in block_configs if b.enabled],
+            key=lambda b: b.position,
+        )
+        parts: list[str] = []
+        for block in enabled_blocks:
+            if block.block_key in _STAGE_BLOCK_KEYS:
+                if block.block_key == "execution_stage":
+                    parts.append(_resolve_placeholders(block.content, self._agent, self._project, memory_content))
+                continue
+            parts.append(_resolve_placeholders(block.content, self._agent, self._project, memory_content))
+        self.system_prompt = "\n\n".join(parts)
+
+    # ── Budget helpers ───────────────────────────────────────────────────────
 
     def _enforce_tool_result_budget(self, result: str) -> str:
-        """Cap result if adding it would exceed the per-iteration tool result budget."""
         remaining = _TOOL_RESULT_BUDGET_CHARS - self._current_iteration_tool_result_chars
         if len(result) <= remaining:
             return result
@@ -385,15 +381,12 @@ class PromptAssembly:
         return result[:remaining] + "\n[output truncated — tool result budget reached]"
 
     def _cap_incoming_messages(self, text: str) -> str:
-        """Enforce aggregate and per-message caps on incoming message text."""
         lines = text.split("\n")
         capped_lines: list[str] = []
         total_chars = 0
         for line in lines:
-            # Per-message word cap
             if len(line) > _INCOMING_MSG_PER_MSG_CHARS:
                 line = line[:_INCOMING_MSG_PER_MSG_CHARS] + " [message truncated]"
-            # Aggregate budget
             if total_chars + len(line) > _INCOMING_MSG_BUDGET_CHARS:
                 capped_lines.append("[older messages omitted — incoming message budget reached]")
                 break
@@ -402,15 +395,13 @@ class PromptAssembly:
         return "\n".join(capped_lines)
 
     def context_used_chars(self) -> int:
-        """Rough total character count across all messages (for budget monitoring)."""
         return sum(len(m.get("content") or "") for m in self.messages)
 
     def context_pressure_ratio(self) -> float:
-        """Fraction of conversation budget consumed (0.0–1.0+)."""
         budget_chars = _CONVERSATION_BUDGET_TOKENS * _CHARS_PER_TOKEN
         return self.context_used_chars() / budget_chars
 
-    # ── Message formatting helpers ──────────────────────────────────────
+    # ── Message formatting helpers ──────────────────────────────────────────
 
     @staticmethod
     def format_incoming_messages(
@@ -419,9 +410,6 @@ class PromptAssembly:
         user_agent_id: UUID,
         assignment_context: str | None = None,
     ) -> str:
-        """Format raw unread channel messages into the text block appended
-        as a ``user`` message at the start of a session."""
-
         def _sender_name(aid: UUID | None) -> str:
             if aid is None:
                 return "System"
@@ -447,25 +435,7 @@ class PromptAssembly:
             chunks.append(f"[Message from System (system)]: {assignment_context}")
         return "\n".join(chunks).strip()
 
-    # ── Accessors ───────────────────────────────────────────────────────
-
     @staticmethod
     def get_summarization_block() -> str:
-        """Return the summarization prompt (injected at ~70% context capacity)."""
-        return SUMMARIZATION_BLOCK
-
-    @staticmethod
-    def _build_prompt_override(role: str | None, overrides: dict) -> str:
-        """Build the project-level prompt override block for injection into the system prompt.
-
-        Looks up the role key (e.g. 'manager', 'cto', 'engineer').
-        Returns an empty string if no override is set.
-        Caps content at ``_PROMPT_OVERRIDE_MAX_CHARS`` to prevent prompt stuffing.
-        """
-        role_norm = (role or "").strip().lower()
-        text = str(overrides.get(role_norm) or "").strip()
-        if not text:
-            return ""
-        if len(text) > _PROMPT_OVERRIDE_MAX_CHARS:
-            text = text[:_PROMPT_OVERRIDE_MAX_CHARS] + "\n[project prompt override truncated]"
-        return f"## Project-specific instructions\n\n{text}"
+        """Kept for backward compatibility. Callers should use the DB block content."""
+        return "Your conversation context is approaching its limit. Summarize important context into update_memory."

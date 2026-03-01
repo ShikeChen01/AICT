@@ -12,6 +12,7 @@ import {
   ProjectsPage,
   RegisterPage,
   SettingsPage,
+  TestLoginPage,
   UserSettingsPage,
   WorkspacePage,
 } from './pages';
@@ -75,6 +76,7 @@ function AppShell() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/auth/callback" element={<AuthCallbackPage />} />
+        <Route path="/test-login" element={<TestLoginPage />} />
 
         <Route element={<ProtectedRoute />}>
           <Route path="/repositories" element={<ProjectsPage onProjectsUpdated={refreshProjects} />} />

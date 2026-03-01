@@ -20,13 +20,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.constants import USER_AGENT_ID
-from backend.db.models import Agent, Repository, Task
+from backend.db.models import Agent, PromptBlockConfig, Repository, Task
+from backend.db.repositories.agent_templates import PromptBlockConfigRepository
 from backend.db.repositories.attachments import AttachmentRepository
 from backend.db.repositories.llm_usage import LLMUsageRepository
 from backend.db.repositories.messages import AgentMessageRepository
 from backend.db.repositories.project_settings import ProjectSettingsRepository
 from backend.llm.contracts import ImagePart
-from backend.llm.model_resolver import resolve_model
+from backend.llm.model_resolver import resolve_provider
 from backend.llm.pricing import estimate_cost_usd
 from backend.prompts.assembly import PromptAssembly
 from backend.websocket.manager import Channel, ws_manager
@@ -38,6 +39,9 @@ from backend.services.task_service import TaskService
 from backend.tools.loop_registry import (
     RunContext,
     get_handlers_for_role,
+    get_thinking_phase_handlers,
+    get_thinking_phase_tool_defs,
+    get_tool_defs_for_role,
     truncate_tool_output,
     validate_tool_input,
 )
@@ -237,6 +241,7 @@ async def run_inner_loop(
     task_service = TaskService(db)
     agent_service = AgentService(db)
     agent_msg_repo = AgentMessageRepository(db)
+    block_repo = PromptBlockConfigRepository(db)
     llm = LLMService()
     handlers = get_handlers_for_role(agent.role)
 
@@ -274,11 +279,9 @@ async def run_inner_loop(
     if isinstance(memory_content, dict):
         memory_content = str(memory_content) if memory_content else None
 
-    # Load project-level settings: model/prompt overrides and budget/rate limits.
+    # Load project-level settings: budget/rate limits (model/prompt overrides deprecated).
     ps_repo = ProjectSettingsRepository(db)
     project_settings = await ps_repo.get_by_project(project.id)
-    model_overrides = (project_settings.model_overrides or {}) if project_settings else {}
-    prompt_overrides = (project_settings.prompt_overrides or {}) if project_settings else {}
     daily_token_budget = (project_settings.daily_token_budget or 0) if project_settings else 0
     calls_per_hour_limit = (project_settings.calls_per_hour_limit or 0) if project_settings else 0
     tokens_per_hour_limit = (project_settings.tokens_per_hour_limit or 0) if project_settings else 0
@@ -286,20 +289,40 @@ async def run_inner_loop(
 
     usage_repo = LLMUsageRepository(db)
 
-    # Resolve which model to use (role + overrides) so we can decide if we can attach images.
-    resolved_model = resolve_model(
-        agent.role,
-        seniority=getattr(agent, "tier", None),
-        model_override=agent.model,
-        project_model_overrides=model_overrides,
-    )
+    # Read model and provider directly from DB (write-through, no fallback chain).
+    resolved_model = agent.model
+    resolved_provider = resolve_provider(agent.provider, agent.model)
 
-    # Build prompt: system blocks + tool defs; then load history and append incoming messages.
-    pa = PromptAssembly(agent, project, memory_content, prompt_overrides=prompt_overrides)
+    # Determine thinking stage: None = thinking OFF, "thinking" = Stage 1, "execution" = Stage 2.
+    thinking_enabled = getattr(agent, "thinking_enabled", False)
+    # Stage is managed below; starts at "thinking" if thinking is ON.
+    thinking_stage: str | None = "thinking" if thinking_enabled else None
+
+    # Load prompt block configs for this agent from DB (seeded at agent creation).
+    block_configs: list[PromptBlockConfig] = await block_repo.list_for_agent(agent.id)
+
+    # Build prompt: system blocks from DB + tool defs (restricted during thinking Stage 1).
+    if thinking_enabled:
+        # Stage 1: restricted tool set; thinking_stage block included.
+        pa = PromptAssembly(
+            agent, project, memory_content,
+            block_configs=block_configs,
+            thinking_stage="thinking",
+        )
+        pa.tools = get_thinking_phase_tool_defs(agent.role)
+        thinking_handlers = get_thinking_phase_handlers()
+        logger.info("Agent %s: thinking_enabled=True — starting Stage 1 (thinking)", agent.id)
+    else:
+        pa = PromptAssembly(
+            agent, project, memory_content,
+            block_configs=block_configs,
+            thinking_stage=None,
+        )
+
     pa.load_history(
         history,
         new_messages_text,
-        known_tool_names=set(handlers.keys()),
+        known_tool_names=set(handlers.keys()) | {"thinking_done"},
     )
 
     # If the user attached images, add them to the last user message (or a note if model is text-only).
@@ -416,7 +439,11 @@ async def run_inner_loop(
                 agent.id,
                 pa.context_pressure_ratio() * 100,
             )
-            pa.append_summarization()
+            _summarization_content = next(
+                (b.content for b in block_configs if b.block_key == "summarization" and b.enabled),
+                PromptAssembly.get_summarization_block(),
+            )
+            pa.append_summarization(_summarization_content)
             summarization_injected = True
 
         # ── Budget/rate-limit gates (checked before each LLM call) ─────────────────────────
@@ -581,30 +608,80 @@ async def run_inner_loop(
                     emit_agent_message,
                 )
                 return "max_loopbacks"
-            pa.append_loopback()
+            # Find loopback block content from DB-loaded block configs
+            _loopback_content = next(
+                (b.content for b in block_configs if b.block_key == "loopback" and b.enabled),
+                "You responded without calling any tools. If your work is done, call END. "
+                "If there is more to do, use the appropriate tools.",
+            )
+            pa.append_loopback(_loopback_content)
             continue
 
         loopbacks = 0
+
+        # --- thinking_done handling: stage transition (Stage 1 → Stage 2) ---
+        thinking_done_calls = [tc for tc in tool_calls if tc.get("name") == "thinking_done"]
+        if thinking_done_calls and thinking_enabled and thinking_stage == "thinking":
+            td = thinking_done_calls[0]
+            td_id = td.get("id", "thinking-done-transition")
+            td_summary = (td.get("input") or {}).get("summary", "Plan saved to memory.")
+            result_text = f"Thinking phase complete. Transitioning to execution phase.\nPlan summary: {td_summary}"
+            pa.append_tool_result("thinking_done", result_text, td_id)
+            await agent_msg_repo.create_message(
+                agent_id=agent.id,
+                project_id=project.id,
+                role="tool",
+                content=result_text,
+                loop_iteration=iteration,
+                session_id=session_id,
+                tool_name="thinking_done",
+                tool_input={"__tool_use_id__": td_id, **(td.get("input") or {})},
+                tool_output=result_text,
+            )
+            if emit_tool_result:
+                emit_tool_result("thinking_done", result_text)
+
+            # Rebuild system prompt for Stage 2 and switch to full tool set.
+            thinking_stage = "execution"
+            memory_content_now = agent.memory
+            if isinstance(memory_content_now, dict):
+                import json as _json
+                memory_content_now = _json.dumps(memory_content_now) if memory_content_now else None
+            pa.rebuild_for_execution_stage(block_configs, memory_content_now)
+            pa.tools = get_tool_defs_for_role(agent.role)
+            logger.info("Agent %s: thinking_done called — entering Stage 2 (execution)", agent.id)
+            # Remove any thinking_done calls from tool_calls so we don't try to dispatch them below.
+            tool_calls = [tc for tc in tool_calls if tc.get("name") != "thinking_done"]
+            # If no remaining tool calls, loop back for the next LLM turn in execution mode.
+            if not tool_calls:
+                continue
+
         # Rule: END must be called alone. If agent called END with other tools, inject warning and synthetic result.
         end_calls = [tc for tc in tool_calls if tc.get("name") == "end"]
-        non_end_calls = [tc for tc in tool_calls if tc.get("name") != "end"]
+        non_end_calls = [tc for tc in tool_calls if tc.get("name") not in ("end", "thinking_done")]
         if end_calls and non_end_calls:
             for ec in end_calls:
                 end_use_id = ec.get("id") or "end-solo-rule"
-                pa.append_end_solo_warning(end_use_id)
+                _end_solo_content = (
+                    "END was called alongside other tools in the same response and was ignored "
+                    "for this iteration. END must always be called alone. If you have remaining "
+                    "work, complete it first. Then call END by itself in a separate response."
+                )
+                pa.append_end_solo_warning(_end_solo_content, end_use_id)
                 await agent_msg_repo.create_message(
                     agent_id=agent.id,
                     project_id=project.id,
                     role="tool",
-                    content=pa.messages[-1]["content"],
+                    content=_end_solo_content,
                     loop_iteration=iteration,
                     session_id=session_id,
                     tool_name="end",
                     tool_input={"__tool_use_id__": end_use_id},
-                    tool_output=pa.messages[-1]["content"],
+                    tool_output=_end_solo_content,
                 )
 
         # --- Execute each non-END tool, persist tool result, append to prompt ---
+        active_handlers = thinking_handlers if (thinking_enabled and thinking_stage == "thinking") else handlers
         for tc in non_end_calls:
             name = tc.get("name", "")
             tool_input = tc.get("input") or {}
@@ -613,7 +690,7 @@ async def run_inner_loop(
 
             tool_use_id = tc.get("id", "")
             try:
-                handler = handlers.get(name)
+                handler = active_handlers.get(name)
                 if handler is None:
                     raise RuntimeError(f"Unknown tool '{name}'")
                 validate_tool_input(name, tool_input)

@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.api.v1.router import api_router
+from backend.api.v1.test_login import router as test_login_router
 from backend.api_internal.router import internal_router
 from backend.core.error_handlers import aict_exception_handler
 from backend.core.exceptions import AICTException
@@ -252,6 +253,9 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
 
+
+# Test login (development only — mounted at root so path stays obfuscated)
+app.include_router(test_login_router)
 
 # Public API
 app.include_router(api_router, prefix="/api/v1")

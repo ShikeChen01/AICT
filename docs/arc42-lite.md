@@ -232,10 +232,10 @@ Reconciler              PostgreSQL              WorkerManager
 │  Google Cloud Platform                                           │
 │                                                                  │
 │  ┌────────────────────┐    ┌────────────────────────────────┐   │
-│  │  Cloud Run          │    │  Cloud SQL                     │   │
+│  │  Cloud Run          │    │  Self-hosted GCE VM            │   │
 │  │                     │    │                                │   │
-│  │  Backend container  │───▶│  PostgreSQL 15                 │   │
-│  │  (python:3.11-slim) │    │  Unix socket connection        │   │
+│  │  Backend container  │───▶│  PostgreSQL 16                 │   │
+│  │  (python:3.11-slim) │    │  Private IP (VPC connector)    │   │
 │  │                     │    │                                │   │
 │  │  min-instances: 1   │    │  Single source of truth        │   │
 │  │  cpu-boost: on      │    └────────────────────────────────┘   │
@@ -266,7 +266,7 @@ Frontend SPA: Static hosting (Firebase Hosting or equivalent)
 | Backend | `python:3.11-slim` | 1 | 1 | min=1 required for always-on workers. Single instance avoids WebSocket routing issues. |
 | Sandbox Pool Mgr | `python:3.11-slim` | 1 | 1 | Manages Docker containers on the same VM. |
 | Sandbox containers | `ubuntu:22.04` | 0 | N | Created/destroyed per agent session. |
-| PostgreSQL | Cloud SQL | 1 | 1 | Managed. |
+| PostgreSQL | Docker on GCE VM | 1 | 1 | Self-hosted PostgreSQL 16 via `infra/postgres/docker-compose.yml`. VPC private IP connection. |
 
 ---
 
@@ -332,8 +332,7 @@ All significant decisions are recorded as Architecture Decision Records:
 |------|------------|--------|-----------|
 | **Single-instance limit** | High (current) | WebSocket events lost if multi-instance | Planned: Redis Pub/Sub for WebSocket fan-out |
 | **Container restart loses file state** | High | Cloned repos lost, re-provisioned on restart | `PROVISION_REPOS_ON_STARTUP` re-clones. Persistent volume planned. |
-| **LLM provider rate limits** | Medium | Agent sessions fail mid-execution | Retry logic in LLM layer. Token usage monitoring planned. |
-| **Cloud SQL cost** | High (current) | Significant operational cost | Planned: self-hosted PostgreSQL |
+| **LLM provider rate limits** | Medium | Agent sessions fail mid-execution | Per-project hourly call/token limits (soft pause) and daily budgets (hard stop) implemented in Phase 4. |
 | **No horizontal scaling** | Medium | Single container handles all agents | Acceptable for current scale. Worker sharding is a future option. |
 
 ### Technical Debt
@@ -343,7 +342,6 @@ All significant decisions are recorded as Architecture Decision Records:
 | LangGraph checkpointer still used for Manager-CTO graph (not inner loop) | Inconsistency with "DB is source of truth" principle | Low — works, but could be removed |
 | `Project = Repository` alias in models | Naming confusion | Low |
 | Hardcoded reconciler/worker thresholds | Not configurable via env vars | Low |
-| No API rate limiting or token usage monitoring | Cost risk with scale | High |
 | Agent roles stored as `"assistant"` in some contexts | Should reflect actual role | Medium |
 
 ---

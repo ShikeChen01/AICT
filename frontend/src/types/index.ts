@@ -65,13 +65,17 @@ export interface TaskUpdate {
 
 export type AgentRole = 'manager' | 'cto' | 'engineer';
 export type AgentStatus = 'sleeping' | 'active' | 'busy';
+export type BaseRole = 'manager' | 'cto' | 'worker';
 
 export interface Agent {
   id: UUID;
   project_id: UUID;
+  template_id: UUID | null;
   role: AgentRole;
   display_name: string;
   model: string;
+  provider: string | null;
+  thinking_enabled: boolean;
   status: AgentStatus;
   current_task_id: UUID | null;
   sandbox_id: string | null;
@@ -79,6 +83,60 @@ export interface Agent {
   memory?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+}
+
+// ─── Agent Templates ─────────────────────────────────────────────────
+
+export interface AgentTemplate {
+  id: UUID;
+  project_id: UUID;
+  name: string;
+  base_role: BaseRole;
+  model: string;
+  provider: string | null;
+  thinking_enabled: boolean;
+  is_system_default: boolean;
+}
+
+export interface CreateAgentTemplate {
+  name: string;
+  base_role?: BaseRole;
+  model: string;
+  provider?: string | null;
+  thinking_enabled?: boolean;
+}
+
+export interface UpdateAgentTemplate {
+  name?: string;
+  model?: string;
+  provider?: string | null;
+  thinking_enabled?: boolean;
+}
+
+// ─── Prompt Blocks ───────────────────────────────────────────────────
+
+export interface PromptBlockConfig {
+  id: UUID;
+  template_id: UUID | null;
+  agent_id: UUID | null;
+  block_key: string;
+  content: string;
+  position: number;
+  enabled: boolean;
+}
+
+export interface PromptBlockConfigItem {
+  block_key: string;
+  content: string;
+  position: number;
+  enabled: boolean;
+}
+
+export interface UpdateAgentRequest {
+  model?: string;
+  provider?: string | null;
+  thinking_enabled?: boolean;
+  display_name?: string;
 }
 
 export interface AgentTaskQueueItem {
@@ -552,7 +610,7 @@ export interface AgentStreamBuffer {
   lastActivity: number;
 }
 
-// ─── Architecture Documents (Phase 10) ───────────────────────────────
+// ─── Architecture Documents ───────────────────────────────────────────
 
 export interface ProjectDocument {
   id: UUID;
@@ -561,6 +619,8 @@ export interface ProjectDocument {
   title: string | null;
   content: string | null;
   updated_by_agent_id: UUID | null;
+  updated_by_user_id: UUID | null;
+  current_version: number;
   created_at: string;
   updated_at: string;
 }
@@ -571,7 +631,38 @@ export interface ProjectDocumentSummary {
   doc_type: string;
   title: string | null;
   updated_by_agent_id: UUID | null;
+  updated_by_user_id: UUID | null;
+  current_version: number;
   updated_at: string;
+}
+
+export interface DocumentVersion {
+  id: UUID;
+  document_id: UUID;
+  version_number: number;
+  content: string | null;
+  title: string | null;
+  edited_by_agent_id: UUID | null;
+  edited_by_user_id: UUID | null;
+  edit_summary: string | null;
+  created_at: string;
+}
+
+export interface DocumentVersionSummary {
+  id: UUID;
+  document_id: UUID;
+  version_number: number;
+  title: string | null;
+  edited_by_agent_id: UUID | null;
+  edited_by_user_id: UUID | null;
+  edit_summary: string | null;
+  created_at: string;
+}
+
+export interface DocumentEditRequest {
+  content: string;
+  title?: string | null;
+  edit_summary?: string | null;
 }
 
 export interface DocumentUpdatedData {

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import secrets
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +20,7 @@ class SandboxState:
     host_port: int
     volume_name: str
     auth_token: str
-    status: str  # "idle" | "assigned" | "unhealthy" | "starting"
+    status: str  # "idle" | "assigned" | "resetting" | "unhealthy"
     assigned_agent_id: Optional[str] = None
     created_at: str = field(default_factory=lambda: _now().isoformat())
     last_used_at: str = field(default_factory=lambda: _now().isoformat())
@@ -116,7 +115,29 @@ class PoolState:
     def idle(self) -> list[SandboxState]:
         return [s for s in self._sandboxes.values() if s.status == "idle"]
 
+    def mark_resetting(self, sandbox_id: str) -> None:
+        """
+        Transition a sandbox from any state to "resetting".
+
+        Clears the agent assignment immediately so the agent_map no longer
+        references this sandbox, but keeps the entry in _sandboxes so the
+        slot is still counted by active_count() while the Docker reset runs.
+        """
+        s = self._sandboxes.get(sandbox_id)
+        if s:
+            if s.assigned_agent_id:
+                self._agent_map.pop(s.assigned_agent_id, None)
+            s.assigned_agent_id = None
+            s.status = "resetting"
+            s.health_failures = 0
+            s.touch()
+        self.save()
+
     def active_count(self) -> int:
+        # "unhealthy" containers are being evicted/restarted by health monitor;
+        # exclude them from the capacity check so fresh slots can be created.
+        # "resetting" containers are temporarily between destroy and recreate but
+        # still occupy the Docker resource budget, so we count them.
         return sum(1 for s in self._sandboxes.values() if s.status != "unhealthy")
 
     def update(self, s: SandboxState) -> None:

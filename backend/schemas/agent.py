@@ -17,10 +17,13 @@ class AgentTaskQueueItem(BaseModel):
 class AgentResponse(BaseModel):
     id: UUID
     project_id: UUID
+    template_id: UUID | None = None
     role: str
     display_name: str
     tier: str | None = None
     model: str
+    provider: str | None = None
+    thinking_enabled: bool = False
     status: str
     current_task_id: UUID | None
     sandbox_id: str | None
@@ -38,11 +41,20 @@ class AgentStatusWithQueueResponse(AgentResponse):
     task_queue: list[AgentTaskQueueItem] = Field(default_factory=list)
 
 
+class UpdateAgentRequest(BaseModel):
+    """PATCH /agents/{id} — update model, provider, or thinking_enabled on an existing agent."""
+    model: str | None = Field(None, min_length=1, max_length=100)
+    provider: str | None = Field(None, max_length=50)
+    thinking_enabled: bool | None = None
+    display_name: str | None = Field(None, min_length=1, max_length=100)
+
+
 class SpawnEngineerCreate(BaseModel):
     """Request body for spawning a new engineer."""
 
     project_id: UUID
     display_name: str | None = None
+    template_id: UUID | None = None
     seniority: str | None = None
     module_path: str | None = None
 
@@ -54,16 +66,20 @@ class AgentTool(BaseModel):
 
 
 class AgentContextResponse(BaseModel):
-    """
-    Agent context for the Inspector panel (Frontend V2).
-    
-    Includes system prompt, available tools, and recent message history.
+    """Agent context for the Inspector panel.
+
+    Includes real assembled system prompt (from DB block configs), available tools,
+    and recent message history.
     """
     id: UUID
+    project_id: UUID
+    template_id: UUID | None = None
     role: str
     display_name: str
     tier: str | None = None
     model: str
+    provider: str | None = None
+    thinking_enabled: bool = False
     status: str
     system_prompt: str | None = None
     available_tools: list[AgentTool] = Field(default_factory=list)

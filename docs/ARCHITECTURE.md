@@ -69,7 +69,7 @@ The system is built around an **inspection and interference** model: users obser
              │                         │
     ┌────────▼──────────┐   ┌──────────▼──────────┐
     │   PostgreSQL       │   │   LLM Providers      │
-    │   (Cloud SQL)      │   │   ├── Anthropic       │
+    │   (Self-hosted VM) │   │   ├── Anthropic       │
     │                   │   │   ├── Google Gemini   │
     │  Single source    │   │   └── OpenAI          │
     │  of truth for     │   └─────────────────────────┘
@@ -150,6 +150,8 @@ All user-facing endpoints are at `/api/v1/*`. Firebase Bearer token authenticati
 | Messages | `/api/v1/messages/*` | User↔agent messaging |
 | Sessions | `/api/v1/sessions/*` | Agent session history and message log |
 | Tasks | `/api/v1/tasks/*` | Kanban board CRUD |
+| Attachments | `/api/v1/attachments/*` | Image upload/download (stored as bytea in Postgres) |
+| Documents | `/api/v1/documents/*` | Per-project architecture documents (read-only for users) |
 | Diagnostics | `/api/v1/diagnostics/*` | Debug endpoints |
 
 See `docs/backend/backend&API.md` for the full endpoint specification.
@@ -196,6 +198,10 @@ WebSocket connections are project-scoped: `ws://{host}/ws?token={TOKEN}&project_
 | `agents` | `agent_status` | Agent state changes |
 | `activity` | `agent_log`, `sandbox_log` | Debug feed |
 | `backend_logs` | `backend_log` | Server-side log lines |
+| `workflow` | `workflow_update` | LangGraph workflow state changes |
+| `usage` | `usage_update` | LLM token/cost usage events |
+| `documents` | `document_update` | Project document create/update events |
+| `all` | all of the above | Subscribe to every channel |
 
 The backend WebSocket manager (`backend/websocket/manager.py`) broadcasts events to all connected clients subscribed to a project. Events are emitted from:
 - The inner loop (`loop.py`) for agent stream events
@@ -556,6 +562,9 @@ PostgreSQL is the single source of truth for all state. No in-memory state persi
 | `agent_sessions` | Session tracking (one row per agent wake→END cycle) |
 | `agent_messages` | Persistent log of every LLM message in every session |
 | `llm_usage_events` | One row per LLM API call: provider, model, token counts, estimated cost, agent, session, user |
+| `attachments` | Binary image blobs (bytea, ≤10 MB, image/* only) |
+| `message_attachments` | Junction table linking channel messages to attachments |
+| `project_documents` | Manager-writable architecture documents (`doc_type` keyed, e.g. `arc42_lite`, `adr/<slug>`) |
 
 **`project_settings` key columns:**
 
@@ -576,7 +585,7 @@ PostgreSQL is the single source of truth for all state. No in-memory state persi
 - Worker loops: `AsyncSessionLocal()` context manager — one session per agent wake cycle
 - Services: receive session as a parameter, never create their own
 
-**Migrations:** Alembic, auto-run at startup via `run_startup_migrations()` (configurable via `AUTO_RUN_MIGRATIONS_ON_STARTUP`). Migration files live in `backend/migrations/versions/`. Currently at migration `012` (rate limits + cost budget). Startup migration is a soft-fail — the backend continues to serve if migration times out or fails.
+**Migrations:** Alembic, auto-run at startup via `run_startup_migrations()` (configurable via `AUTO_RUN_MIGRATIONS_ON_STARTUP`). Migration files live in `backend/migrations/versions/`. Currently at migration `014` (project documents). Startup migration is a soft-fail — the backend continues to serve if migration times out or fails.
 
 ---
 
@@ -769,17 +778,37 @@ See `docs/todo.md` for the full phased roadmap. Summary of completion status as 
 | Cost estimation (pricing lookup) | `backend/llm/pricing.py`, `backend/config.py` |
 | Settings UI: rate limit inputs + progress bars + cost column | `frontend/src/pages/Settings.tsx` |
 
-### Phases 1, 5–10 — Not yet started
+### Phase 1 — Self-host PostgreSQL (COMPLETE)
+
+Self-hosted PostgreSQL 16 on a GCE VM via `infra/postgres/docker-compose.yml`. Custom `postgresql.conf` and `pg_hba.conf` mounted read-only; SSL certs from `/opt/postgres/ssl`. Backup/restore scripts in `infra/postgres/scripts/`. Backend connects via VPC (private IP, not Cloud SQL socket).
+
+### Phase 6 — Image/attachment end-to-end (COMPLETE)
+
+| Item | Files |
+|------|-------|
+| `attachments` + `message_attachments` tables | migration 013, `db/models.py` |
+| Upload endpoint (multipart, ≤10 MB, image/* only) | `backend/api/v1/attachments.py` |
+| SHA-256 integrity stored per attachment | `db/models.py` (`Attachment.sha256`) |
+| Attachment IDs surfaced on `ChannelMessage` | `db/models.py` (selectin relationship) |
+
+### Phase 10 — Per-project typed document store (COMPLETE)
+
+| Item | Files |
+|------|-------|
+| `project_documents` table | migration 014, `db/models.py` |
+| REST read endpoints for users | `backend/api/v1/documents.py` |
+| Agent write tool | `backend/tools/executors/docs.py` |
+| WebSocket `document_update` events | `backend/websocket/` |
+| Architecture page in frontend | `frontend/src/components/Architecture/ArchitecturePage.tsx` |
+
+### Phases 5, 7–9 — Not yet started
 
 | Phase | Goal |
 |-------|------|
-| 1 | Self-host PostgreSQL on VM to cut Cloud SQL cost |
-| 5 | Kimi 2.5 integration (cheap provider) |
-| 6 | Image/attachment end-to-end (binary in DB, multimodal LLM calls) |
+| 5 | Kimi/Moonshot provider integration (cheap provider) |
 | 7 | Streaming + messaging upgrades (structured WS events, chat semantics) |
 | 8 | Subagent pattern + async tooling safety model |
 | 9 | Sandbox image upgrades + pressure tests |
-| 10 | Per-project typed document store (arc42, C4, ADRs) |
 
 ### Known Technical Debt
 

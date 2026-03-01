@@ -9,6 +9,10 @@ export const TEST_PROJECT_ID = process.env.TEST_PROJECT_ID || '';
 export const GITHUB_TEST_OWNER = process.env.GITHUB_TEST_OWNER || '';
 export const GITHUB_TOKEN_TEST = process.env.GITHUB_TOKEN_TEST || '';
 
+// Build verification configuration
+export const GITHUB_TEST_TOKEN = process.env.GITHUB_TEST_TOKEN || '';
+export const GITHUB_TEST_REPOSITORY_LINK = process.env.GITHUB_TEST_REPOSITORY_LINK || '';
+
 /**
  * Generate a unique test repo name with timestamp.
  */

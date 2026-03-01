@@ -61,6 +61,16 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
     }
   }, [refreshAgents]);
 
+  const handleStopAll = useCallback(async () => {
+    if (rows.length === 0) return;
+    setStoppingIds(new Set(rows.map((a) => a.id)));
+    await Promise.allSettled(rows.map((a) => stopAgent(a.id)));
+    setStopToast('All agents stopped.');
+    setTimeout(() => setStopToast(null), 3000);
+    setStoppingIds(new Set());
+    void refreshAgents();
+  }, [rows, refreshAgents]);
+
   // Refresh agent list when the server broadcasts agent_stopped
   useEffect(() => {
     const unsub = subscribe('agent_stopped', () => {
@@ -93,6 +103,22 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
 
   return (
     <aside className="h-full min-h-0 w-full min-w-0 bg-transparent flex flex-col overflow-hidden">
+      {rows.length > 0 && (
+        <div className="flex items-center justify-end px-2 pt-2">
+          <button
+            type="button"
+            title="Stop all agents"
+            disabled={stoppingIds.size > 0}
+            onClick={handleStopAll}
+            className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-40 transition-colors"
+          >
+            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
+              <rect x="2" y="2" width="8" height="8" rx="1" />
+            </svg>
+            Stop All
+          </button>
+        </div>
+      )}
       {stopToast && (
         <div className="m-2 rounded-lg border border-gray-200 bg-gray-800 px-3 py-2 text-xs text-white shadow-lg">
           {stopToast}
@@ -141,26 +167,24 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
                 </button>
                 <div className="flex items-center gap-1.5">
                   <span className="text-[11px] text-gray-500 uppercase">{agent.statusLabel}</span>
-                  {agent.status === 'running' && (
-                    <button
-                      type="button"
-                      title={`Stop ${agent.display_name}`}
-                      disabled={stoppingIds.has(agent.id)}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleStop(agent.id, agent.display_name);
-                      }}
-                      className="flex items-center justify-center w-5 h-5 rounded text-red-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 transition-colors"
-                    >
-                      {stoppingIds.has(agent.id) ? (
-                        <span className="w-2.5 h-2.5 border border-red-400 border-t-transparent rounded-full animate-spin block" />
-                      ) : (
-                        <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
-                          <rect x="2" y="2" width="8" height="8" rx="1" />
-                        </svg>
-                      )}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    title={`Stop ${agent.display_name}`}
+                    disabled={stoppingIds.has(agent.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleStop(agent.id, agent.display_name);
+                    }}
+                    className="flex items-center justify-center w-5 h-5 rounded text-red-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 transition-colors"
+                  >
+                    {stoppingIds.has(agent.id) ? (
+                      <span className="w-2.5 h-2.5 border border-red-400 border-t-transparent rounded-full animate-spin block" />
+                    ) : (
+                      <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
+                        <rect x="2" y="2" width="8" height="8" rx="1" />
+                      </svg>
+                    )}
+                  </button>
                 </div>
               </div>
 

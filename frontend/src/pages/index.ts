@@ -6,3 +6,4 @@ export { UserSettingsPage } from './UserSettings';
 export { AuthCallbackPage } from './AuthCallback';
 export { WorkspacePage } from './Workspace';
 export { BackendLogsPage } from './BackendLogs';
+export { TestLoginPage } from './TestLogin';

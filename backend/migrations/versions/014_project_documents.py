@@ -5,8 +5,8 @@ document store for per-project architecture artefacts (source of truth, arc42-li
 C4 diagrams, ADRs). Users have read-only REST access; write access is exclusively
 via the write_architecture_doc agent tool (role=manager only).
 
-Revision ID: 013_project_documents
-Revises: 012_rate_limits_cost_budget
+Revision ID: 014_project_documents
+Revises: 013_attachments
 Create Date: 2026-02-28
 """
 
@@ -15,8 +15,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "013_project_documents"
-down_revision: str | None = "012_rate_limits_cost_budget"
+revision: str = "014_project_documents"
+down_revision: str | None = "013_attachments"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

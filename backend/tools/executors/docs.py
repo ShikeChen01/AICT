@@ -46,9 +46,13 @@ async def run_write_architecture_doc(ctx: RunContext, tool_input: dict) -> str:
 
     if not content:
         raise ToolExecutionError(
-            message="content must not be empty.",
+            message="content is required and must not be empty.",
             error_code="INVALID_INPUT",
-            hint="Provide the full Markdown content for the document.",
+            hint=(
+                "Include the full Markdown text in the 'content' parameter in the same call. "
+                "Do not call write_architecture_doc without content — retry with both "
+                "doc_type and content provided together."
+            ),
         )
 
     repo = ProjectDocumentRepository(ctx.db)

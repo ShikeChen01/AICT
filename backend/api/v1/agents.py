@@ -14,8 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.auth import get_current_user
 from backend.core.exceptions import AgentNotFoundError
 from backend.core.project_access import require_project_access
-from backend.db.models import Agent, Task, User
+from backend.db.models import Agent, Repository, Task, User
+from backend.db.repositories.agent_templates import PromptBlockConfigRepository
 from backend.db.session import get_db
+from backend.llm.model_resolver import infer_provider
 from backend.schemas.agent import (
     AgentContextResponse,
     AgentResponse,
@@ -23,6 +25,7 @@ from backend.schemas.agent import (
     AgentTaskQueueItem,
     AgentTool,
     SpawnEngineerCreate,
+    UpdateAgentRequest,
 )
 from backend.services.agent_service import get_agent_service
 from backend.services.message_service import get_message_service
@@ -159,18 +162,19 @@ async def spawn_engineer(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Spawn a new engineer agent for the project.
+    """Spawn a new engineer agent for the project.
 
     Enforces max_engineers limit (default 5). Raises 400 if limit reached.
+    Optionally specify template_id to use a specific agent template.
     """
     await require_project_access(db, data.project_id, current_user.id)
     service = get_agent_service(db)
     agent = await service.spawn_engineer(
         data.project_id,
         display_name=data.display_name,
-        seniority=data.seniority,
-        module_path=data.module_path,
+        template_id=getattr(data, "template_id", None),
+        seniority=getattr(data, "seniority", None),
+        module_path=getattr(data, "module_path", None),
     )
     await db.commit()
     await db.refresh(agent)
@@ -318,39 +322,93 @@ async def wake_agent(
     return WakeResponse()
 
 
+@router.patch("/{agent_id}", response_model=AgentResponse)
+async def update_agent(
+    agent_id: UUID,
+    body: UpdateAgentRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update an agent's model, provider, thinking_enabled, or display_name.
+
+    These values are written directly to the agent row (write-through pattern).
+    Changes take effect on the agent's next session.
+    """
+    agent = await _ensure_agent_access(db, agent_id, current_user.id)
+
+    if body.model is not None:
+        agent.model = body.model
+        # Re-infer provider if not explicitly provided
+        if body.provider is None:
+            agent.provider = infer_provider(body.model)
+    if body.provider is not None:
+        agent.provider = body.provider
+    if body.thinking_enabled is not None:
+        agent.thinking_enabled = body.thinking_enabled
+    if body.display_name is not None:
+        agent.display_name = body.display_name
+
+    await db.commit()
+    await db.refresh(agent)
+    return agent
+
+
 @router.get("/{agent_id}/context", response_model=AgentContextResponse)
 async def get_agent_context(
     agent_id: UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Get agent context for the Inspector panel.
+    """Get agent context for the Inspector panel.
 
-    Returns system prompt, available tools, and recent message history.
+    Returns the real assembled system prompt (from DB block configs),
+    available tools, and recent message history.
     """
+    from backend.prompts.assembly import PromptAssembly
+
     agent = await _ensure_agent_access(db, agent_id, current_user.id)
 
-    # Get system prompt for this role
-    system_prompt = _SYSTEM_PROMPTS.get(agent.role, "")
+    # Load the project for placeholder resolution
+    result = await db.execute(select(Repository).where(Repository.id == agent.project_id))
+    project = result.scalar_one_or_none()
 
-    # Get available tools
+    # Assemble the real system prompt from DB block configs
+    system_prompt: str | None = None
+    if project:
+        block_repo = PromptBlockConfigRepository(db)
+        block_configs = await block_repo.list_for_agent(agent.id)
+        if block_configs:
+            memory_content = agent.memory
+            if isinstance(memory_content, dict):
+                import json
+                memory_content = json.dumps(memory_content) if memory_content else None
+            pa = PromptAssembly(
+                agent, project, memory_content,
+                block_configs=block_configs,
+                thinking_stage=None,  # show base prompt (thinking OFF) in inspector
+            )
+            system_prompt = pa.system_prompt
+        else:
+            system_prompt = _SYSTEM_PROMPTS.get(agent.role, "")
+    else:
+        system_prompt = _SYSTEM_PROMPTS.get(agent.role, "")
+
     available_tools = _get_tools_for_role(agent.role)
-
-    # Recent messages would come from LangGraph checkpointer
-    # For now, return empty list (implement when checkpointer integration is done)
-    recent_messages: list[dict] = []
 
     return AgentContextResponse(
         id=agent.id,
+        project_id=agent.project_id,
+        template_id=agent.template_id,
         role=agent.role,
         display_name=agent.display_name,
         tier=agent.tier,
         model=agent.model,
+        provider=agent.provider,
+        thinking_enabled=agent.thinking_enabled,
         status=agent.status,
         system_prompt=system_prompt,
         available_tools=available_tools,
-        recent_messages=recent_messages,
+        recent_messages=[],
         sandbox_id=agent.sandbox_id,
         sandbox_active=bool(agent.sandbox_id),
     )

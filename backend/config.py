@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     # LangGraph persistence (PostgresSaver for production; MemorySaver when False)
     graph_persist_postgres: bool = Field(default=False, description="Use PostgresSaver for graph checkpoints")
 
+    # Test login (development only — never enable in production)
+    test_login_enabled: bool = False
+    test_login_email: str = ""
+    test_login_password: str = ""
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8000

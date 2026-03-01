@@ -16,12 +16,17 @@ PostgreSQL is the single source of truth for all AICT state. No LangGraph checkp
 |-------|---------|
 | `users` | Firebase-authenticated users with GitHub credentials |
 | `repositories` | Projects — git repos with local paths |
-| `project_settings` | Per-project configurables (max engineers, sandbox count) |
+| `repository_memberships` | User access to projects (roles: `owner`, `member`, `viewer`) |
+| `project_settings` | Per-project configurables: max engineers, model/prompt overrides, token/cost/rate budgets |
 | `agents` | Agent definitions (role, model, status, memory, sandbox) |
 | `tasks` | Kanban board items with 2D priority |
-| `channel_messages` | Inter-agent and user-to-agent communication channel |
+| `channel_messages` | Inter-agent and user-to-agent communication channel; includes `from_user_id` for attribution |
 | `agent_sessions` | Session tracking (one row per agent wake→END cycle) |
 | `agent_messages` | Persistent LLM message log (every prompt, response, tool call) |
+| `llm_usage_events` | One row per LLM API call: provider, model, token counts, estimated cost |
+| `attachments` | Binary image blobs (bytea, ≤10 MB, image/* only) stored in Postgres |
+| `message_attachments` | Junction table linking channel messages to attachments |
+| `project_documents` | Manager-writable architecture documents (arc42, ADRs, C4, etc.) |
 
 ---
 
@@ -91,6 +96,12 @@ project_settings
   project_id               UUID     FK(repositories.id), ON DELETE CASCADE, UNIQUE NOT NULL
   max_engineers             Integer  NOT NULL, default 5
   persistent_sandbox_count  Integer  NOT NULL, default 1
+  model_overrides           JSON     nullable    -- per-role model override map, e.g. {"manager": "claude-opus-4-6"}
+  prompt_overrides          JSON     nullable    -- per-role extra system prompt text (max 2,000 chars per role)
+  daily_token_budget        Integer  NOT NULL, default 0   -- 0 = unlimited. Hard stop.
+  calls_per_hour_limit      Integer  NOT NULL, default 0   -- 0 = unlimited. Soft pause.
+  tokens_per_hour_limit     Integer  NOT NULL, default 0   -- 0 = unlimited. Soft pause.
+  daily_cost_budget_usd     Float    NOT NULL, default 0.0 -- 0.0 = unlimited. Hard stop.
   created_at               DateTime(tz) NOT NULL, default utcnow
   updated_at               DateTime(tz) NOT NULL, default utcnow, onupdate utcnow
 ```
@@ -98,6 +109,10 @@ project_settings
 Notes:
 - `max_engineers`: the `spawn_engineer` tool checks this before creating a new engineer. Returns an error if at limit.
 - `persistent_sandbox_count`: how many sandbox slots survive across agent sessions. Currently stored but sandbox persistence is managed by the `SandboxService` / `PoolManagerClient`.
+- `model_overrides`: JSONB map of role → model string, e.g. `{"manager": "claude-opus-4-6"}`. Part of the three-tier model resolution (agent override > project override > global default).
+- `prompt_overrides`: JSONB map of role → extra text appended to the system prompt. Capped at 2,000 characters per role at injection time.
+- `daily_token_budget` / `daily_cost_budget_usd`: hard stops enforced at the top of each loop iteration. UTC day boundary.
+- `calls_per_hour_limit` / `tokens_per_hour_limit`: soft pauses — the loop sleeps in 5-second cycles until the window clears or 10 minutes elapse.
 - Row is created lazily via `ProjectSettingsRepository.get_or_create_defaults()` when first accessed.
 
 ---
@@ -183,6 +198,7 @@ channel_messages
   project_id      UUID      FK(repositories.id), ON DELETE CASCADE NOT NULL
   from_agent_id   UUID      nullable    -- NULL = system. User = USER_AGENT_ID (not a FK)
   target_agent_id UUID      nullable    -- NULL = broadcast. User = USER_AGENT_ID (not a FK)
+  from_user_id    UUID      FK(users.id), ON DELETE SET NULL, nullable  -- real user FK for attribution (set when sent from REST API)
   content         Text      NOT NULL
   message_type    String(20) NOT NULL, default 'normal'   -- 'normal' | 'system'
   status          String(20) NOT NULL, default 'sent'     -- 'sent' | 'received'
@@ -195,6 +211,7 @@ channel_messages
 
 Notes:
 - `from_agent_id` and `target_agent_id` are **not foreign keys** to `agents.id`. The user UUID (`00000000-0000-0000-0000-000000000000`) never exists in `agents`, so a FK would violate the constraint.
+- `from_user_id` is a real FK to `users.id`. It is set when a message is sent from the public REST API (`POST /api/v1/messages/send`) and is `NULL` for agent-to-agent messages. This enables per-user attribution in the frontend without a schema join on `from_agent_id`.
 - `status = 'sent'` → message is unread by the target. `'received'` → message was consumed by the target's inner loop.
 - Delivery flow: after writing a message, `MessageService.send()` calls `MessageRouter.notify(target_agent_id)` to push a wake-up signal to the target's asyncio queue.
 - Messages targeting `USER_AGENT_ID` are pushed via WebSocket `agent_message` event to the browser — they are never "received" by a worker queue.
@@ -272,32 +289,181 @@ Notes:
 
 ---
 
+## repository_memberships
+
+Tracks which users have access to which repositories and at what role level.
+
+```
+repository_memberships
+  id              UUID        PK, default uuid4
+  repository_id   UUID        FK(repositories.id), ON DELETE CASCADE NOT NULL
+  user_id         UUID        FK(users.id), ON DELETE CASCADE NOT NULL
+  role            String(50)  NOT NULL, default 'member'   -- 'owner' | 'member' | 'viewer'
+  created_at      DateTime(tz) NOT NULL, default utcnow
+
+  UNIQUE INDEX ix_repo_memberships_repo_user (repository_id, user_id)
+  INDEX ix_repo_memberships_user (user_id)
+```
+
+Notes:
+- Every API endpoint that touches a project calls `require_project_access(db, project_id, user_id)` from `backend/core/project_access.py`. This checks for a matching membership row and falls back to the legacy `owner_id IS NULL` pattern for backwards compatibility.
+- `owner` role grants full control including settings changes. `member` grants read/write. `viewer` is read-only.
+- On `POST /api/v1/repositories` and import, `add_owner_membership()` auto-creates an `owner` row for the creating user.
+
+---
+
+## llm_usage_events
+
+One row per LLM API call. Used for cost attribution, daily budget enforcement, and the usage dashboard.
+
+```
+llm_usage_events
+  id              UUID        PK, default uuid4
+  project_id      UUID        FK(repositories.id), ON DELETE CASCADE NOT NULL
+  agent_id        UUID        FK(agents.id), ON DELETE SET NULL, nullable
+  session_id      UUID        FK(agent_sessions.id), ON DELETE SET NULL, nullable
+  user_id         UUID        FK(users.id), ON DELETE SET NULL, nullable
+  provider        String(50)  NOT NULL    -- 'anthropic' | 'google' | 'openai'
+  model           String(100) NOT NULL    -- exact model name string
+  input_tokens    Integer     NOT NULL, default 0
+  output_tokens   Integer     NOT NULL, default 0
+  request_id      String(255) nullable    -- provider-side request ID for debugging
+
+  created_at      DateTime(tz) NOT NULL, default utcnow
+
+  INDEX ix_llm_usage_project_time (project_id, created_at)
+  INDEX ix_llm_usage_agent (agent_id)
+  INDEX ix_llm_usage_session (session_id)
+```
+
+Notes:
+- Written after every LLM call in `run_inner_loop()` via `LLMUsageRepository.record()`. The write is soft-fail — a write error does not abort the agent loop.
+- `GET /api/v1/repositories/{id}/usage` returns today's rollup (total calls, tokens, estimated cost USD), the last-hour rollup (for rate-limit progress bars), and the most recent 50 individual call records.
+- Cost estimation is done at read time via `backend/llm/pricing.py`, which looks up `LLM_MODEL_PRICING` in `config.py` by exact model name then longest-prefix match.
+
+---
+
+## attachments
+
+Binary image blobs stored directly in Postgres. Linked to channel messages via `message_attachments`.
+
+```
+attachments
+  id                    UUID        PK, default uuid4
+  project_id            UUID        FK(repositories.id), ON DELETE CASCADE NOT NULL
+  uploaded_by_user_id   UUID        FK(users.id), ON DELETE SET NULL, nullable
+  filename              String(255) NOT NULL
+  mime_type             String(100) NOT NULL    -- must be image/jpeg | image/png | image/gif | image/webp
+  size_bytes            Integer     NOT NULL    -- capped at 10 MB (10 * 1024 * 1024)
+  sha256                String(64)  NOT NULL    -- SHA-256 hex digest for integrity
+  data                  LargeBinary NOT NULL    -- raw binary blob (bytea in Postgres)
+  created_at            DateTime(tz) NOT NULL, default utcnow
+
+  INDEX ix_attachments_project (project_id, created_at)
+```
+
+Notes:
+- Uploaded via `POST /api/v1/attachments` (multipart/form-data). Only `image/*` MIME types are accepted; all others return `400`.
+- Maximum size is 10 MB per file. Oversized uploads return `400`.
+- SHA-256 is computed server-side and stored for integrity verification.
+- The blob is served back via `GET /api/v1/attachments/{id}` with the correct `Content-Type` header.
+
+---
+
+## message_attachments
+
+Junction table linking a `channel_message` to one or more `attachment` rows. Supports multiple images per message with ordering.
+
+```
+message_attachments
+  id              UUID     PK, default uuid4
+  message_id      UUID     FK(channel_messages.id), ON DELETE CASCADE NOT NULL
+  attachment_id   UUID     FK(attachments.id), ON DELETE CASCADE NOT NULL
+  position        Integer  NOT NULL, default 0    -- display order within the message
+
+  INDEX ix_msg_attachments_message (message_id)
+  INDEX ix_msg_attachments_attachment (attachment_id)
+```
+
+Notes:
+- Loaded via `selectin` relationship on `ChannelMessage` to avoid N+1 queries when listing messages.
+- The `attachment_ids` property on `ChannelMessage` exposes IDs only when the relationship is already loaded (avoids sync IO from Pydantic serialization).
+
+---
+
+## project_documents
+
+Manager-agent-writable architecture documents. Read-only for users via REST. Used to store living documents that the Manager maintains as the project evolves.
+
+```
+project_documents
+  id                  UUID        PK, default uuid4
+  project_id          UUID        FK(repositories.id), ON DELETE CASCADE NOT NULL
+  doc_type            String(100) NOT NULL    -- well-known type slug (see below)
+  title               String(255) nullable
+  content             Text        nullable
+  updated_by_agent_id UUID        FK(agents.id), ON DELETE SET NULL, nullable
+
+  created_at          DateTime(tz) NOT NULL, default utcnow
+  updated_at          DateTime(tz) NOT NULL, default utcnow, onupdate utcnow
+
+  UNIQUE INDEX ix_project_documents_project_type (project_id, doc_type)
+```
+
+Well-known `doc_type` values:
+- `architecture_source_of_truth` — single canonical architecture description
+- `arc42_lite` — arc42-lite template content
+- `c4_diagrams` — C4 model diagrams (Markdown + PlantUML/Mermaid)
+- `adr/<slug>` — individual Architecture Decision Records
+
+Notes:
+- `GET /api/v1/documents?project_id={uuid}` lists all documents for a project. `GET /api/v1/documents/{project_id}/{doc_type}` fetches a single document.
+- Write access is restricted to agent internal API calls; users have read-only access.
+- `updated_by_agent_id` tracks which agent last modified the document (nullable for legacy/seed data).
+- The UNIQUE constraint on `(project_id, doc_type)` enforces one document per type per project; upsert semantics are used for writes.
+
+---
+
 ## Entity Relationship Diagram
 
 ```
 users ──────────────< repositories
-                          │
-                          ├──────────────< project_settings (1:1)
-                          │
-                          ├──────────────< agents
-                          │                  │
-                          │                  ├──────────────< agent_sessions
-                          │                  │                     │
-                          │                  │                     └──────< agent_messages
-                          │                  │
-                          │                  └──(assigned_agent_id)──< tasks
-                          │
-                          ├──────────────< tasks (project_id)
-                          │
-                          └──────────────< channel_messages (project_id)
+  │                       │
+  │                       ├──────────────< repository_memberships >──── users
+  │                       │
+  │                       ├──────────────< project_settings (1:1)
+  │                       │
+  │                       ├──────────────< agents
+  │                       │                  │
+  │                       │                  ├──────────────< agent_sessions
+  │                       │                  │                     │
+  │                       │                  │                     └──────< agent_messages
+  │                       │                  │                     │
+  │                       │                  │                     └──────< llm_usage_events
+  │                       │                  │
+  │                       │                  └──(assigned_agent_id)──< tasks
+  │                       │
+  │                       ├──────────────< tasks (project_id)
+  │                       │
+  │                       ├──────────────< channel_messages (project_id)
+  │                       │                     │
+  │                       │                     └──────< message_attachments >──── attachments
+  │                       │
+  │                       ├──────────────< attachments (project_id)
+  │                       │
+  │                       └──────────────< project_documents (project_id)
+  │
+  └──────────────(uploaded_by_user_id)──< attachments
 ```
 
 Key relationships:
 - `repositories` 1:1 `project_settings`
-- `repositories` 1:N `agents`
-- `agents` 1:N `agent_sessions`
-- `agent_sessions` 1:N `agent_messages`
+- `repositories` 1:N `agents`, `tasks`, `channel_messages`, `attachments`, `project_documents`
+- `users` N:M `repositories` (via `repository_memberships`)
+- `agents` 1:N `agent_sessions`, `llm_usage_events`
+- `agent_sessions` 1:N `agent_messages`, `llm_usage_events`
 - `agents` N:1 `tasks` (via `assigned_agent_id`, `current_task_id`)
+- `channel_messages` N:M `attachments` (via `message_attachments`)
 - `channel_messages` references agents by UUID but NOT via FK (user uses reserved UUID)
 
 ---
@@ -324,6 +490,12 @@ This UUID represents the user in `channel_messages.from_agent_id` and `channel_m
 | `006_data_and_messaging_foundation.py` | `channel_messages`, `agent_sessions`, `agent_messages`, `project_settings`; drops legacy tables |
 | `007_deprecate_om_use_cto.py` | Renames `om` role → `cto`; removes deprecated agents |
 | `008_add_agent_tier_column.py` | `agents.tier` column for engineer seniority |
+| `009_memberships_and_attribution.py` | `repository_memberships` table; `channel_messages.from_user_id` for user attribution |
+| `010_project_settings_overrides.py` | `project_settings.model_overrides` + `prompt_overrides` columns |
+| `011_llm_usage_events.py` | `llm_usage_events` table; `project_settings.daily_token_budget` |
+| `012_rate_limits_and_cost_budget.py` | `project_settings.calls_per_hour_limit`, `tokens_per_hour_limit`, `daily_cost_budget_usd` |
+| `013_attachments.py` | `attachments` + `message_attachments` tables |
+| `014_project_documents.py` | `project_documents` table |
 
 ---
 
@@ -339,5 +511,12 @@ Critical indexes for query performance:
 | `ix_agent_sessions_status` | `agent_sessions` | `(status)` | Reconciler: find all running sessions |
 | `ix_agent_messages_agent_time` | `agent_messages` | `(agent_id, created_at)` | Read history for agent |
 | `ix_agent_messages_session` | `agent_messages` | `(session_id, loop_iteration)` | Messages within a session |
+| `ix_repo_memberships_repo_user` | `repository_memberships` | `(repository_id, user_id)` UNIQUE | Access control check |
+| `ix_repo_memberships_user` | `repository_memberships` | `(user_id)` | Projects visible to a user |
+| `ix_llm_usage_project_time` | `llm_usage_events` | `(project_id, created_at)` | Daily/hourly usage rollup |
+| `ix_llm_usage_agent` | `llm_usage_events` | `(agent_id)` | Per-agent cost attribution |
+| `ix_llm_usage_session` | `llm_usage_events` | `(session_id)` | Per-session token usage |
+| `ix_attachments_project` | `attachments` | `(project_id, created_at)` | Attachments for a project |
+| `ix_project_documents_project_type` | `project_documents` | `(project_id, doc_type)` UNIQUE | Fetch single doc by type |
 
 The `ix_channel_target_status` index is the hottest path in the system: it is queried every time any agent wakes up to read its unread messages.

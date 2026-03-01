@@ -10,7 +10,7 @@ from docker.errors import APIError, NotFound
 
 from config import (
     CGROUP_PARENT,
-    CONTAINER_CPU,
+    CONTAINER_CPU_SHARES,
     CONTAINER_INTERNAL_PORT,
     CONTAINER_MEMORY,
     DOCKER_IMAGE,
@@ -41,7 +41,11 @@ class DockerManager:
             name=f"sandbox-{sandbox_id}",
             detach=True,
             cgroup_parent=CGROUP_PARENT,
-            nano_cpus=int(CONTAINER_CPU * 1e9),
+            # cpu_shares is a relative weight (not a hard quota).  Containers
+            # can freely burst to use idle cores; the kernel only enforces the
+            # weight when CPUs are genuinely contested, enabling
+            # oversubscription across up to 35 sandboxes on a 4-core host.
+            cpu_shares=CONTAINER_CPU_SHARES,
             mem_limit=CONTAINER_MEMORY,
             ports={f"{CONTAINER_INTERNAL_PORT}/tcp": host_port},
             volumes={volume_name: {"bind": "/workspace", "mode": "rw"}},

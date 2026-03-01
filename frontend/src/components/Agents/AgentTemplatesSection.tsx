@@ -1,0 +1,406 @@
+/**
+ * Agent Templates Section — used in Settings page.
+ *
+ * Lists all templates for the project.
+ * System defaults (Manager, CTO, Engineer) can be edited but not deleted.
+ * Users can create new worker templates and delete them.
+ */
+
+import { useState, useEffect, useCallback } from 'react';
+import {
+  Plus,
+  Trash2,
+  Save,
+  Loader2,
+  BrainCircuit,
+  Settings2,
+  ChevronDown,
+  ChevronUp,
+  X,
+} from 'lucide-react';
+import {
+  listTemplates,
+  createTemplate,
+  updateTemplate,
+  deleteTemplate,
+} from '../../api/client';
+import type { AgentTemplate, CreateAgentTemplate } from '../../types';
+import { Button, Card, Input } from '../ui';
+
+// ── Model options ──────────────────────────────────────────────────────
+
+const MODEL_OPTIONS = [
+  { value: 'claude-opus-4-6', label: 'Claude Opus 4.6 (powerful)' },
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (balanced)' },
+  { value: 'claude-haiku-4-6', label: 'Claude Haiku 4.6 (fast)' },
+  { value: 'gpt-5.2', label: 'GPT-5.2' },
+  { value: 'gpt-4o', label: 'GPT-4o' },
+  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+  { value: 'o4-mini', label: 'o4-mini (reasoning)' },
+  { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+  { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+  { value: 'kimi-k2-0711-preview', label: 'Kimi K2 (very cheap)' },
+];
+
+const BASE_ROLE_LABELS: Record<string, string> = {
+  manager: 'Manager',
+  cto: 'CTO',
+  worker: 'Worker / Engineer',
+};
+
+// ── TemplateCard ──────────────────────────────────────────────────────
+
+interface TemplateCardProps {
+  template: AgentTemplate;
+  onSave: (id: string, updates: { name?: string; model?: string; provider?: string | null; thinking_enabled?: boolean }) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}
+
+function TemplateCard({ template, onSave, onDelete }: TemplateCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [name, setName] = useState(template.name);
+  const [model, setModel] = useState(template.model);
+  const [provider, setProvider] = useState(template.provider ?? '');
+  const [thinkingEnabled, setThinkingEnabled] = useState(template.thinking_enabled);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const isDirty =
+    name !== template.name ||
+    model !== template.model ||
+    (provider || null) !== template.provider ||
+    thinkingEnabled !== template.thinking_enabled;
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave(template.id, {
+        name,
+        model,
+        provider: provider.trim() || null,
+        thinking_enabled: thinkingEnabled,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm(`Delete template "${template.name}"? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      await onDelete(template.id);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center gap-3">
+          <Settings2 className="w-4 h-4 text-gray-500" />
+          <div>
+            <span className="font-medium text-gray-800">{template.name}</span>
+            <span className="ml-2 text-xs text-gray-500">
+              ({BASE_ROLE_LABELS[template.base_role] ?? template.base_role})
+            </span>
+            {template.is_system_default && (
+              <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                system
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500 font-mono">{template.model}</span>
+          {thinkingEnabled && (
+            <BrainCircuit className="w-4 h-4 text-purple-500" title="Thinking enabled" />
+          )}
+          {expanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="p-4 space-y-4 border-t border-gray-200">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Template Name</label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. QA Tester" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+              <select
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+              >
+                {MODEL_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+                {!MODEL_OPTIONS.find((o) => o.value === model) && (
+                  <option value={model}>{model} (custom)</option>
+                )}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Provider <span className="text-gray-400 font-normal">(optional, inferred if blank)</span>
+              </label>
+              <Input
+                value={provider}
+                onChange={(e) => setProvider(e.target.value)}
+                placeholder="anthropic / openai / google / kimi"
+              />
+            </div>
+            <div className="flex items-center gap-3 self-end pb-1">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="rounded"
+                  checked={thinkingEnabled}
+                  onChange={(e) => setThinkingEnabled(e.target.checked)}
+                />
+                <span className="text-sm font-medium text-gray-700 flex items-center gap-1">
+                  <BrainCircuit className="w-4 h-4 text-purple-500" />
+                  Enable two-stage thinking
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <p className="text-xs text-gray-500">
+            Template changes only affect <strong>newly created agents</strong>. Existing agents keep their current model and settings.
+          </p>
+
+          <div className="flex justify-between items-center">
+            {!template.is_system_default ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+              >
+                {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                Delete
+              </Button>
+            ) : (
+              <span />
+            )}
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleSave}
+              disabled={saving || !isDirty}
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              Save
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── CreateTemplateForm ────────────────────────────────────────────────
+
+interface CreateTemplateFormProps {
+  onCreated: (template: AgentTemplate) => void;
+  onCancel: () => void;
+  projectId: string;
+}
+
+function CreateTemplateForm({ onCreated, onCancel, projectId }: CreateTemplateFormProps) {
+  const [name, setName] = useState('');
+  const [model, setModel] = useState('gpt-5.2');
+  const [provider, setProvider] = useState('');
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleCreate = async () => {
+    if (!name.trim()) { setError('Template name is required'); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const template = await createTemplate(projectId, {
+        name: name.trim(),
+        base_role: 'worker',
+        model,
+        provider: provider.trim() || null,
+        thinking_enabled: thinkingEnabled,
+      } as CreateAgentTemplate);
+      onCreated(template);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to create template');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="border border-blue-200 rounded-lg p-4 bg-blue-50 space-y-4">
+      <div className="flex justify-between items-center">
+        <h4 className="text-sm font-semibold text-gray-800">New Worker Template</h4>
+        <button type="button" onClick={onCancel} className="text-gray-400 hover:text-gray-600">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Template Name</label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. QA Tester" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+          <select
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+          >
+            {MODEL_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Provider <span className="text-gray-400 font-normal">(optional)</span>
+          </label>
+          <Input
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            placeholder="anthropic / openai / google / kimi"
+          />
+        </div>
+        <div className="flex items-center gap-2 self-end pb-1">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              className="rounded"
+              checked={thinkingEnabled}
+              onChange={(e) => setThinkingEnabled(e.target.checked)}
+            />
+            <span className="text-sm font-medium text-gray-700 flex items-center gap-1">
+              <BrainCircuit className="w-4 h-4 text-purple-500" />
+              Enable thinking
+            </span>
+          </label>
+        </div>
+      </div>
+      <div className="flex justify-end">
+        <Button type="button" size="sm" onClick={handleCreate} disabled={saving}>
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+          Create Template
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ── AgentTemplatesSection ──────────────────────────────────────────────
+
+interface AgentTemplatesSectionProps {
+  projectId: string;
+}
+
+export function AgentTemplatesSection({ projectId }: AgentTemplatesSectionProps) {
+  const [templates, setTemplates] = useState<AgentTemplate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+
+  const fetchTemplates = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await listTemplates(projectId);
+      setTemplates(data);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to load templates');
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
+
+  const handleSave = async (id: string, updates: Parameters<typeof updateTemplate>[1]) => {
+    const updated = await updateTemplate(id, updates);
+    setTemplates((prev) => prev.map((t) => (t.id === id ? updated : t)));
+  };
+
+  const handleDelete = async (id: string) => {
+    await deleteTemplate(id);
+    setTemplates((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const handleCreated = (template: AgentTemplate) => {
+    setTemplates((prev) => [...prev, template]);
+    setShowCreateForm(false);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-gray-500 py-4">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        <span>Loading templates…</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return <p className="text-sm text-red-600">{error}</p>;
+  }
+
+  // Sort: system defaults first, then custom
+  const sorted = [...templates].sort((a, b) => {
+    if (a.is_system_default && !b.is_system_default) return -1;
+    if (!a.is_system_default && b.is_system_default) return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return (
+    <div className="space-y-3">
+      {sorted.map((template) => (
+        <TemplateCard
+          key={template.id}
+          template={template}
+          onSave={handleSave}
+          onDelete={handleDelete}
+        />
+      ))}
+
+      {showCreateForm ? (
+        <CreateTemplateForm
+          projectId={projectId}
+          onCreated={handleCreated}
+          onCancel={() => setShowCreateForm(false)}
+        />
+      ) : (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => setShowCreateForm(true)}
+          className="w-full"
+        >
+          <Plus className="w-4 h-4" />
+          New Worker Template
+        </Button>
+      )}
+
+      <p className="text-xs text-gray-500">
+        System templates (Manager, CTO, Engineer) are created automatically. You can edit their model and settings.
+        Create additional worker templates for specialized roles (e.g. "QA Tester", "DevOps Engineer").
+      </p>
+    </div>
+  );
+}

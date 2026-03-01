@@ -9,15 +9,15 @@ The AICT backend is a FastAPI application that orchestrates a multi-agent AI sof
 | Layer | Technology |
 |-------|-----------|
 | Framework | FastAPI (async, ASGI) |
-| Runtime | Python 3.12+, uvicorn |
-| Database | PostgreSQL 15+ via SQLAlchemy async ORM |
-| Migrations | Alembic |
+| Runtime | Python 3.11+, uvicorn |
+| Database | PostgreSQL 16 via SQLAlchemy 2.0 async ORM + asyncpg |
+| Migrations | Alembic (auto-run at startup) |
 | Auth | Firebase Admin SDK (user auth) + Bearer token (API auth) |
-| Sandbox | E2B (remote sandboxes per agent) |
-| LLM | Anthropic Claude, Google Gemini (via LangChain adapters) |
-| Visualization | LangGraph (topology metadata only, no execution) |
+| Sandbox | Self-hosted VM pool manager (Docker containers on GCE VM, port 9090) |
+| LLM | Anthropic Claude, Google Gemini, OpenAI GPT/o-series (native SDKs) |
+| Agent Orchestration | Custom universal loop (`run_inner_loop`) + LangGraph `StateGraph` for Manager↔CTO consultation |
 | Real-time | WebSocket (FastAPI native) |
-| Testing | pytest + pytest-asyncio, aiosqlite (unit), testcontainers (integration) |
+| Testing | pytest + pytest-asyncio, aiosqlite (unit), testcontainers[postgres] (integration) |
 
 ### Design Principles
 
@@ -33,114 +33,130 @@ The AICT backend is a FastAPI application that orchestrates a multi-agent AI sof
 ```
 backend/
 ├── main.py                     # FastAPI app, lifespan, middleware
-├── config.py                   # Pydantic settings (env-based)
-├── __init__.py
+├── config.py                   # Pydantic settings (env-based) + LLM pricing table
+├── requirements.txt
 │
 ├── api/                        # Public REST API (user-facing)
 │   └── v1/
 │       ├── router.py           # Aggregated v1 router
 │       ├── auth.py             # Firebase auth + user profile
-│       ├── repositories.py     # Project/repo CRUD
-│       ├── agents.py           # Agent listing, inspector, spawn
+│       ├── repositories.py     # Project/repo CRUD + settings + usage
+│       ├── agents.py           # Agent listing, inspector, memory
 │       ├── tasks.py            # Kanban board CRUD
-│       ├── messages.py         # User-to-agent messaging (NEW)
-│       ├── sessions.py         # Agent session history (NEW)
-│       └── settings.py         # Project settings (NEW)
+│       ├── messages.py         # User-to-agent messaging
+│       ├── sessions.py         # Agent session history
+│       ├── attachments.py      # Image upload/download (bytea in Postgres)
+│       ├── documents.py        # Per-project architecture documents (read-only)
+│       └── diagnostics.py      # Debug endpoints
 │
 ├── api_internal/               # Internal API (agent tools → services)
 │   ├── router.py               # Aggregated internal router
-│   ├── lifecycle.py            # Agent wake/sleep/interrupt
-│   ├── messaging.py            # send_message, broadcast (NEW)
+│   ├── lifecycle.py            # Agent sleep/interrupt
+│   ├── messaging.py            # send_message, broadcast, read messages
+│   ├── memory.py               # update_memory, read_history
+│   ├── management.py           # spawn_engineer, list_agents
 │   ├── tasks.py                # Task CRUD (agent-scoped)
-│   ├── git.py                  # Git operations (in sandbox)
-│   └── sandbox.py              # execute_command (NEW)
+│   └── files.py                # execute_command (shell in sandbox container)
 │
 ├── core/                       # Cross-cutting concerns
-│   ├── auth.py                 # Token verification, Firebase init
-│   ├── access_control.py       # Role-based permission checks
-│   ├── exceptions.py           # Custom exception hierarchy
+│   ├── auth.py                 # Firebase + API token verification; user auto-create
+│   ├── project_access.py       # require_project_access() + membership helpers
+│   ├── exceptions.py           # AICTException hierarchy
 │   ├── error_handlers.py       # FastAPI exception handlers
-│   └── constants.py            # USER_AGENT_ID, role enums (NEW)
+│   ├── constants.py            # USER_AGENT_ID, role/status enums
+│   └── logging_config.py       # Structured logging setup
 │
 ├── db/                         # Database layer
 │   ├── session.py              # Async engine + session factory
-│   ├── models.py               # SQLAlchemy ORM models
+│   ├── models.py               # SQLAlchemy ORM models (14 tables)
 │   ├── migration_runner.py     # Alembic programmatic runner
-│   └── repositories/           # Data access layer (NEW)
-│       ├── base.py             # Generic async CRUD base
-│       ├── agents.py           # Agent queries (NEW)
-│       ├── tasks.py            # Task queries (NEW)
-│       ├── messages.py         # Channel + agent message queries (NEW)
-│       └── sessions.py         # Session queries (NEW)
+│   └── repositories/           # Data access layer
+│       ├── agents.py
+│       ├── attachments.py
+│       ├── llm_usage.py        # Usage record + daily/hourly rollup
+│       ├── messages.py
+│       ├── membership.py
+│       ├── project_settings.py
+│       └── sessions.py
+│
+├── graph/                      # LangGraph Manager↔CTO consultation workflow
+│   ├── workflow.py             # StateGraph definition + AsyncPostgresSaver/MemorySaver
+│   ├── state.py
+│   ├── events.py
+│   ├── utils.py
+│   └── nodes/
+│       ├── manager.py
+│       └── cto.py
+│
+├── llm/                        # LLM provider abstraction
+│   ├── contracts.py            # LLMRequest, LLMResponse, LLMTool, LLMMessage
+│   ├── model_resolver.py       # Three-tier model resolution (agent > project > global)
+│   ├── pricing.py              # estimate_cost_usd() — looks up LLM_MODEL_PRICING
+│   └── providers/
+│       ├── anthropic.py        # AnthropicSDKProvider
+│       ├── google.py           # GeminiProviderAdapter
+│       └── openai.py           # OpenAISDKProvider
+│
+├── prompts/                    # Prompt assembly system
+│   ├── assembly.py             # PromptAssembly — owns full LLM context per session
+│   ├── builder.py
+│   └── blocks/                 # Markdown prompt block files
 │
 ├── services/                   # Business logic layer
-│   ├── agent_service.py        # Agent lifecycle, spawn, state
+│   ├── agent_service.py        # Agent lifecycle, spawn, state, memory
 │   ├── task_service.py         # Task CRUD with business rules
-│   ├── message_service.py      # Channel message send/read (NEW)
-│   ├── session_service.py      # Agent session tracking (NEW)
-│   ├── e2b_service.py          # Sandbox create/connect/close
-│   ├── sandbox_pool.py         # Persistent slot allocator (NEW)
-│   ├── git_service.py          # Git operations via sandbox
-│   ├── prompt_service.py       # Prompt block assembly (NEW)
-│   ├── llm_service.py          # LLM client abstraction
+│   ├── message_service.py      # Channel message send/read
+│   ├── session_service.py      # Agent session tracking
+│   ├── sandbox_service.py      # Pool manager client (HTTP REST to VM)
+│   ├── llm_service.py          # LLM call + provider routing
 │   └── repo_provisioning.py    # Clone repos on project create
 │
-├── workers/                    # Agent execution runtime (NEW)
-│   ├── agent_worker.py         # Per-agent async loop
-│   ├── message_router.py       # Singleton message dispatcher
-│   ├── worker_manager.py       # Lifecycle manager (startup/shutdown)
-│   └── loop.py                 # The universal async loop
-│
 ├── tools/                      # Agent tool definitions
-│   ├── registry.py             # Role → tool set mapping
-│   ├── core.py                 # end, sleep, send_message, etc. (NEW)
-│   ├── management.py           # interrupt, spawn, list_agents (NEW)
-│   ├── tasks.py                # create/list/assign/update tasks
-│   ├── git.py                  # create_branch, create_pr, etc.
-│   ├── sandbox.py              # execute_command (NEW)
-│   └── context.py              # ToolContext dataclass (NEW)
+│   ├── base.py                 # RunContext dataclass
+│   ├── loop_registry.py        # Per-role tool handler registries
+│   ├── tool_descriptions.json  # Tool schemas for LLM
+│   └── executors/              # Stateless async tool handler functions
+│       ├── agents.py           # spawn_engineer, list_agents, interrupt_agent
+│       ├── docs.py             # write_document (agent-only)
+│       ├── memory.py           # update_memory, read_history
+│       ├── messaging.py        # send_message, broadcast_message
+│       ├── meta.py             # end, describe_tool
+│       ├── sandbox.py          # execute_command
+│       └── tasks.py            # create_task, assign_task, etc.
 │
 ├── websocket/                  # Real-time streaming
 │   ├── endpoint.py             # /ws WebSocket handler
-│   ├── manager.py              # Connection + channel manager
-│   └── events.py               # Event types + factory functions
+│   ├── manager.py              # Multi-channel connection manager
+│   └── events.py               # Event type constants + emitters
+│
+├── workers/                    # Agent execution runtime
+│   ├── loop.py                 # Universal wake-to-END inner loop
+│   ├── worker_manager.py       # Spawn, track, respawn AgentWorker tasks
+│   ├── message_router.py       # In-process asyncio.Queue notification bus
+│   └── reconciler.py           # Background self-healing (30s cycle)
 │
 ├── migrations/                 # Alembic migration scripts
 │   ├── env.py
-│   └── versions/
+│   └── versions/               # 001–014
 │
-├── schemas/                    # Pydantic request/response models
-│
-├── scripts/                    # CLI utilities
-│   └── seed.py                 # Dev data seeder
-│
-└── tests/                      # Test suite
+└── schemas/                    # Pydantic request/response models
 ```
 
-### Files to Drop (Deprecated)
+### Refactor Notes (Historical)
 
-These files correspond to the deprecated ticket system, old chat system, old LangGraph execution, and old worker model. They will be replaced during the refactor:
+The legacy ticket system, old synchronous chat API, and E2B-based sandbox integration have been removed. The following replacements are now in place:
 
-| File | Replacement |
-|------|-------------|
-| `api/v1/chat.py` | `api/v1/messages.py` (unified messaging) |
-| `api/v1/tickets.py` | Dropped (messaging replaces tickets) |
+| Removed | Replacement |
+|---------|-------------|
+| `api/v1/chat.py` (sync GM response) | `api/v1/messages.py` (async, 202 Accepted) |
+| `api/v1/tickets.py` | Dropped — messaging replaces tickets |
 | `api/v1/engineers.py` | Merged into `api/v1/agents.py` |
 | `api/v1/jobs.py` | `api/v1/sessions.py` (universal sessions) |
-| `api_internal/tickets.py` | `api_internal/messaging.py` |
-| `api_internal/files.py` | `api_internal/sandbox.py` (execute_command) |
 | `services/chat_service.py` | `services/message_service.py` |
 | `services/ticket_service.py` | Dropped |
-| `services/engineer_worker.py` | `workers/agent_worker.py` |
-| `services/engineer_graph_service.py` | Dropped (no graph execution) |
-| `services/orchestrator.py` | `workers/worker_manager.py` + `services/sandbox_pool.py` |
-| `graph/` (entire directory) | Dropped (LangGraph is visualization-only, lives in a thin utility) |
-| `tools/tickets.py` | Dropped |
-| `tools/e2b.py`, `tools/e2b_tool.py` | `tools/sandbox.py` |
-| `tools/files.py` | Dropped (file ops via execute_command) |
-| `tools/git_tool.py` | Merged into `tools/git.py` |
-| `tools/agents.py` | `tools/management.py` |
-| `schemas/chat.py` | `schemas/message.py` |
+| `services/engineer_worker.py` | `workers/agent_worker.py` + `workers/loop.py` |
+| `services/e2b_service.py` | `services/sandbox_service.py` (VM pool manager client) |
+| `tools/e2b.py`, `tools/e2b_tool.py` | `tools/executors/sandbox.py` |
 | `schemas/ticket.py` | Dropped |
 | `schemas/job.py` | `schemas/session.py` |
 
@@ -151,22 +167,24 @@ These files correspond to the deprecated ticket system, old chat system, old Lan
 ### Startup (`main.py` lifespan)
 
 ```
-1. Run Alembic migrations (auto-migrate on startup)
-2. Initialize WorkerManager
+1. Run Alembic migrations (soft-fail — startup continues on timeout/error)
+2. Repository provisioning (soft-fail) — re-clone any repos missing from disk
+3. WorkerManager startup (hard-fail, retried 3×):
    a. Load all agents from DB
    b. Spawn an AgentWorker (asyncio.Task) for each agent
-   c. Start the MessageRouter singleton
+   c. Register all agents with the MessageRouter (asyncio.Queue per agent)
    d. Replay undelivered messages (channel_messages with status="sent")
-3. Initialize sandbox pool state from DB
+   If all 3 attempts fail, the process crashes and Cloud Run restarts it.
+4. Start backend log broadcaster (background asyncio.Task)
+5. Start Reconciler (background asyncio.Task, runs every 30s)
 ```
 
 ### Shutdown
 
 ```
-1. Signal all AgentWorkers to stop (cancel tasks)
-2. Stop the MessageRouter
-3. Close all non-persistent sandboxes
-4. Close DB connection pool
+1. Cancel all AgentWorker asyncio tasks
+2. Cancel Reconciler and log broadcaster tasks
+3. Reset the MessageRouter singleton
 ```
 
 ### Request Flow
@@ -195,10 +213,11 @@ All configuration is environment-based via `pydantic-settings`. The `Settings` c
 |----------|-------------|
 | **Database** | `DATABASE_URL`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SOCKET_PATH` |
 | **Auth** | `FIREBASE_CREDENTIALS_PATH`, `FIREBASE_PROJECT_ID`, `API_TOKEN` |
-| **E2B** | `E2B_API_KEY`, `E2B_TEMPLATE_ID`, `E2B_TIMEOUT_SECONDS` |
-| **LLM** | `CLAUDE_API_KEY`, `GEMINI_API_KEY`, `CLAUDE_MODEL`, `GEMINI_MODEL`, `LLM_REQUEST_TIMEOUT_SECONDS`, `LLM_MAX_TOKENS`, `LLM_TEMPERATURE` |
+| **Sandbox** | `SANDBOX_VM_HOST`, `SANDBOX_VM_POOL_PORT`, `SANDBOX_VM_MASTER_TOKEN` |
+| **LLM** | `CLAUDE_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `MANAGER_MODEL_DEFAULT`, `CTO_MODEL_DEFAULT`, `ENGINEER_JUNIOR_MODEL`, `ENGINEER_INTERMEDIATE_MODEL`, `ENGINEER_SENIOR_MODEL`, `LLM_REQUEST_TIMEOUT_SECONDS`, `LLM_MAX_TOKENS` |
 | **Git** | `GITHUB_TOKEN`, `CODE_REPO_URL`, `SPEC_REPO_PATH`, `CODE_REPO_PATH` |
-| **Server** | `HOST`, `PORT`, `DEBUG`, `AUTO_RUN_MIGRATIONS_ON_STARTUP` |
+| **Server** | `HOST`, `PORT`, `DEBUG`, `AUTO_RUN_MIGRATIONS_ON_STARTUP`, `PROVISION_REPOS_ON_STARTUP`, `MAX_ENGINEERS` |
+| **LangGraph** | `GRAPH_PERSIST_POSTGRES` (bool, default false — uses MemorySaver when false) |
 
 ---
 
@@ -315,7 +334,7 @@ DELETE /api/v1/repositories/{id}
 
 ---
 
-### Project Settings (NEW)
+### Project Settings
 
 ```
 GET /api/v1/repositories/{id}/settings
@@ -323,10 +342,20 @@ GET /api/v1/repositories/{id}/settings
   Response: ProjectSettings
 
 PATCH /api/v1/repositories/{id}/settings
-  Auth: Required
-  Body: { "max_engineers"?: int, "persistent_sandbox_count"?: int }
+  Auth: Required (owner only)
+  Body: {
+    "max_engineers"?: int,
+    "persistent_sandbox_count"?: int,
+    "model_overrides"?: object,       -- per-role model map, e.g. {"manager": "claude-opus-4-6"}
+    "prompt_overrides"?: object,      -- per-role extra system prompt text (max 2,000 chars/role)
+    "daily_token_budget"?: int,       -- 0 = unlimited. Hard stop.
+    "daily_cost_budget_usd"?: float,  -- 0.0 = unlimited. Hard stop.
+    "calls_per_hour_limit"?: int,     -- 0 = unlimited. Soft pause.
+    "tokens_per_hour_limit"?: int     -- 0 = unlimited. Soft pause.
+  }
   Response: ProjectSettings
-  Notes: Updates project-level configurables.
+  Notes: Updates project-level configurables. Budget changes take effect within one
+         loop cycle (≤5s for rate limit changes during soft pause).
 ```
 
 **ProjectSettings schema:**
@@ -336,6 +365,102 @@ PATCH /api/v1/repositories/{id}/settings
   "project_id": "uuid",
   "max_engineers": "int (default 5)",
   "persistent_sandbox_count": "int (default 1)",
+  "model_overrides": "object | null",
+  "prompt_overrides": "object | null",
+  "daily_token_budget": "int (default 0 = unlimited)",
+  "daily_cost_budget_usd": "float (default 0.0 = unlimited)",
+  "calls_per_hour_limit": "int (default 0 = unlimited)",
+  "tokens_per_hour_limit": "int (default 0 = unlimited)",
+  "created_at": "datetime",
+  "updated_at": "datetime"
+}
+```
+
+### Usage
+
+```
+GET /api/v1/repositories/{id}/usage
+  Auth: Required
+  Response: UsageSummary
+  Notes: Returns today's token/cost rollup, last-hour rollup (for rate-limit progress
+         bars), and the most recent 50 individual LLM call records.
+```
+
+**UsageSummary schema:**
+```json
+{
+  "today": {
+    "total_calls": "int",
+    "total_input_tokens": "int",
+    "total_output_tokens": "int",
+    "estimated_cost_usd": "float",
+    "by_model": [{ "model": "string", "calls": "int", "input_tokens": "int", "output_tokens": "int", "cost_usd": "float" }]
+  },
+  "last_hour": {
+    "calls": "int",
+    "input_tokens": "int",
+    "output_tokens": "int"
+  },
+  "recent_calls": [{ "id": "uuid", "provider": "string", "model": "string", "input_tokens": "int", "output_tokens": "int", "cost_usd": "float", "created_at": "datetime" }]
+}
+```
+
+### Attachments
+
+```
+POST /api/v1/attachments
+  Auth: Required
+  Body: multipart/form-data — file field + project_id field
+  Response: Attachment
+  Status: 201
+  Notes: Accepts image/* MIME types only (jpeg, png, gif, webp). Max 10 MB.
+         Blob stored as bytea in Postgres. SHA-256 computed server-side.
+
+GET /api/v1/attachments/{id}
+  Auth: Required
+  Response: binary (Content-Type matches stored MIME type)
+  Notes: Serves the raw image bytes.
+```
+
+**Attachment schema:**
+```json
+{
+  "id": "uuid",
+  "project_id": "uuid",
+  "uploaded_by_user_id": "uuid | null",
+  "filename": "string",
+  "mime_type": "string",
+  "size_bytes": "int",
+  "sha256": "string",
+  "created_at": "datetime"
+}
+```
+
+### Documents
+
+```
+GET /api/v1/documents?project_id={uuid}
+  Auth: Required
+  Response: ProjectDocument[]
+  Notes: Lists all architecture documents for a project.
+
+GET /api/v1/documents/{project_id}/{doc_type}
+  Auth: Required
+  Response: ProjectDocument
+  Notes: Fetches a single document by type slug. Well-known types:
+         architecture_source_of_truth, arc42_lite, c4_diagrams, adr/<slug>
+  Status: 404 if not found.
+```
+
+**ProjectDocument schema:**
+```json
+{
+  "id": "uuid",
+  "project_id": "uuid",
+  "doc_type": "string",
+  "title": "string | null",
+  "content": "string | null",
+  "updated_by_agent_id": "uuid | null",
   "created_at": "datetime",
   "updated_at": "datetime"
 }
@@ -703,16 +828,32 @@ GET /internal/agent/git/diff
   Access: All agents
 ```
 
-### Sandbox
+### Files / Sandbox
 
 ```
-POST /internal/agent/execute
+POST /internal/agent/files/execute
   Body: { "agent_id": uuid, "command": string, "timeout"?: int }
   Access: All agents
-  Notes: Runs command in the agent's E2B sandbox. On first call in a session,
-         acquires a sandbox from the pool (see sandbox_pool.py).
-         Result is subject to MAX_TOOL_RESULT_TOKENS truncation.
+  Notes: Runs a shell command in the agent's sandbox container. On first call
+         in a session, the backend calls the VM pool manager to acquire a
+         sandbox (POST /api/sandbox/session/start). Commands execute in a
+         PTY bash session inside the container. Result is subject to
+         MAX_TOOL_RESULT_TOKENS truncation.
+         When SANDBOX_VM_HOST is not configured, returns an "offline"
+         placeholder so callers don't crash during local dev.
 ```
+
+**Sandbox VM pool manager** (external service on GCE VM, port 9090):
+
+```
+POST /api/sandbox/session/start   -- acquire/create a sandbox for an agent
+POST /api/sandbox/session/end     -- release a sandbox after session ends
+GET  /api/health                  -- health check
+GET  /api/sandbox/list            -- list active sandboxes
+DELETE /api/sandbox/{id}          -- destroy a sandbox
+```
+
+The pool manager is a separate FastAPI process on the same VM as the sandbox Docker containers. It manages a pool of up to 35 containers, ports 30001–30100, 256 MB memory limit per container. State is persisted to `/opt/sandbox/state.json` and reconciled against Docker reality on startup.
 
 ---
 
@@ -732,12 +873,16 @@ ws://{host}/ws?token={TOKEN}&project_id={UUID}&channels={CHANNELS}
 
 | Channel | Events | Purpose |
 |---------|--------|---------|
-| `agent_stream` | `agent_text`, `agent_tool_call`, `agent_tool_result` | Real-time agent loop output (NEW) |
-| `messages` | `agent_message`, `system_message` | Messages to/from user (NEW) |
+| `agent_stream` | `agent_text`, `agent_tool_call`, `agent_tool_result` | Real-time agent loop output |
+| `messages` | `agent_message`, `system_message` | Messages to/from user |
 | `kanban` | `task_created`, `task_update` | Kanban board changes |
 | `agents` | `agent_status` | Agent state changes (sleeping/active/busy) |
 | `activity` | `agent_log`, `sandbox_log` | Debug-level activity feed |
-| `all` | All of the above | Subscribe to everything |
+| `backend_logs` | `backend_log` | Server-side log lines broadcast to subscribers |
+| `workflow` | `workflow_update` | LangGraph Manager↔CTO workflow state |
+| `usage` | `usage_update` | LLM token/cost events (incremental updates) |
+| `documents` | `document_update` | Project document create/update events |
+| `all` | All of the above | Subscribe to every channel |
 
 ### Client → Server Messages
 

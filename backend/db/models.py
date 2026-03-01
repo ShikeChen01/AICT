@@ -70,6 +70,7 @@ class Repository(Base):
 
     owner = relationship("User", back_populates="repositories")
     agents = relationship("Agent", back_populates="project", cascade="all, delete-orphan")
+    agent_templates = relationship("AgentTemplate", back_populates="project", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="project", cascade="all, delete-orphan")
     project_settings = relationship(
         "ProjectSettings", back_populates="project", uselist=False, cascade="all, delete-orphan"
@@ -156,6 +157,90 @@ class ProjectSettings(Base):
 VALID_ROLES = ("manager", "cto", "engineer")
 VALID_STATUSES = ("sleeping", "active", "busy")
 
+# ── Agent Templates ──────────────────────────────────────────────────
+
+VALID_BASE_ROLES = ("manager", "cto", "worker")
+
+
+class AgentTemplate(Base):
+    """Reusable agent configuration. DB is source of truth for model/provider/blocks.
+
+    System defaults (Manager, CTO, Engineer) are created automatically per project.
+    Users can create additional worker templates (e.g. "QA Tester", "DevOps Engineer").
+    Template changes only affect newly created agents; existing agents keep their values.
+    """
+
+    __tablename__ = "agent_templates"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    )
+    name = Column(String(100), nullable=False)
+    base_role = Column(String(50), nullable=False)  # 'manager', 'cto', 'worker'
+    model = Column(String(100), nullable=False)
+    provider = Column(String(50), nullable=True)  # NULL = infer from model name
+    thinking_enabled = Column(Boolean, default=False, nullable=False)
+    tool_access = Column(JSON, nullable=True)  # Future: custom tool whitelist
+    is_system_default = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    project = relationship("Repository", back_populates="agent_templates")
+    agents = relationship("Agent", back_populates="template")
+    prompt_blocks = relationship(
+        "PromptBlockConfig",
+        primaryjoin="AgentTemplate.id == PromptBlockConfig.template_id",
+        back_populates="template",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("ix_agent_templates_project", "project_id"),
+    )
+
+
+class PromptBlockConfig(Base):
+    """Per-agent or per-template prompt block configuration.
+
+    DB is always the source of truth. Seeded from .md files at template/agent creation.
+    Exactly one of template_id or agent_id must be set.
+    The 'content' column is always populated (never NULL after seeding).
+    Duplication is supported: multiple rows with same block_key but different position.
+    """
+
+    __tablename__ = "prompt_block_configs"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    template_id = Column(
+        Uuid, ForeignKey("agent_templates.id", ondelete="CASCADE"), nullable=True
+    )
+    agent_id = Column(
+        Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
+    )
+    block_key = Column(String(50), nullable=False)
+    content = Column(Text, nullable=False)
+    position = Column(Integer, nullable=False, default=0)
+    enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    template = relationship(
+        "AgentTemplate",
+        foreign_keys=[template_id],
+        back_populates="prompt_blocks",
+    )
+    agent = relationship(
+        "Agent",
+        foreign_keys=[agent_id],
+        back_populates="prompt_blocks",
+    )
+
+    __table_args__ = (
+        Index("ix_prompt_block_configs_template", "template_id", "position"),
+        Index("ix_prompt_block_configs_agent", "agent_id", "position"),
+    )
+
 
 class Agent(Base):
     __tablename__ = "agents"
@@ -164,10 +249,15 @@ class Agent(Base):
     project_id = Column(
         Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
     )
+    template_id = Column(
+        Uuid, ForeignKey("agent_templates.id", ondelete="SET NULL"), nullable=True
+    )
     role = Column(String(50), nullable=False)  # 'manager', 'cto', 'engineer'
     display_name = Column(String(100), nullable=False)
-    tier = Column(String(50), nullable=True)
-    model = Column(String(100), nullable=False)
+    tier = Column(String(50), nullable=True)  # deprecated; use template.name
+    model = Column(String(100), nullable=False)  # always populated; DB is source of truth
+    provider = Column(String(50), nullable=True)  # explicit provider; populated at creation
+    thinking_enabled = Column(Boolean, default=False, nullable=False)
     status = Column(String(20), default="sleeping", nullable=False)
     current_task_id = Column(
         Uuid,
@@ -181,12 +271,19 @@ class Agent(Base):
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
     project = relationship("Repository", back_populates="agents")
+    template = relationship("AgentTemplate", back_populates="agents", foreign_keys=[template_id])
     current_task = relationship("Task", foreign_keys=[current_task_id])
     agent_sessions = relationship(
         "AgentSession", back_populates="agent", cascade="all, delete-orphan"
     )
     agent_messages = relationship(
         "AgentMessage", back_populates="agent", cascade="all, delete-orphan"
+    )
+    prompt_blocks = relationship(
+        "PromptBlockConfig",
+        primaryjoin="Agent.id == PromptBlockConfig.agent_id",
+        back_populates="agent",
+        cascade="all, delete-orphan",
     )
 
 
@@ -469,7 +566,7 @@ class MessageAttachment(Base):
 
 
 class ProjectDocument(Base):
-    """Manager-agent-writable architecture document. Read-only for users via REST.
+    """Architecture document. Writable by both users and the manager agent.
 
     Well-known doc_type values:
       'architecture_source_of_truth' — single canonical architecture description
@@ -490,13 +587,57 @@ class ProjectDocument(Base):
     updated_by_agent_id = Column(
         Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
     )
+    updated_by_user_id = Column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    current_version = Column(Integer, default=1, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
     project = relationship("Repository", back_populates="documents")
     updated_by_agent = relationship("Agent", foreign_keys=[updated_by_agent_id])
+    updated_by_user = relationship("User", foreign_keys=[updated_by_user_id])
+    versions = relationship(
+        "DocumentVersion", back_populates="document", cascade="all, delete-orphan",
+        order_by="DocumentVersion.version_number.desc()",
+    )
 
     __table_args__ = (
         Index("ix_project_documents_project", "project_id", "updated_at"),
         # unique constraint handled at migration level
+    )
+
+
+class DocumentVersion(Base):
+    """Version snapshot of a project document.
+
+    Created before every edit (by user or agent). Keeps last N=20 versions per document.
+    Revert creates a new version rather than destructive rollback.
+    """
+
+    __tablename__ = "document_versions"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    document_id = Column(
+        Uuid, ForeignKey("project_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    version_number = Column(Integer, nullable=False)
+    content = Column(Text, nullable=True)
+    title = Column(String(255), nullable=True)
+    edited_by_agent_id = Column(
+        Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
+    )
+    edited_by_user_id = Column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    edit_summary = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    document = relationship("ProjectDocument", back_populates="versions")
+    edited_by_agent = relationship("Agent", foreign_keys=[edited_by_agent_id])
+    edited_by_user = relationship("User", foreign_keys=[edited_by_user_id])
+
+    __table_args__ = (
+        Index("ix_document_versions_doc_num", "document_id", "version_number", unique=True),
+        Index("ix_document_versions_doc_time", "document_id", "created_at"),
     )

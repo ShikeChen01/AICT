@@ -699,51 +699,75 @@
   },
   {
     "name": "write_architecture_doc",
-    "description": "Write or update a project architecture document (manager only).",
+    "description": "Write or update a project architecture document. Pass doc_type AND the full content together in one call.",
     "detailed_description": [
-      "Writes a Markdown architecture document to the project's document store.",
-      "Only the manager agent can call this tool. Users see documents read-only on",
-      "the Architecture page in the frontend; the page updates in real-time after each write.",
+      "Persists a Markdown architecture document for the project. Only the manager can call this.",
+      "Users see documents read-only on the Architecture page; it updates in real-time.",
       "",
-      "Call this after significant architectural decisions, ADR discussions, or when",
-      "the source-of-truth description needs updating.",
+      "IMPORTANT: you MUST pass doc_type and content together in the same call.",
+      "Do NOT call this tool without content — the content field is required and cannot be empty.",
+      "Write the complete Markdown text in one call; each call is a full replace.",
       "",
-      "doc_type (required) — identifies which document to write. Well-known values:",
-      "  'architecture_source_of_truth' — the canonical description of the system",
-      "  'arc42_lite'                   — arc42-lite template (12 sections, condensed)",
-      "  'c4_diagrams'                  — C4 model in Mermaid or PlantUML fenced blocks",
-      "  'adr/<slug>'                   — an ADR, e.g. 'adr/001-use-postgresql'",
+      "Parameters:",
+      "  doc_type (required, string) — one of:",
+      "    'architecture_source_of_truth'  canonical system description",
+      "    'arc42_lite'                    arc42-lite template",
+      "    'c4_diagrams'                   C4 diagrams (Mermaid fenced blocks)",
+      "    'adr/<slug>'                    individual ADR, e.g. 'adr/001-use-postgresql'",
+      "  content (required, string) — the full Markdown document text",
+      "  title   (optional, string) — display title shown as the tab label",
       "",
-      "content (required) — full Markdown content. Write the complete document each",
-      "call; this is a full replace, not a patch.",
-      "",
-      "title (optional) — human-readable title displayed in the frontend tab.",
-      "",
-      "Example:",
-      "  write_architecture_doc(",
-      "    doc_type='adr/002-event-sourcing',",
-      "    title='ADR 002 — Event Sourcing',",
-      "    content='# ADR 002 — Event Sourcing\\n\\n## Status\\nAccepted\\n...'",
-      "  )"
+      "When to call this:",
+      "  - After agreeing on an architectural decision (write an ADR)",
+      "  - After discussing system design (update architecture_source_of_truth)",
+      "  - When asked by the user to document something"
     ],
     "input_schema": {
       "type": "object",
       "properties": {
         "doc_type": {
           "type": "string",
-          "description": "Document type. Well-known: 'architecture_source_of_truth', 'arc42_lite', 'c4_diagrams', 'adr/<slug>'."
+          "description": "Which document to write. Values: 'architecture_source_of_truth', 'arc42_lite', 'c4_diagrams', or 'adr/<slug>' (e.g. 'adr/001-use-postgresql')."
         },
         "content": {
           "type": "string",
-          "description": "Full Markdown content. Replaces any previous content for this doc_type."
+          "description": "The complete Markdown content for the document. Must not be empty. This is a full replace — write the entire document text here."
         },
         "title": {
           "type": "string",
-          "description": "Optional human-readable title shown in the frontend tab."
+          "description": "Optional display title for the document tab in the frontend."
         }
       },
       "required": ["doc_type", "content"]
     },
     "allowed_roles": ["manager"]
+  },
+  {
+    "name": "thinking_done",
+    "description": "Signal that the thinking phase is complete and transition to execution. Call this only after saving your full plan to memory via update_memory.",
+    "detailed_description": [
+      "Ends the thinking phase and transitions the agent to the execution phase.",
+      "Before calling this tool:",
+      "  1. You must have fully analyzed the task.",
+      "  2. You must have written your complete step-by-step plan to memory using update_memory.",
+      "  3. The plan in memory should be concrete enough to execute without further planning.",
+      "",
+      "After calling thinking_done, you will be in execution mode with your full tool set available.",
+      "The summary parameter is a short confirmation of what you saved to memory.",
+      "",
+      "This tool is only available during the thinking phase (when thinking_enabled is ON).",
+      "Do NOT call this tool in normal (non-thinking) sessions."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "Brief summary of the plan you saved to memory (1-3 sentences). Confirms what you are about to execute."
+        }
+      },
+      "required": ["summary"]
+    },
+    "allowed_roles": ["*"]
   }
 ]

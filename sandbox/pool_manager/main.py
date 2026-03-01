@@ -136,6 +136,7 @@ async def health(_: None = Depends(require_master_token)) -> JSONResponse:
         "total": len(sandboxes),
         "idle": sum(1 for s in sandboxes if s.status == "idle"),
         "assigned": sum(1 for s in sandboxes if s.status == "assigned"),
+        "resetting": sum(1 for s in sandboxes if s.status == "resetting"),
         "unhealthy": sum(1 for s in sandboxes if s.status == "unhealthy"),
         "max_containers": config.MAX_CONTAINERS,
         "can_create": _pool.active_count() < config.MAX_CONTAINERS,
@@ -238,6 +239,60 @@ async def assign_sandbox(
     return JSONResponse({"ok": True, "sandbox_id": sandbox_id, "agent_id": body.agent_id})
 
 
+# ── Background reset helper ───────────────────────────────────────────────────
+
+
+async def _background_reset_and_idle(sandbox_id: str) -> None:
+    """
+    Destroy and recreate the container for *sandbox_id*, wait until it is
+    ready, then mark the slot as "idle".
+
+    Called as a fire-and-forget asyncio task by both ``session_end`` and
+    ``release_sandbox``.  The sandbox is already in "resetting" state when
+    this coroutine runs, so it will not be handed out by ``session_start``
+    until the reset finishes.  If the reset fails the slot is marked
+    "unhealthy" so the health monitor can clean it up.
+    """
+    s = _pool.get(sandbox_id)
+    if not s:
+        return
+
+    loop = asyncio.get_event_loop()
+    try:
+        new_container_id = await loop.run_in_executor(
+            None,
+            _docker.reset_container,
+            sandbox_id,
+            s.host_port,
+            s.auth_token,
+            s.volume_name,
+        )
+        s.container_id = new_container_id
+        _pool.update(s)
+
+        # Wait for the freshly created container to accept requests before
+        # advertising it as idle.  Without this, the next session_start that
+        # picks up the idle slot would hand a still-booting container to the
+        # agent (the original "sandbox not ready" race condition).
+        ready = await _wait_for_container_ready(s.host_port, s.auth_token, timeout=30.0)
+        if not ready:
+            print(
+                f"[pool-manager] WARNING: sandbox {sandbox_id} did not become ready "
+                "after reset in 30s — marking unhealthy"
+            )
+            s.status = "unhealthy"
+            _pool.update(s)
+            return
+
+        _pool.release(sandbox_id)  # status → "idle"
+    except Exception as exc:
+        print(f"[pool-manager] Background reset failed for {sandbox_id}: {exc} — marking unhealthy")
+        s2 = _pool.get(sandbox_id)
+        if s2:
+            s2.status = "unhealthy"
+            _pool.update(s2)
+
+
 # ── Release sandbox ───────────────────────────────────────────────────────────
 
 
@@ -250,27 +305,13 @@ async def release_sandbox(
     if not s:
         raise HTTPException(status_code=404, detail="Sandbox not found")
 
-    # Reset the container filesystem (keeps the volume)
-    loop = asyncio.get_event_loop()
-    try:
-        new_container_id = await loop.run_in_executor(
-            None,
-            _docker.reset_container,
-            sandbox_id,
-            s.host_port,
-            s.auth_token,
-            s.volume_name,
-        )
-        s.container_id = new_container_id
-        _pool.release(sandbox_id)
-        _pool.update(s)
-    except Exception as exc:
-        # If reset fails, mark unhealthy instead of crashing
-        s.status = "unhealthy"
-        _pool.update(s)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    # Mark as "resetting" immediately (removes agent assignment, stays in
+    # active_count so the slot is still guarded) and kick off the Docker
+    # destroy+recreate in the background so this HTTP call returns fast.
+    _pool.mark_resetting(sandbox_id)
+    asyncio.create_task(_background_reset_and_idle(sandbox_id))
 
-    return JSONResponse({"ok": True, "sandbox_id": sandbox_id, "status": "idle"})
+    return JSONResponse({"ok": True, "sandbox_id": sandbox_id, "status": "resetting"})
 
 
 # ── Destroy sandbox ───────────────────────────────────────────────────────────
@@ -333,6 +374,7 @@ async def pool_debug(_: None = Depends(require_master_token)) -> JSONResponse:
         "container_count": len(sandboxes),
         "assigned": sum(1 for s in sandboxes if s.status == "assigned"),
         "idle": sum(1 for s in sandboxes if s.status == "idle"),
+        "resetting": sum(1 for s in sandboxes if s.status == "resetting"),
         "unhealthy": sum(1 for s in sandboxes if s.status == "unhealthy"),
         "ports_used": len([s for s in sandboxes]),
         "port_range": f"{config.PORT_RANGE_START}-{config.PORT_RANGE_END}",
@@ -448,27 +490,23 @@ async def session_end(
     body: SessionEndRequest,
     _: None = Depends(require_master_token),
 ) -> JSONResponse:
-    """Release the sandbox assigned to an agent and reset it for reuse."""
+    """
+    Release the sandbox assigned to an agent and schedule a reset for reuse.
+
+    The Docker destroy+recreate is intentionally non-blocking: we immediately
+    transition the slot to "resetting" (so it is no longer assigned to the
+    agent and cannot be handed out as idle) and return success to the caller.
+    The background task completes the reset and marks the slot as "idle" once
+    the new container is healthy.  This prevents the previous bug where a
+    slow Docker reset caused the 30 s HTTP timeout on the backend client,
+    leaving the slot permanently stuck in "assigned" state.
+    """
     s = _pool.get_by_agent(body.agent_id)
     if not s:
         return JSONResponse({"ok": True, "message": "No sandbox assigned to this agent"})
 
-    loop = asyncio.get_event_loop()
-    try:
-        new_container_id = await loop.run_in_executor(
-            None,
-            _docker.reset_container,
-            s.sandbox_id,
-            s.host_port,
-            s.auth_token,
-            s.volume_name,
-        )
-        s.container_id = new_container_id
-        _pool.release(s.sandbox_id)
-        _pool.update(s)
-    except Exception as exc:
-        s.status = "unhealthy"
-        _pool.update(s)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    sandbox_id = s.sandbox_id
+    _pool.mark_resetting(sandbox_id)
+    asyncio.create_task(_background_reset_and_idle(sandbox_id))
 
-    return JSONResponse({"ok": True, "sandbox_id": s.sandbox_id})
+    return JSONResponse({"ok": True, "sandbox_id": sandbox_id})

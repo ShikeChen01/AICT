@@ -7,6 +7,7 @@ import asyncio
 import httpx
 
 from config import (
+    ASSIGNED_TTL_SECONDS,
     HEALTH_CHECK_FAIL_THRESHOLD,
     HEALTH_CHECK_INTERVAL_SECONDS,
     IDLE_TTL_SECONDS,
@@ -44,10 +45,29 @@ class HealthMonitor:
             await self._check_one(s)
 
     async def _check_one(self, s: SandboxState) -> None:
+        # "resetting" slots are between destroy and recreate — Docker doesn't
+        # have a running container to ping yet.  Skip and let the background
+        # reset task in main.py drive the transition to "idle".
+        if s.status == "resetting":
+            return
+
         # TTL-based idle cleanup
         if s.status == "idle" and s.idle_seconds() > IDLE_TTL_SECONDS:
             print(f"[health-monitor] Evicting idle sandbox {s.sandbox_id} (TTL exceeded)")
             await self._evict(s)
+            return
+
+        # Zombie assigned-sandbox guard.  If an agent's session_end call
+        # timed out or the backend crashed without calling session_end, the
+        # slot stays "assigned" even though no live agent holds it.  Release
+        # it back to the reset pipeline so the slot becomes available again.
+        if s.status == "assigned" and s.idle_seconds() > ASSIGNED_TTL_SECONDS:
+            print(
+                f"[health-monitor] Releasing zombie assigned sandbox {s.sandbox_id} "
+                f"(idle for {s.idle_seconds():.0f}s > ASSIGNED_TTL={ASSIGNED_TTL_SECONDS}s)"
+            )
+            self._pool.mark_resetting(s.sandbox_id)
+            asyncio.create_task(self._reset_and_idle(s))
             return
 
         # Health ping
@@ -78,7 +98,55 @@ class HealthMonitor:
         except Exception:
             return False
 
+    async def _reset_and_idle(self, s: SandboxState) -> None:
+        """Reset a sandbox container and mark it idle once the new instance is ready."""
+        sandbox_id = s.sandbox_id
+        print(f"[health-monitor] Resetting sandbox {sandbox_id} → idle …")
+        loop = asyncio.get_event_loop()
+        try:
+            new_id = await loop.run_in_executor(
+                None,
+                self._docker.reset_container,
+                sandbox_id,
+                s.host_port,
+                s.auth_token,
+                s.volume_name,
+            )
+            # Re-fetch in case the object was updated while the executor ran.
+            current = self._pool.get(sandbox_id)
+            if current:
+                current.container_id = new_id
+                self._pool.update(current)
+
+            # Wait for the new container to be reachable before advertising it.
+            url = f"http://127.0.0.1:{s.host_port}/health"
+            headers = {"Authorization": f"Bearer {s.auth_token}"}
+            deadline = asyncio.get_event_loop().time() + 30.0
+            ready = False
+            while asyncio.get_event_loop().time() < deadline:
+                try:
+                    async with httpx.AsyncClient(timeout=2.0) as client:
+                        resp = await client.get(url, headers=headers)
+                        if resp.status_code == 200:
+                            ready = True
+                            break
+                except Exception:
+                    pass
+                await asyncio.sleep(1.0)
+
+            if not ready:
+                print(f"[health-monitor] Sandbox {sandbox_id} not ready after reset — evicting")
+                await self._evict(self._pool.get(sandbox_id) or s)
+                return
+
+            self._pool.release(sandbox_id)
+            print(f"[health-monitor] Sandbox {sandbox_id} reset complete → idle")
+        except Exception as exc:
+            print(f"[health-monitor] Reset failed for {sandbox_id}: {exc} — evicting")
+            await self._evict(self._pool.get(sandbox_id) or s)
+
     async def _restart(self, s: SandboxState) -> None:
+        """Restart an unhealthy container, keeping its assignment if it had one."""
         print(f"[health-monitor] Restarting container for sandbox {s.sandbox_id}...")
         loop = asyncio.get_event_loop()
         try:
@@ -92,6 +160,8 @@ class HealthMonitor:
             )
             s.container_id = new_id
             s.health_failures = 0
+            # Preserve "assigned" only when an agent still holds the sandbox.
+            # If assigned_agent_id was cleared (zombie), default to idle.
             s.status = "assigned" if s.assigned_agent_id else "idle"
             self._pool.update(s)
             print(f"[health-monitor] Sandbox {s.sandbox_id} restarted → {new_id[:12]}")

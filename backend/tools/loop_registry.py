@@ -62,6 +62,8 @@ __all__ = [
     "parse_tool_uuid",
     "get_tool_defs_for_role",
     "get_handlers_for_role",
+    "get_thinking_phase_tool_defs",
+    "get_thinking_phase_handlers",
     "validate_tool_input",
 ]
 
@@ -101,6 +103,7 @@ _TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
     "describe_tool": None,  # assigned below after _TOOLS is built
     "get_project_metadata": run_get_project_metadata,
     "write_architecture_doc": run_write_architecture_doc,
+    "thinking_done": None,  # stage-transition tool — handled directly by loop.py, not dispatched
 }
 
 
@@ -227,10 +230,43 @@ def validate_tool_input(tool_name: str, tool_input: dict) -> None:
 def get_handlers_for_role(role: str) -> dict[str, ToolExecutor]:
     """Return a name→executor map for all dispatchable tools for the given role.
 
-    'end' is excluded because the loop handles it separately before dispatch.
+    'end' and 'thinking_done' are excluded — the loop handles them separately.
     """
+    excluded = {"end", "thinking_done"}
     return {
         t.name: t.execute
         for t in _TOOLS
-        if t.name != "end" and t.execute is not None and _role_has_tool(t, role)
+        if t.name not in excluded and t.execute is not None and _role_has_tool(t, role)
+    }
+
+
+# Tools available during the thinking phase (Stage 1)
+_THINKING_PHASE_TOOL_NAMES = frozenset({
+    "update_memory",
+    "read_history",
+    "list_sessions",
+    "thinking_done",
+})
+
+
+def get_thinking_phase_tool_defs(role: str) -> list[dict]:
+    """Return tool defs for the thinking phase (restricted tool set).
+
+    Only planning tools + thinking_done are available during Stage 1.
+    """
+    return [
+        {"name": t.name, "description": t.description, "input_schema": t.input_schema}
+        for t in _TOOLS
+        if t.name in _THINKING_PHASE_TOOL_NAMES and _role_has_tool(t, role)
+    ]
+
+
+def get_thinking_phase_handlers() -> dict[str, ToolExecutor]:
+    """Return executor map for thinking phase tools (excluding thinking_done)."""
+    return {
+        t.name: t.execute
+        for t in _TOOLS
+        if t.name in _THINKING_PHASE_TOOL_NAMES
+        and t.name != "thinking_done"
+        and t.execute is not None
     }

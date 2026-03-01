@@ -26,6 +26,17 @@ import type {
   UserProfile,
   WSEvent,
   APIError,
+  ProjectDocument,
+  ProjectDocumentSummary,
+  DocumentVersion,
+  DocumentVersionSummary,
+  DocumentEditRequest,
+  AgentTemplate,
+  CreateAgentTemplate,
+  UpdateAgentTemplate,
+  PromptBlockConfig,
+  PromptBlockConfigItem,
+  UpdateAgentRequest,
 } from '../types';
 
 // ─── Configuration ───────────────────────────────────────────────────
@@ -440,9 +451,13 @@ export const deleteProject = deleteRepository;
 
 export async function getAgentContext(agentId: string): Promise<{
   id: string;
+  project_id: string;
+  template_id: string | null;
   role: string;
   display_name: string;
   model: string;
+  provider: string | null;
+  thinking_enabled: boolean;
   status: string;
   system_prompt: string | null;
   available_tools: { name: string; description: string | null }[];
@@ -451,6 +466,87 @@ export async function getAgentContext(agentId: string): Promise<{
   sandbox_active: boolean;
 }> {
   return request('GET', `/agents/${agentId}/context`);
+}
+
+export async function updateAgent(agentId: string, data: UpdateAgentRequest): Promise<Agent> {
+  return request<Agent>('PATCH', `/agents/${agentId}`, data);
+}
+
+// ─── Agent Templates ─────────────────────────────────────────────────
+
+export async function listTemplates(projectId: string): Promise<AgentTemplate[]> {
+  return request<AgentTemplate[]>('GET', `/templates/projects/${projectId}/templates`);
+}
+
+export async function createTemplate(projectId: string, data: CreateAgentTemplate): Promise<AgentTemplate> {
+  return request<AgentTemplate>('POST', `/templates/projects/${projectId}/templates`, data);
+}
+
+export async function updateTemplate(templateId: string, data: UpdateAgentTemplate): Promise<AgentTemplate> {
+  return request<AgentTemplate>('PATCH', `/templates/templates/${templateId}`, data);
+}
+
+export async function deleteTemplate(templateId: string): Promise<void> {
+  return request<void>('DELETE', `/templates/templates/${templateId}`);
+}
+
+// ─── Prompt Blocks ────────────────────────────────────────────────────
+
+export async function listAgentBlocks(agentId: string): Promise<PromptBlockConfig[]> {
+  return request<PromptBlockConfig[]>('GET', `/prompt-blocks/agents/${agentId}/blocks`);
+}
+
+export async function saveAgentBlocks(agentId: string, blocks: PromptBlockConfigItem[]): Promise<PromptBlockConfig[]> {
+  return request<PromptBlockConfig[]>('PUT', `/prompt-blocks/agents/${agentId}/blocks`, { blocks });
+}
+
+export async function resetAgentBlock(agentId: string, blockId: string): Promise<PromptBlockConfig> {
+  return request<PromptBlockConfig>('POST', `/prompt-blocks/agents/${agentId}/blocks/${blockId}/reset`);
+}
+
+export async function listTemplateBlocks(templateId: string): Promise<PromptBlockConfig[]> {
+  return request<PromptBlockConfig[]>('GET', `/prompt-blocks/templates/${templateId}/blocks`);
+}
+
+export async function saveTemplateBlocks(templateId: string, blocks: PromptBlockConfigItem[]): Promise<PromptBlockConfig[]> {
+  return request<PromptBlockConfig[]>('PUT', `/prompt-blocks/templates/${templateId}/blocks`, { blocks });
+}
+
+export async function getDefaultBlocks(baseRole: string): Promise<PromptBlockConfigItem[]> {
+  return request<PromptBlockConfigItem[]>('GET', `/prompt-blocks/defaults/${baseRole}`);
+}
+
+// ─── Document Versioning ─────────────────────────────────────────────
+
+export async function editDocument(
+  repositoryId: string,
+  docType: string,
+  data: DocumentEditRequest,
+): Promise<ProjectDocument> {
+  return request<ProjectDocument>('PUT', `/repositories/${repositoryId}/documents/${docType}`, data);
+}
+
+export async function listDocumentVersions(
+  repositoryId: string,
+  docType: string,
+): Promise<DocumentVersionSummary[]> {
+  return request<DocumentVersionSummary[]>('GET', `/repositories/${repositoryId}/documents/${docType}/versions`);
+}
+
+export async function getDocumentVersion(
+  repositoryId: string,
+  docType: string,
+  versionNumber: number,
+): Promise<DocumentVersion> {
+  return request<DocumentVersion>('GET', `/repositories/${repositoryId}/documents/${docType}/versions/${versionNumber}`);
+}
+
+export async function revertDocument(
+  repositoryId: string,
+  docType: string,
+  versionNumber: number,
+): Promise<ProjectDocument> {
+  return request<ProjectDocument>('POST', `/repositories/${repositoryId}/documents/${docType}/revert`, { version_number: versionNumber });
 }
 
 // ─── WebSocket Client ────────────────────────────────────────────────
@@ -559,9 +655,31 @@ export function createWebSocketClient(projectId: string, channels: string = 'all
 // Export error class
 export { APIClientError };
 
-// ─── Architecture Documents (Phase 10) ───────────────────────────────
+// ─── Test Login (dev only) ────────────────────────────────────────────
 
-import type { ProjectDocument, ProjectDocumentSummary } from '../types';
+/** POST /testfads89213xlogin — returns the shared api_token on success. */
+export async function testLogin(email: string, password: string): Promise<{ token: string }> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 10_000);
+  let response: Response;
+  try {
+    response = await fetch('/testfads89213xlogin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({})) as { detail?: string };
+    throw new Error(data.detail ?? `HTTP ${response.status}`);
+  }
+  return response.json() as Promise<{ token: string }>;
+}
+
+// ─── Architecture Documents (Phase 10) ───────────────────────────────
 
 export async function listDocuments(repositoryId: string): Promise<ProjectDocumentSummary[]> {
   return request<ProjectDocumentSummary[]>('GET', `/repositories/${repositoryId}/documents`);

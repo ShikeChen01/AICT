@@ -1,4 +1,4 @@
-"""Pydantic schemas for project_documents (read-only for users)."""
+"""Pydantic schemas for project_documents."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ class ProjectDocumentResponse(BaseModel):
     title: str | None
     content: str | None
     updated_by_agent_id: UUID | None
+    updated_by_user_id: UUID | None = None
+    current_version: int = 1
     created_at: datetime
     updated_at: datetime
 
@@ -30,4 +32,6 @@ class ProjectDocumentSummaryResponse(BaseModel):
     doc_type: str
     title: str | None
     updated_by_agent_id: UUID | None
+    updated_by_user_id: UUID | None = None
+    current_version: int = 1
     updated_at: datetime

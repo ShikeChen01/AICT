@@ -4,10 +4,12 @@ Agent service — manages agent lifecycle and engineer spawning.
 - Enforces MAX_ENGINEERS limit when spawning engineers
 - Ensures Manager and CTO exist for new projects
 - Coordinates with E2B/orchestrator for sandbox lifecycle
+- Uses the template system: agents are created from AgentTemplates (write-through)
 """
 
 from __future__ import annotations
 
+import uuid as _uuid
 from uuid import UUID
 
 from sqlalchemy import func, select, update
@@ -15,9 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.core.exceptions import MaxEngineersReached, ProjectNotFoundError
-from backend.db.models import Agent, Repository, Task, VALID_ROLES
+from backend.db.models import Agent, AgentTemplate, Repository, Task, VALID_ROLES
+from backend.db.repositories.agent_templates import AgentTemplateRepository, PromptBlockConfigRepository
 from backend.db.repositories.project_settings import ProjectSettingsRepository
-from backend.llm.model_resolver import normalize_seniority, resolve_model
+from backend.llm.model_resolver import default_model_for_role, infer_provider
+
+_ROLE_TO_BASE_ROLE = {"manager": "manager", "cto": "cto", "engineer": "worker"}
 
 
 class AgentService:
@@ -57,17 +62,56 @@ class AgentService:
         )
         return result.scalar_one_or_none()
 
+    async def _create_agent_from_template(
+        self,
+        project_id: UUID,
+        role: str,
+        display_name: str,
+        template: AgentTemplate,
+        *,
+        sandbox_persist: bool = False,
+    ) -> Agent:
+        """Create an agent, copying model/provider/thinking_enabled from template.
+
+        Also copies prompt block configs from template to agent level.
+        """
+        agent = Agent(
+            id=_uuid.uuid4(),
+            project_id=project_id,
+            template_id=template.id,
+            role=role,
+            display_name=display_name,
+            tier=None,  # deprecated; template.name differentiates agent types
+            model=template.model,
+            provider=template.provider or infer_provider(template.model),
+            thinking_enabled=template.thinking_enabled,
+            status="sleeping",
+            sandbox_persist=sandbox_persist,
+            current_task_id=None,
+        )
+        self.session.add(agent)
+        await self.session.flush()
+        await self.session.refresh(agent)
+
+        # Copy template block rows to agent-level block rows
+        block_repo = PromptBlockConfigRepository(self.session)
+        await block_repo.copy_template_blocks_to_agent(template.id, agent.id)
+
+        return agent
+
     async def spawn_engineer(
         self,
         project_id: UUID,
         *,
         display_name: str | None = None,
+        template_id: UUID | None = None,
         seniority: str | None = None,
         module_path: str | None = None,
     ) -> Agent:
-        """
-        Create a new engineer agent for the project.
+        """Create a new engineer agent for the project.
 
+        If template_id is provided, uses that template's model/provider/thinking.
+        Otherwise uses the project's default Engineer template (system default).
         Raises MaxEngineersReached if the project already has max_engineers.
         """
         count = await self.count_by_role(project_id, "engineer")
@@ -81,38 +125,42 @@ class AgentService:
         if count >= limit:
             raise MaxEngineersReached(limit)
 
-        # Compute display name (Engineer-1, Engineer-2, ...)
         if display_name is None:
             display_name = f"Engineer-{count + 1}"
-        normalized_seniority = normalize_seniority(seniority)
-        project_model_overrides = (
-            dict(project_settings.model_overrides)
-            if project_settings and project_settings.model_overrides
-            else None
-        )
-        effective_model = resolve_model(
-            "engineer",
-            seniority=normalized_seniority,
-            project_model_overrides=project_model_overrides,
-        )
 
-        agent = Agent(
-            project_id=project_id,
-            role="engineer",
-            display_name=display_name,
-            tier=normalized_seniority,
-            model=effective_model,
-            status="sleeping",
-            sandbox_persist=False,
-            current_task_id=None,
-        )
-        if module_path:
-            # Store module_path on agent if needed (could be on Task instead)
-            pass  # Agent model doesn't have module_path; tasks do
-        self.session.add(agent)
-        await self.session.flush()
-        await self.session.refresh(agent)
-        return agent
+        template_repo = AgentTemplateRepository(self.session)
+
+        if template_id:
+            result = await self.session.execute(
+                select(AgentTemplate).where(AgentTemplate.id == template_id)
+            )
+            template = result.scalar_one_or_none()
+        else:
+            template = await template_repo.get_by_project_and_role(project_id, "worker")
+
+        if template:
+            return await self._create_agent_from_template(
+                project_id, "engineer", display_name, template
+            )
+        else:
+            # Fallback: create template-less agent with defaults (pre-migration or test env)
+            model = default_model_for_role("engineer")
+            agent = Agent(
+                id=_uuid.uuid4(),
+                project_id=project_id,
+                role="engineer",
+                display_name=display_name,
+                model=model,
+                provider=infer_provider(model),
+                thinking_enabled=False,
+                status="sleeping",
+                sandbox_persist=False,
+                current_task_id=None,
+            )
+            self.session.add(agent)
+            await self.session.flush()
+            await self.session.refresh(agent)
+            return agent
 
     async def ensure_project_agents(
         self,
@@ -121,8 +169,7 @@ class AgentService:
         manager_model: str | None = None,
         cto_model: str | None = None,
     ) -> tuple[Agent, Agent]:
-        """
-        Ensure manager and CTO agents exist for a project. Create them if missing.
+        """Ensure manager and CTO agents exist for a project. Create them if missing.
 
         Returns (manager, cto).
         """
@@ -135,62 +182,33 @@ class AgentService:
         existing = {a.role: a for a in result.scalars().all()}
         manager = existing.get("manager")
         cto = existing.get("cto")
-        ps_repo = ProjectSettingsRepository(self.session)
-        project_settings_for_model = await ps_repo.get_by_project(project.id)
-        proj_model_overrides = (
-            dict(project_settings_for_model.model_overrides)
-            if project_settings_for_model and project_settings_for_model.model_overrides
-            else None
-        )
-        manager_model_resolved = resolve_model(
-            "manager",
-            model_override=manager_model,
-            project_model_overrides=proj_model_overrides,
-        )
-        cto_model_resolved = resolve_model(
-            "cto",
-            model_override=cto_model,
-            project_model_overrides=proj_model_overrides,
-        )
+
+        # Ensure system default templates exist
+        template_repo = AgentTemplateRepository(self.session)
+        templates = await template_repo.ensure_system_defaults(project.id)
 
         if not manager:
-            manager = Agent(
-                project_id=project.id,
-                role="manager",
-                display_name="GM",
-                model=manager_model_resolved,
-                status="sleeping",
-                sandbox_persist=True,
+            mgr_template = templates["manager"]
+            if manager_model:
+                mgr_template.model = manager_model
+                mgr_template.provider = infer_provider(manager_model)
+            manager = await self._create_agent_from_template(
+                project.id, "manager", "GM", mgr_template, sandbox_persist=True
             )
-            self.session.add(manager)
-            await self.session.flush()
-            await self.session.refresh(manager)
 
         if not cto:
-            cto = Agent(
-                project_id=project.id,
-                role="cto",
-                display_name="CTO",
-                model=cto_model_resolved,
-                status="sleeping",
-                sandbox_persist=True,
+            cto_template = templates["cto"]
+            if cto_model:
+                cto_template.model = cto_model
+                cto_template.provider = infer_provider(cto_model)
+            cto = await self._create_agent_from_template(
+                project.id, "cto", "CTO", cto_template, sandbox_persist=True
             )
-            self.session.add(cto)
-            await self.session.flush()
-            await self.session.refresh(cto)
 
         return manager, cto
 
     async def remove_agent(self, agent_id: UUID, caller_project_id: UUID) -> Agent:
-        """Permanently remove an engineer agent from the project.
-
-        Validates the target is an engineer in the same project, resets any
-        active task assignments back to backlog, nulls the circular current_task_id
-        FK, then deletes the agent (cascades sessions and messages automatically).
-
-        Returns the removed agent's data before deletion.
-        Raises ValueError on any validation failure.
-        """
+        """Permanently remove an engineer agent from the project."""
         result = await self.session.execute(select(Agent).where(Agent.id == agent_id))
         agent = result.scalar_one_or_none()
 
@@ -222,10 +240,7 @@ class AgentService:
         self,
         project_id: UUID,
     ) -> tuple[Agent, Agent]:
-        """
-        Get manager and CTO for a project, creating them if the project exists but
-        has no agents.
-        """
+        """Get manager and CTO for a project, creating them if the project exists but has no agents."""
         result = await self.session.execute(
             select(Repository).where(Repository.id == project_id)
         )
