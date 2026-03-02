@@ -29,6 +29,7 @@ const STAGE_DESC: Record<string, string> = {
 interface ThinkingStagesGroupProps {
   blocks: PromptBlockConfig[];
   thinkingEnabled: boolean;
+  mutationsDisabled?: boolean;
   onEdit: (blockId: string) => void;
   onToggle: (blockId: string) => void;
 }
@@ -36,6 +37,7 @@ interface ThinkingStagesGroupProps {
 export function ThinkingStagesGroup({
   blocks,
   thinkingEnabled,
+  mutationsDisabled = false,
   onEdit,
   onToggle,
 }: ThinkingStagesGroupProps) {
@@ -113,8 +115,9 @@ export function ThinkingStagesGroup({
                 >
                   <button
                     type="button"
-                    className="p-1 rounded hover:bg-violet-100 text-violet-600 transition-colors"
+                    className="p-1 rounded hover:bg-violet-100 text-violet-600 transition-colors disabled:opacity-50"
                     title={block.enabled ? 'Disable' : 'Enable'}
+                    disabled={mutationsDisabled}
                     onClick={() => onToggle(block.id)}
                   >
                     {block.enabled ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}

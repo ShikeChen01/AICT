@@ -93,6 +93,29 @@
     ]
   },
   {
+    "name": "compact_history",
+    "description": "Remove older messages from context after saving important context to memory.",
+    "detailed_description": [
+      "Removes past session messages and older current session messages from the active",
+      "context window. Call this AFTER update_memory to ensure important context is preserved.",
+      "This tool is typically called in response to a context pressure warning.",
+      "Messages are not deleted — they remain accessible via read_history.",
+      "Use keep_recent to control how many recent message pairs to retain."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "keep_recent": {
+          "type": "integer",
+          "description": "Number of recent current-session messages to keep (default: 20)"
+        }
+      }
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
     "name": "read_history",
     "description": "Read message history. Use session_id to query a specific past session.",
     "detailed_description": [

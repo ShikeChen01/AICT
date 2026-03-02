@@ -19,6 +19,7 @@ from backend.config import settings
 from backend.core.exceptions import MaxEngineersReached, ProjectNotFoundError
 from backend.db.models import Agent, AgentTemplate, Repository, Task, VALID_ROLES
 from backend.db.repositories.agent_templates import AgentTemplateRepository, PromptBlockConfigRepository
+from backend.db.repositories.tool_configs import ToolConfigRepository
 from backend.db.repositories.project_settings import ProjectSettingsRepository
 from backend.llm.model_resolver import default_model_for_role, infer_provider
 
@@ -105,6 +106,11 @@ class AgentService:
         # Copy template block rows to agent-level block rows
         block_repo = PromptBlockConfigRepository(self.session)
         await block_repo.copy_template_blocks_to_agent(template.id, agent.id)
+
+        # Seed tool configs for this agent from tool_descriptions.json
+        base_role = _ROLE_TO_BASE_ROLE.get(role, "worker")
+        tool_repo = ToolConfigRepository(self.session)
+        await tool_repo.seed_for_agent(agent.id, base_role)
 
         return agent
 

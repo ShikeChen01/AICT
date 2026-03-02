@@ -18,6 +18,7 @@ from backend.db.models import Agent, Repository, Task, User
 from backend.db.repositories.agent_templates import PromptBlockConfigRepository
 from backend.db.session import get_db
 from backend.llm.model_resolver import infer_provider
+from backend.llm.model_catalog import is_claude_model
 from backend.schemas.agent import (
     AgentContextResponse,
     AgentResponse,
@@ -347,6 +348,27 @@ async def update_agent(
         agent.thinking_enabled = body.thinking_enabled
     if body.display_name is not None:
         agent.display_name = body.display_name
+    if body.token_allocations is not None:
+        # Empty dict resets to system defaults (NULL in DB)
+        alloc = body.token_allocations if body.token_allocations else None
+        if alloc and "max_images_per_turn" in alloc:
+            # max_images_per_turn is only meaningful for Claude; validate range
+            resolved_model = (body.model or agent.model or "")
+            if not is_claude_model(resolved_model):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "max_images_per_turn is only configurable for Claude models. "
+                        f"Model '{resolved_model}' uses the system default of 10 images."
+                    ),
+                )
+            val = alloc["max_images_per_turn"]
+            if not isinstance(val, int) or not (1 <= val <= 20):
+                raise HTTPException(
+                    status_code=422,
+                    detail="max_images_per_turn must be an integer between 1 and 20.",
+                )
+        agent.token_allocations = alloc
 
     await db.commit()
     await db.refresh(agent)

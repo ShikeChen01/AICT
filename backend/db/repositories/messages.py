@@ -144,6 +144,11 @@ class ChannelMessageRepository(BaseRepository[ChannelMessage]):
         return dict(result.all())
 
 
+# Token estimation constants (word-based, no tokenizer dependency)
+_WORDS_PER_TOKEN = 0.75   # 1 token ≈ 0.75 words (conservative estimate)
+_FILL_TARGET = 0.95       # fill to 95% of budget, 5% margin for estimation error
+
+
 class AgentMessageRepository(BaseRepository[AgentMessage]):
     def __init__(self, session: AsyncSession):
         super().__init__(AgentMessage, session)
@@ -200,6 +205,81 @@ class AgentMessageRepository(BaseRepository[AgentMessage]):
             .where(AgentMessage.session_id.in_(session_ids))
             .order_by(AgentMessage.created_at.asc())
             .limit(messages_per_session * n_sessions)
+        )
+        return list(result.scalars().all())
+
+    async def list_past_session_history(
+        self,
+        agent_id: UUID,
+        current_session_id: UUID,
+        budget_tokens: int,
+        n_sessions: int = 5,
+    ) -> list[AgentMessage]:
+        """Load conversation-only history from past sessions, fitted to budget.
+
+        - Filters out tool messages (role != 'tool') at the SQL level
+        - Uses word count as a token estimate (1 token ≈ 0.75 words)
+        - Fills to 95% of budget_tokens to leave a safety margin
+        - Returns results in chronological order (oldest first)
+        - Most recent sessions are prioritized when budget is tight
+        """
+        from backend.db.models import AgentSession
+
+        target_words = int(budget_tokens * _WORDS_PER_TOKEN * _FILL_TARGET)
+
+        # Get the last N session IDs (excluding current session)
+        session_result = await self.session.execute(
+            select(AgentSession.id)
+            .where(
+                AgentSession.agent_id == agent_id,
+                AgentSession.id != current_session_id,
+            )
+            .order_by(AgentSession.started_at.desc())
+            .limit(n_sessions)
+        )
+        session_ids = [row[0] for row in session_result.all()]
+        if not session_ids:
+            return []
+
+        # Query conversation messages only (no tool role), newest first
+        result = await self.session.execute(
+            select(AgentMessage)
+            .where(
+                AgentMessage.agent_id == agent_id,
+                AgentMessage.session_id.in_(session_ids),
+                AgentMessage.role != "tool",
+            )
+            .order_by(AgentMessage.created_at.desc())
+        )
+        messages = list(result.scalars().all())
+
+        # Accumulate newest-first until we approach the word budget
+        selected: list[AgentMessage] = []
+        accumulated_words = 0
+        for msg in messages:
+            msg_words = len((msg.content or "").split())
+            if accumulated_words + msg_words > target_words:
+                break
+            selected.append(msg)
+            accumulated_words += msg_words
+
+        # Reverse to chronological order
+        selected.reverse()
+        return selected
+
+    async def list_current_session(
+        self,
+        agent_id: UUID,
+        session_id: UUID,
+    ) -> list[AgentMessage]:
+        """Return all messages from the current session, in chronological order."""
+        result = await self.session.execute(
+            select(AgentMessage)
+            .where(
+                AgentMessage.agent_id == agent_id,
+                AgentMessage.session_id == session_id,
+            )
+            .order_by(AgentMessage.created_at.asc())
         )
         return list(result.scalars().all())
 

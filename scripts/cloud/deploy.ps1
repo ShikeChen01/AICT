@@ -85,6 +85,7 @@ $yamlLines = @(
     "PROVISION_REPOS_ON_STARTUP: 'true'"
     "CLONE_CODE_REPO_ON_STARTUP: 'true'"
     "MAX_ENGINEERS: '5'"
+    "SECRET_ENCRYPTION_KEY: '$($env:SECRET_ENCRYPTION_KEY)'"
 )
 [System.IO.File]::WriteAllLines($EnvFile, $yamlLines)
 

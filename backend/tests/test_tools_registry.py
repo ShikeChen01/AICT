@@ -22,6 +22,8 @@ def test_engineer_has_all_sandbox_tools() -> None:
         "sandbox_health",
         "sandbox_screenshot",
         "sandbox_mouse_move",
+        "sandbox_mouse_click",
+        "sandbox_mouse_scroll",
         "sandbox_mouse_location",
         "sandbox_keyboard_press",
         "sandbox_record_screen",

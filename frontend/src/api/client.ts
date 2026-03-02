@@ -19,6 +19,8 @@ import type {
   AgentInterruptResponse,
   AgentWakeRequest,
   AgentWakeResponse,
+  ProjectSecret,
+  ProjectSecretUpsert,
   ProjectSettings,
   ProjectSettingsUpdate,
   ProjectUsageResponse,
@@ -38,6 +40,9 @@ import type {
   PromptBlockConfigItem,
   UpdateAgentRequest,
   PromptMeta,
+  ToolConfig,
+  ToolConfigUpdateItem,
+  ToolConfigMeta,
 } from '../types';
 
 // ─── Configuration ───────────────────────────────────────────────────
@@ -308,6 +313,23 @@ export async function getProjectUsage(repositoryId: string): Promise<ProjectUsag
   return request<ProjectUsageResponse>('GET', `/repositories/${repositoryId}/usage`);
 }
 
+// ─── Project secrets ────────────────────────────────────────────────
+
+export async function listProjectSecrets(repositoryId: string): Promise<ProjectSecret[]> {
+  return request<ProjectSecret[]>(`GET`, `/repositories/${repositoryId}/secrets`);
+}
+
+export async function upsertProjectSecret(
+  repositoryId: string,
+  data: ProjectSecretUpsert
+): Promise<ProjectSecret> {
+  return request<ProjectSecret>(`POST`, `/repositories/${repositoryId}/secrets`, data);
+}
+
+export async function deleteProjectSecret(repositoryId: string, name: string): Promise<void> {
+  return request<void>(`DELETE`, `/repositories/${repositoryId}/secrets/${encodeURIComponent(name)}`);
+}
+
 // ─── Tasks ───────────────────────────────────────────────────────────
 
 export async function getTasks(projectId: string, status?: string): Promise<Task[]> {
@@ -517,8 +539,36 @@ export async function getDefaultBlocks(baseRole: string): Promise<PromptBlockCon
   return request<PromptBlockConfigItem[]>('GET', `/prompt-blocks/defaults/${baseRole}`);
 }
 
-export async function getPromptMeta(): Promise<PromptMeta> {
-  return request<PromptMeta>('GET', '/prompt-blocks/meta');
+export async function getPromptMeta(params?: { model?: string; agent_id?: string }): Promise<PromptMeta> {
+  const qs = new URLSearchParams();
+  if (params?.model) qs.set('model', params.model);
+  if (params?.agent_id) qs.set('agent_id', params.agent_id);
+  const query = qs.toString() ? `?${qs.toString()}` : '';
+  return request<PromptMeta>('GET', `/prompt-blocks/meta${query}`);
+}
+
+// ─── Tool Configs ─────────────────────────────────────────────────────
+
+export async function listAgentTools(agentId: string): Promise<ToolConfig[]> {
+  return request<ToolConfig[]>('GET', `/tool-configs/agents/${agentId}/tools`);
+}
+
+export async function saveAgentTools(
+  agentId: string,
+  tools: ToolConfigUpdateItem[],
+): Promise<ToolConfig[]> {
+  return request<ToolConfig[]>('PUT', `/tool-configs/agents/${agentId}/tools`, { tools });
+}
+
+export async function resetAgentTool(
+  agentId: string,
+  toolConfigId: string,
+): Promise<ToolConfig> {
+  return request<ToolConfig>('POST', `/tool-configs/agents/${agentId}/tools/${toolConfigId}/reset`);
+}
+
+export async function getToolConfigMeta(agentId: string): Promise<ToolConfigMeta> {
+  return request<ToolConfigMeta>('GET', `/tool-configs/meta?agent_id=${agentId}`);
 }
 
 // ─── Document Versioning ─────────────────────────────────────────────

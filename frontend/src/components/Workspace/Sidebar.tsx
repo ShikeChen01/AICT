@@ -1,5 +1,5 @@
 /**
- * Sidebar — project selector and navigation (workspace, kanban, workflow, artifacts, settings).
+ * Sidebar — project selector and navigation (workspace, kanban, prompt assembly, project architecture, settings).
  */
 
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
@@ -18,8 +18,8 @@ export function Sidebar({ activeProjectId, onProjectChange }: SidebarProps) {
 
   const workspacePath = projectId ? `/repository/${projectId}/workspace` : '/';
   const kanbanPath = projectId ? `/repository/${projectId}/kanban` : '/';
-  const workflowPath = projectId ? `/repository/${projectId}/workflow` : '/';
-  const artifactsPath = projectId ? `/repository/${projectId}/artifacts` : '/';
+  const promptAssemblyPath = projectId ? `/repository/${projectId}/prompt_assembly` : '/';
+  const projectArchitecturePath = projectId ? `/repository/${projectId}/artifacts` : '/';
   const settingsPath = projectId ? `/repository/${projectId}/settings` : '/';
   const backendLogsPath = projectId ? `/repository/${projectId}/backend-logs` : '/';
 
@@ -89,23 +89,23 @@ export function Sidebar({ activeProjectId, onProjectChange }: SidebarProps) {
             </NavLink>
           </li>
           <li>
-            <NavLink to={workflowPath} className={linkClass}>
+            <NavLink to={promptAssemblyPath} className={linkClass}>
               <span className="w-5 h-5 flex items-center justify-center">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
               </span>
-              Workflow
+              Prompt Assembly
             </NavLink>
           </li>
           <li>
-            <NavLink to={artifactsPath} className={linkClass}>
+            <NavLink to={projectArchitecturePath} className={linkClass}>
               <span className="w-5 h-5 flex items-center justify-center">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </span>
-              Architecture
+              Project Architecture
             </NavLink>
           </li>
           <li>

@@ -194,72 +194,160 @@ async def test_stop_recording_returns_bytes() -> None:
 # SandboxClient — shell execution (WebSocket mocked)
 # ---------------------------------------------------------------------------
 
+# Fixed marker so tests can construct known drain/end sentinels (client uses token_hex(8) -> 16 chars)
+_TEST_MARKER = "a" * 16
+_DRAIN_SENTINEL = f"__AICT_DRAIN_{_TEST_MARKER}__"
+_END_SENTINEL = f"__AICT_CMD_DONE_{_TEST_MARKER}__"
+
+
+def _make_fake_ws_drain_then_output(
+    output: bytes,
+    exit_code: int = 0,
+) -> "FakeWS":
+    """FakeWS that returns drain data (sentinel x2) then output + end sentinel."""
+    drain_data = (f"prompt\n{_DRAIN_SENTINEL}\n{_DRAIN_SENTINEL}\n").encode()
+    end_line = f"{_END_SENTINEL}:{exit_code}\n".encode()
+    return FakeWS(recv_payloads=[drain_data, output + end_line])
+
+
+def _make_fake_ws_drain_then_hang() -> "FakeWS":
+    """FakeWS that returns drain data then blocks on recv (to trigger timeout)."""
+    drain_data = (f"prompt\n{_DRAIN_SENTINEL}\n{_DRAIN_SENTINEL}\n").encode()
+    return FakeWS(recv_payloads=[drain_data], hang_after=True)
+
+
+class FakeWS:
+    """WebSocket mock that uses recv() and a list of payloads (no shared iterator)."""
+
+    def __init__(
+        self,
+        recv_payloads: list[bytes],
+        *,
+        hang_after: bool = False,
+    ) -> None:
+        self._payloads = list(recv_payloads)
+        self._index = 0
+        self._hang_after = hang_after
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
+    async def send(self, data: bytes) -> None:
+        pass
+
+    async def recv(self):
+        if self._index < len(self._payloads):
+            data = self._payloads[self._index]
+            self._index += 1
+            return data
+        if self._hang_after:
+            await asyncio.sleep(100)
+        return b""
+
 
 @pytest.mark.asyncio
 async def test_execute_shell_returns_output() -> None:
     """
-    Shell execution collects stdout. The FakeWS yields normal output then
-    hangs, letting the client time out cleanly and return what it got.
-    Exit-code parsing (sentinel detection) is tested at the integration level.
+    Shell execution: drain phase sees two sentinels, then read phase gets
+    command output and end sentinel. Exit code is parsed.
     """
     client = SandboxClient()
     client.register("sbox1", "127.0.0.1", 30001, "tok")
+    fake_ws = _make_fake_ws_drain_then_output(b"hello from sandbox\n")
 
-    class FakeWS:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
-
-        async def send(self, data):
-            pass  # accept but ignore
-
-        def __aiter__(self):
-            return self._stream()
-
-        async def _stream(self):
-            yield b"hello from sandbox\n"
-            # Never yield sentinel — client will time out
-            await asyncio.sleep(100)
-
-    with patch("websockets.connect", return_value=FakeWS()):
-        result = await client.execute_shell("sbox1", "echo hello", timeout=0.1)
+    with (
+        patch("secrets.token_hex", return_value=_TEST_MARKER),
+        patch("websockets.connect", return_value=fake_ws),
+    ):
+        result = await client.execute_shell("sbox1", "echo hello", timeout=5.0)
 
     assert isinstance(result, ShellResult)
     assert "hello from sandbox" in result.stdout
-    # exit_code is None because we never sent the sentinel (timed out)
-    assert result.exit_code is None
+    assert result.exit_code == 0
 
 
 @pytest.mark.asyncio
 async def test_execute_shell_timeout_returns_none_exit_code() -> None:
-    """When shell times out, exit_code is None."""
+    """When shell times out (no end sentinel), exit_code is None."""
+    client = SandboxClient()
+    client.register("sbox1", "127.0.0.1", 30001, "tok")
+    fake_ws = _make_fake_ws_drain_then_hang()
+
+    with (
+        patch("secrets.token_hex", return_value=_TEST_MARKER),
+        patch("websockets.connect", return_value=fake_ws),
+    ):
+        result = await client.execute_shell("sbox1", "sleep 99", timeout=0.05)
+
+    assert result.exit_code is None
+
+
+@pytest.mark.asyncio
+async def test_execute_shell_drain_waits_for_two_sentinels() -> None:
+    """Drain phase does not break after first sentinel (echo); waits for second (real echo)."""
+    client = SandboxClient()
+    client.register("sbox1", "127.0.0.1", 30001, "tok")
+    # One recv with both sentinels (simulates echo then real output)
+    drain_data = (f"x\n{_DRAIN_SENTINEL}\n{_DRAIN_SENTINEL}\n").encode()
+    command_out = b"ok\n" + f"{_END_SENTINEL}:0\n".encode()
+    fake_ws = FakeWS(recv_payloads=[drain_data, command_out])
+
+    with (
+        patch("secrets.token_hex", return_value=_TEST_MARKER),
+        patch("websockets.connect", return_value=fake_ws),
+    ):
+        result = await client.execute_shell("sbox1", "echo ok", timeout=5.0)
+
+    assert "ok" in result.stdout
+    assert result.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_shell_multiple_sequential_calls() -> None:
+    """Multiple execute_shell calls each get a new WS and return correct output."""
     client = SandboxClient()
     client.register("sbox1", "127.0.0.1", 30001, "tok")
 
-    class FakeWS:
-        async def __aenter__(self):
-            return self
+    def make_ws():
+        return _make_fake_ws_drain_then_output(b"result\n")
 
-        async def __aexit__(self, *args):
-            pass
+    with (
+        patch("secrets.token_hex", return_value=_TEST_MARKER),
+        patch("websockets.connect", side_effect=lambda *a, **k: make_ws()),
+    ):
+        r1 = await client.execute_shell("sbox1", "first", timeout=5.0)
+        r2 = await client.execute_shell("sbox1", "second", timeout=5.0)
 
-        async def send(self, data):
-            pass
+    assert "result" in r1.stdout
+    assert r1.exit_code == 0
+    assert "result" in r2.stdout
+    assert r2.exit_code == 0
 
-        def __aiter__(self):
-            return self._stream()
 
-        async def _stream(self):
-            # Never yield the sentinel — causes timeout
-            await asyncio.sleep(100)
-            yield b""
+@pytest.mark.asyncio
+async def test_execute_shell_truncation_preserves_sentinel() -> None:
+    """When output is truncated, we never drop the last chunk so end sentinel is still found."""
+    client = SandboxClient()
+    client.register("sbox1", "127.0.0.1", 30001, "tok")
+    # Small payloads so we can patch max bytes and still have sentinel in last chunk
+    drain_data = (f"prompt\n{_DRAIN_SENTINEL}\n{_DRAIN_SENTINEL}\n").encode()
+    big_chunk = b"x" * 60
+    end_chunk = b"tail\n" + f"{_END_SENTINEL}:0\n".encode()
+    fake_ws = FakeWS(recv_payloads=[drain_data, big_chunk, end_chunk])
 
-    with patch("websockets.connect", return_value=FakeWS()):
-        result = await client.execute_shell("sbox1", "sleep 99", timeout=0.01)
+    with (
+        patch("secrets.token_hex", return_value=_TEST_MARKER),
+        patch("backend.services.sandbox_client._MAX_SHELL_OUTPUT_BYTES", 100),
+        patch("websockets.connect", return_value=fake_ws),
+    ):
+        result = await client.execute_shell("sbox1", "large", timeout=5.0)
 
-    assert result.exit_code is None
+    assert result.truncated is True
+    assert result.exit_code == 0
+    assert "tail" in result.stdout
 
 
 # ---------------------------------------------------------------------------

@@ -344,7 +344,7 @@ class LLMService:
             if role == "user":
                 api_messages.append({
                     "role": "user",
-                    "content": [{"type": "text", "text": content or ""}],
+                    "content": [{"type": "text", "text": (content or "").strip() or "\u200b"}],
                 })
             elif role == "assistant":
                 blocks = []
@@ -364,7 +364,7 @@ class LLMService:
                     })
                     issued_tool_use_ids.add(tc_id)
                 if not blocks:
-                    blocks.append({"type": "text", "text": ""})
+                    blocks.append({"type": "text", "text": "\u200b"})
                 api_messages.append({"role": "assistant", "content": blocks})
             elif role == "tool":
                 tool_use_id = m.get("tool_use_id", "")
@@ -400,7 +400,7 @@ class LLMService:
                     if b.get("type") != "tool_use" or b.get("id") not in dangling
                 ]
                 if not am["content"]:
-                    am["content"] = [{"type": "text", "text": ""}]
+                    am["content"] = [{"type": "text", "text": "\u200b"}]
 
         # Anthropic tools format
         api_tools = [

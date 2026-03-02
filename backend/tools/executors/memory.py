@@ -9,6 +9,20 @@ from backend.tools.base import RunContext, parse_tool_uuid
 from backend.tools.result import ToolExecutionError
 
 
+async def run_compact_history(ctx: RunContext, tool_input: dict) -> str:
+    """Signal that the agent wants to compact its context window.
+
+    The actual truncation is performed by loop.py after this executor returns.
+    This executor just validates input and returns an acknowledgment.
+    """
+    keep_recent = tool_input.get("keep_recent", 20)
+    try:
+        keep_recent = int(keep_recent)
+    except (ValueError, TypeError):
+        keep_recent = 20
+    return f"Context compacted. Keeping {keep_recent} most recent messages in context."
+
+
 async def run_update_memory(ctx: RunContext, tool_input: dict) -> str:
     content = tool_input.get("content")
     if not content:

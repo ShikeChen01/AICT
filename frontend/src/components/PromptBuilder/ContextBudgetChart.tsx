@@ -1,15 +1,20 @@
 /**
- * ContextBudgetChart — SVG donut chart showing how the 200k context window is allocated.
+ * ContextBudgetChart — SVG donut chart showing how the context window is allocated.
  *
- * Segments:
- *   - System Prompt: sum of all enabled blocks' estimated tokens
- *   - History:       60% of conversation budget (~114k tokens)
- *   - Tool Results:  30% of conversation budget (~57k tokens)
- *   - Messages:      incoming messages budget (~8k tokens)
- *   - Available:     remainder
+ * Segments (7, no "Available" — the full window is allocated):
+ *   Static:
+ *   - System Prompt: measured from enabled blocks (excl. memory content)
+ *   - Tool Schemas:  measured from enabled tool configs
+ *   - Incoming Msgs: fixed cap (user-editable)
+ *   - Image Reserve: tokens_per_image × max_images (outside context window; user-editable for Claude)
+ *   Dynamic (scale with model context window):
+ *   - Memory:         % of dynamic pool (user-editable)
+ *   - Past Sessions:  % of dynamic pool (user-editable)
+ *   - Current Session: remainder (user-editable)
  */
 
-import type { PromptMeta, PromptBlockConfig } from '../../types';
+import { Lock } from 'lucide-react';
+import type { PromptMeta } from '../../types';
 
 // ── Token estimation (mirrors backend/prompts/assembly.py:estimate_tokens) ──
 
@@ -23,6 +28,7 @@ interface Segment {
   label: string;
   tokens: number;
   color: string;
+  group: 'static' | 'dynamic';
 }
 
 function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
@@ -42,28 +48,24 @@ function describeArc(cx: number, cy: number, r: number, startDeg: number, endDeg
 
 interface ContextBudgetChartProps {
   meta: PromptMeta;
-  blocks: PromptBlockConfig[];
 }
 
-export function ContextBudgetChart({ meta, blocks }: ContextBudgetChartProps) {
-  const total = meta.context_window_tokens;
-
-  const systemTokens = blocks
-    .filter((b) => b.enabled)
-    .reduce((sum, b) => sum + estimateTokens(b.content), 0);
-
-  const historyTokens = meta.budgets['history']?.tokens ?? 0;
-  const toolTokens = meta.budgets['tool_results']?.tokens ?? 0;
-  const msgTokens = meta.budgets['incoming_messages']?.tokens ?? 0;
-  const allocatedTokens = systemTokens + historyTokens + toolTokens + msgTokens;
-  const availableTokens = Math.max(0, total - allocatedTokens);
+export function ContextBudgetChart({ meta }: ContextBudgetChartProps) {
+  const total = meta.total_budget_tokens ?? meta.context_window_tokens + (meta.image_reserve_tokens ?? 0);
+  const imageReserve = meta.image_reserve_tokens ?? 0;
 
   const segments: Segment[] = [
-    { label: 'System Prompt', tokens: systemTokens, color: '#7c3aed' },
-    { label: 'History',       tokens: historyTokens, color: '#3b82f6' },
-    { label: 'Tool Results',  tokens: toolTokens,    color: '#10b981' },
-    { label: 'Messages',      tokens: msgTokens,     color: '#f59e0b' },
-    { label: 'Available',     tokens: availableTokens, color: '#e5e7eb' },
+    // Static sections
+    { label: 'System Prompt',   tokens: meta.system_prompt_tokens,          color: '#7c3aed', group: 'static' },
+    { label: 'Tool Schemas',    tokens: meta.tool_schema_tokens,            color: '#ec4899', group: 'static' },
+    { label: 'Incoming Msgs',   tokens: meta.incoming_msg_budget_tokens,    color: '#f59e0b', group: 'static' },
+    ...(imageReserve > 0
+      ? [{ label: 'Image Reserve', tokens: imageReserve, color: '#0ea5e9', group: 'static' as const }]
+      : []),
+    // Dynamic sections
+    { label: 'Memory',          tokens: meta.memory_budget_tokens,          color: '#8b5cf6', group: 'dynamic' },
+    { label: 'Past Sessions',   tokens: meta.past_session_budget_tokens,    color: '#6366f1', group: 'dynamic' },
+    { label: 'Current Session', tokens: meta.current_session_budget_tokens, color: '#10b981', group: 'dynamic' },
   ];
 
   // Build donut path arcs
@@ -71,11 +73,10 @@ export function ContextBudgetChart({ meta, blocks }: ContextBudgetChartProps) {
   const cy = 80;
   const r = 64;
   const thickness = 20;
-  const innerR = r - thickness;
 
   let currentDeg = 0;
   const arcs = segments.map((seg) => {
-    const sweep = (seg.tokens / total) * 360;
+    const sweep = total > 0 ? (seg.tokens / total) * 360 : 0;
     const startDeg = currentDeg;
     const endDeg = currentDeg + sweep;
     currentDeg = endDeg;
@@ -83,14 +84,17 @@ export function ContextBudgetChart({ meta, blocks }: ContextBudgetChartProps) {
   });
 
   const fmt = (n: number) =>
-    n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
+    n >= 1_000_000
+      ? `${(n / 1_000_000).toFixed(1)}M`
+      : n >= 1000
+      ? `${(n / 1000).toFixed(1)}k`
+      : `${n}`;
 
   return (
     <div className="flex flex-col gap-4">
       {/* Donut + center label */}
       <div className="flex items-center gap-6">
         <svg width={160} height={160} viewBox="0 0 160 160" className="flex-shrink-0">
-          {/* Outer donut ring (segments) */}
           {arcs.map((arc) =>
             arc.sweep < 0.1 ? null : (
               <path
@@ -102,15 +106,14 @@ export function ContextBudgetChart({ meta, blocks }: ContextBudgetChartProps) {
               />
             )
           )}
-          {/* Inner circle to create donut hole */}
-          <circle cx={cx} cy={cy} r={innerR} fill="white" />
+          {/* Inner circle */}
+          <circle cx={cx} cy={cy} r={r - thickness} fill="white" />
           {/* Center text */}
           <text
             x={cx}
             y={cy - 8}
             textAnchor="middle"
             dominantBaseline="middle"
-            className="text-xs font-bold fill-gray-800"
             style={{ fontSize: 13, fontWeight: 700, fill: '#1f2937' }}
           >
             {fmt(total)}
@@ -128,16 +131,23 @@ export function ContextBudgetChart({ meta, blocks }: ContextBudgetChartProps) {
 
         {/* Legend */}
         <div className="flex flex-col gap-1.5 text-xs min-w-0">
-          {segments.map((seg) => (
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Static</div>
+          {segments.filter(s => s.group === 'static').map((seg) => (
             <div key={seg.label} className="flex items-center gap-2">
-              <span
-                className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
-                style={{ backgroundColor: seg.color }}
-              />
+              <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: seg.color }} />
               <span className="text-gray-600 truncate flex-1">{seg.label}</span>
-              <span className="font-mono text-gray-800 font-medium tabular-nums">
-                {fmt(seg.tokens)}
+              <span className="font-mono text-gray-800 font-medium tabular-nums">{fmt(seg.tokens)}</span>
+              <span className="text-gray-400 tabular-nums w-9 text-right">
+                {total > 0 ? `${Math.round((seg.tokens / total) * 100)}%` : '0%'}
               </span>
+            </div>
+          ))}
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5 mt-1">Dynamic</div>
+          {segments.filter(s => s.group === 'dynamic').map((seg) => (
+            <div key={seg.label} className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: seg.color }} />
+              <span className="text-gray-600 truncate flex-1">{seg.label}</span>
+              <span className="font-mono text-gray-800 font-medium tabular-nums">{fmt(seg.tokens)}</span>
               <span className="text-gray-400 tabular-nums w-9 text-right">
                 {total > 0 ? `${Math.round((seg.tokens / total) * 100)}%` : '0%'}
               </span>
@@ -148,7 +158,7 @@ export function ContextBudgetChart({ meta, blocks }: ContextBudgetChartProps) {
 
       {/* Token budget bars */}
       <div className="space-y-1.5">
-        {segments.filter((s) => s.label !== 'Available').map((seg) => (
+        {segments.map((seg) => (
           <div key={seg.label}>
             <div className="flex justify-between text-xs text-gray-500 mb-0.5">
               <span>{seg.label}</span>
@@ -158,7 +168,7 @@ export function ContextBudgetChart({ meta, blocks }: ContextBudgetChartProps) {
               <div
                 className="h-full rounded-full transition-all duration-300"
                 style={{
-                  width: `${Math.min(100, (seg.tokens / total) * 100)}%`,
+                  width: `${Math.min(100, total > 0 ? (seg.tokens / total) * 100 : 0)}%`,
                   backgroundColor: seg.color,
                 }}
               />
@@ -166,6 +176,21 @@ export function ContextBudgetChart({ meta, blocks }: ContextBudgetChartProps) {
           </div>
         ))}
       </div>
+
+      {/* Image reserve note — shown when model supports vision */}
+      {meta.model_supports_vision && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50/60 px-3 py-2.5 space-y-1">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-700">
+            <Lock className="w-3 h-3 flex-shrink-0" />
+            <span>Image Reserve</span>
+            <span className="ml-auto font-mono font-medium">{fmt(imageReserve)}</span>
+          </div>
+          <p className="text-[10px] text-sky-600 leading-relaxed">
+            {meta.image_effective_max_images} image{meta.image_effective_max_images !== 1 ? 's' : ''} ×{' '}
+            {fmt(meta.image_tokens_per_image)} tokens/image — reserved outside the {fmt(meta.context_window_tokens)} context window.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

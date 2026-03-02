@@ -1,5 +1,5 @@
 /**
- * WorkspacePage — main workspace: Sidebar | Main (chat/kanban/workflow/artifacts) | Agents panel.
+ * WorkspacePage — main workspace: Sidebar | Main (chat/kanban/prompt assembly/project architecture) | Agents panel.
  * Wraps content in AgentStreamProvider so agent chat and stream buffers work.
  */
 

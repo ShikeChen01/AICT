@@ -16,7 +16,6 @@ import { saveAgentBlocks, resetAgentBlock, listAgentBlocks } from '../../api/cli
 interface BlockEditorPanelProps {
   agentId: string;
   block: PromptBlockConfig | null;
-  allBlocks: PromptBlockConfig[];
   onClose: () => void;
   /** Called with the authoritative updated block list after save or reset. */
   onSaved: (updated: PromptBlockConfig[]) => void;
@@ -25,7 +24,6 @@ interface BlockEditorPanelProps {
 export function BlockEditorPanel({
   agentId,
   block,
-  allBlocks,
   onClose,
   onSaved,
 }: BlockEditorPanelProps) {
@@ -51,14 +49,17 @@ export function BlockEditorPanel({
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
   // ── Save ──────────────────────────────────────────────────────────────────
+  // Re-fetch blocks from the server so we never send a stale list (e.g. after a
+  // reorder that returned new IDs). We update only the block matching by block_key.
 
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     try {
-      const items: PromptBlockConfigItem[] = allBlocks.map((b) => ({
+      const fresh = await listAgentBlocks(agentId);
+      const items: PromptBlockConfigItem[] = fresh.map((b) => ({
         block_key: b.block_key,
-        content: b.id === block.id ? content : b.content,
+        content: b.block_key === block.block_key ? content : b.content,
         position: b.position,
         enabled: b.enabled,
       }));

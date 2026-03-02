@@ -42,11 +42,14 @@ class AgentStatusWithQueueResponse(AgentResponse):
 
 
 class UpdateAgentRequest(BaseModel):
-    """PATCH /agents/{id} — update model, provider, or thinking_enabled on an existing agent."""
+    """PATCH /agents/{id} — update model, provider, thinking_enabled, or token_allocations."""
     model: str | None = Field(None, min_length=1, max_length=100)
     provider: str | None = Field(None, max_length=50)
     thinking_enabled: bool | None = None
     display_name: str | None = Field(None, min_length=1, max_length=100)
+    # Per-agent token allocation overrides. None = do not change. Empty dict = reset to defaults.
+    # Shape: {incoming_msg_tokens, memory_pct, past_session_pct, current_session_pct}
+    token_allocations: dict | None = Field(None)
 
 
 class SpawnEngineerCreate(BaseModel):

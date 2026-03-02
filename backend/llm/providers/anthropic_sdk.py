@@ -112,7 +112,8 @@ class AnthropicSDKProvider(BaseLLMProvider):
                             "data": b64,
                         },
                     })
-                content_blocks.append({"type": "text", "text": msg.content or ""})
+                text = (msg.content or "").strip() or "\u200b"
+                content_blocks.append({"type": "text", "text": text})
                 api_messages.append({"role": "user", "content": content_blocks})
                 continue
 
@@ -134,7 +135,7 @@ class AnthropicSDKProvider(BaseLLMProvider):
                     )
                     issued_tool_use_ids.add(tc.id)
                 if not blocks:
-                    blocks.append({"type": "text", "text": ""})
+                    blocks.append({"type": "text", "text": "\u200b"})
                 api_messages.append({"role": "assistant", "content": blocks})
                 continue
 
@@ -159,7 +160,7 @@ class AnthropicSDKProvider(BaseLLMProvider):
                             "data": b64,
                         },
                     })
-                tool_content.append({"type": "text", "text": str(msg.content or "")})
+                tool_content.append({"type": "text", "text": str(msg.content or "") or "\u200b"})
                 api_messages.append(
                     {
                         "role": "user",
@@ -189,7 +190,7 @@ class AnthropicSDKProvider(BaseLLMProvider):
                     if b.get("type") != "tool_use" or b.get("id") not in dangling
                 ]
                 if not am["content"]:
-                    am["content"] = [{"type": "text", "text": ""}]
+                    am["content"] = [{"type": "text", "text": "\u200b"}]
 
         return api_messages, issued_tool_use_ids
 

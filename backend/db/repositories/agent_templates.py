@@ -9,7 +9,7 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.db.models import Agent, AgentTemplate, PromptBlockConfig
+from backend.db.models import Agent, AgentTemplate, PromptBlockConfig, ToolConfig
 from backend.db.repositories.base import BaseRepository
 from backend.llm.model_resolver import infer_provider
 
@@ -52,6 +52,8 @@ _COMMON_BLOCK_DEFS: list[tuple[str, str | None, int, bool]] = [
     ("loopback",               "loopback.md",               8,  True),
     ("end_solo_warning",       "end_solo_warning.md",       9,  True),
     ("summarization",          "summarization.md",          10, True),
+    ("summarization_memory",   "summarization_memory.md",   10, True),
+    ("summarization_history",  "summarization_history.md",  10, True),
     ("thinking_stage",         None,                        11, True),
     ("execution_stage",        None,                        12, True),
 ]
@@ -111,6 +113,18 @@ def _build_block_defs_for_role(base_role: str) -> list[dict]:
     identity_file = _ROLE_IDENTITY.get(base_role)
     identity_content = _read_block_file(identity_file) if identity_file else "You are an agent on this project."
     rows.append({"block_key": "identity", "content": identity_content, "position": 7, "enabled": True})
+
+    # secrets: per-project tokens (disabled by default; enable in Prompt Builder to inject {project_secrets})
+    rows.append({
+        "block_key": "secrets",
+        "content": (
+            "## Project secrets\n\n"
+            "The following key-value pairs are configured for this project. Use them only when needed; "
+            "do not echo or repeat them in channel messages.\n\n{project_secrets}"
+        ),
+        "position": 5,
+        "enabled": False,
+    })
 
     return rows
 

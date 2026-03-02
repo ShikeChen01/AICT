@@ -11,10 +11,12 @@ from backend.api.v1.diagnostics import router as diagnostics_router
 from backend.api.v1.documents import router as documents_router
 from backend.api.v1.messages import router as messages_router
 from backend.api.v1.prompt_blocks import router as prompt_blocks_router
+from backend.api.v1.project_secrets import router as project_secrets_router
 from backend.api.v1.repositories import router as repositories_router
 from backend.api.v1.sessions import router as sessions_router
 from backend.api.v1.tasks import router as tasks_router
 from backend.api.v1.templates import router as templates_router
+from backend.api.v1.tool_configs import router as tool_configs_router
 
 api_router = APIRouter()
 
@@ -39,7 +41,9 @@ api_router.include_router(diagnostics_router)
 api_router.include_router(documents_router)
 api_router.include_router(messages_router)
 api_router.include_router(prompt_blocks_router)
+api_router.include_router(project_secrets_router)
 api_router.include_router(repositories_router)
 api_router.include_router(sessions_router)
 api_router.include_router(tasks_router)
 api_router.include_router(templates_router)
+api_router.include_router(tool_configs_router)

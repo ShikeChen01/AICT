@@ -21,6 +21,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -83,6 +84,9 @@ class Repository(Base):
     )
     documents = relationship(
         "ProjectDocument", back_populates="project", cascade="all, delete-orphan"
+    )
+    project_secrets = relationship(
+        "ProjectSecret", back_populates="project", cascade="all, delete-orphan"
     )
 
 
@@ -151,6 +155,31 @@ class ProjectSettings(Base):
     project = relationship("Repository", back_populates="project_settings")
 
 
+# ── Project Secrets ──────────────────────────────────────────────────
+
+
+class ProjectSecret(Base):
+    """Per-project secret tokens (e.g. API keys) for agent use. Values stored encrypted."""
+
+    __tablename__ = "project_secrets"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        Uuid,
+        ForeignKey("repositories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name = Column(String(100), nullable=False)
+    encrypted_value = Column(Text, nullable=False)
+    hint = Column(String(10), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    project = relationship("Repository", back_populates="project_secrets")
+
+    __table_args__ = (UniqueConstraint("project_id", "name", name="uq_project_secrets_project_name"),)
+
+
 # ── Agents (MODIFIED: memory added, priority removed) ─────────────────
 
 
@@ -192,6 +221,11 @@ class AgentTemplate(Base):
         "PromptBlockConfig",
         primaryjoin="AgentTemplate.id == PromptBlockConfig.template_id",
         back_populates="template",
+        cascade="all, delete-orphan",
+    )
+    tool_configs = relationship(
+        "ToolConfig",
+        primaryjoin="AgentTemplate.id == ToolConfig.template_id",
         cascade="all, delete-orphan",
     )
 
@@ -242,6 +276,40 @@ class PromptBlockConfig(Base):
     )
 
 
+class ToolConfig(Base):
+    """Per-agent or per-template tool configuration.
+
+    DB is the source of truth. Seeded from tool_descriptions.json at agent creation.
+    Exactly one of template_id or agent_id must be set.
+    Users can edit: description, detailed_description, enabled, position.
+    Users cannot edit: tool_name, input_schema, allowed_roles (structural).
+    """
+
+    __tablename__ = "tool_configs"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    template_id = Column(
+        Uuid, ForeignKey("agent_templates.id", ondelete="CASCADE"), nullable=True
+    )
+    agent_id = Column(
+        Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
+    )
+    tool_name = Column(String(80), nullable=False)
+    description = Column(Text, nullable=False)
+    detailed_description = Column(Text, nullable=True)
+    input_schema = Column(JSON, nullable=False)
+    allowed_roles = Column(JSON, nullable=False, default=list)
+    enabled = Column(Boolean, default=True, nullable=False)
+    position = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_tool_configs_agent", "agent_id", "position"),
+        Index("ix_tool_configs_template", "template_id", "position"),
+    )
+
+
 class Agent(Base):
     __tablename__ = "agents"
 
@@ -267,6 +335,9 @@ class Agent(Base):
     sandbox_id = Column(String(255), nullable=True)
     sandbox_persist = Column(Boolean, default=False, nullable=False)
     memory = Column(JSON, nullable=True)  # Layer 1 self-define block
+    # Per-agent dynamic pool overrides. NULL = use system defaults.
+    # Shape: {incoming_msg_tokens, memory_pct, past_session_pct, current_session_pct}
+    token_allocations = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
@@ -283,6 +354,11 @@ class Agent(Base):
         "PromptBlockConfig",
         primaryjoin="Agent.id == PromptBlockConfig.agent_id",
         back_populates="agent",
+        cascade="all, delete-orphan",
+    )
+    tool_configs = relationship(
+        "ToolConfig",
+        primaryjoin="Agent.id == ToolConfig.agent_id",
         cascade="all, delete-orphan",
     )
 

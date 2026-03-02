@@ -3,7 +3,7 @@ Your working memory (maintained by you via update_memory):
 {memory_content}
 ---
 
-Structure your memory using these sections. Keep it concise — prune lower-priority items if it grows beyond ~500 words:
+Structure your memory using these sections. Prune lower-priority items if it grows large — your memory budget scales with your model's context window:
 
 ## Active Task
 What you are currently working on, its status, and next steps.

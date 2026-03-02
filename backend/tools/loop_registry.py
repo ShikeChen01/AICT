@@ -23,7 +23,7 @@ from backend.tools.base import (
     parse_tool_uuid,
 )
 from backend.tools.executors.messaging import run_send_message, run_broadcast_message
-from backend.tools.executors.memory import run_update_memory, run_read_history, run_list_sessions
+from backend.tools.executors.memory import run_compact_history, run_update_memory, run_read_history, run_list_sessions
 from backend.tools.executors.tasks import (
     run_list_tasks,
     run_get_task_details,
@@ -64,6 +64,7 @@ __all__ = [
     "truncate_tool_output",
     "parse_tool_uuid",
     "get_tool_defs_for_role",
+    "get_tool_defs_for_agent",
     "get_handlers_for_role",
     "get_thinking_phase_tool_defs",
     "get_thinking_phase_handlers",
@@ -95,6 +96,7 @@ _TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
     "end": None,
     "send_message": run_send_message,
     "broadcast_message": run_broadcast_message,
+    "compact_history": run_compact_history,
     "update_memory": run_update_memory,
     "read_history": run_read_history,
     "list_sessions": run_list_sessions,
@@ -219,12 +221,42 @@ _TOOL_EXECUTORS["describe_tool"] = _run_describe_tool
 
 
 def get_tool_defs_for_role(role: str) -> list[dict]:
-    """Return the LLM tool-definition list for the given agent role."""
+    """Return the LLM tool-definition list for the given agent role (from static JSON).
+
+    Used during thinking phase and as fallback. For the main agent loop,
+    prefer get_tool_defs_for_agent() which reads from DB (user-customized).
+    """
     return [
         {"name": t.name, "description": t.description, "input_schema": t.input_schema}
         for t in _TOOLS
         if _role_has_tool(t, role)
     ]
+
+
+async def get_tool_defs_for_agent(agent_id, role: str, db) -> list[dict]:
+    """Return LLM tool-definition list for an agent, reading from DB (user-customized).
+
+    Falls back to static JSON definitions for any tool not found in DB.
+    Only enabled tools are returned. Ordered by position.
+    """
+    from uuid import UUID
+    from backend.db.repositories.tool_configs import ToolConfigRepository
+
+    repo = ToolConfigRepository(db)
+    role_map = {"manager": "manager", "cto": "cto", "engineer": "worker"}
+    base_role = role_map.get(role, "worker")
+    db_tools = await repo.ensure_agent_tools(agent_id, base_role)
+
+    result = []
+    for tc in db_tools:
+        if not tc.enabled:
+            continue
+        result.append({
+            "name": tc.tool_name,
+            "description": tc.description,
+            "input_schema": tc.input_schema or {},
+        })
+    return result
 
 
 def validate_tool_input(tool_name: str, tool_input: dict) -> None:
@@ -263,6 +295,7 @@ def get_handlers_for_role(role: str) -> dict[str, ToolExecutor]:
 
 # Tools available during the thinking phase (Stage 1)
 _THINKING_PHASE_TOOL_NAMES = frozenset({
+    "compact_history",
     "update_memory",
     "read_history",
     "list_sessions",

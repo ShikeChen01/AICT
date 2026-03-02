@@ -25,6 +25,7 @@ from backend.db.repositories.agent_templates import PromptBlockConfigRepository
 from backend.db.repositories.attachments import AttachmentRepository
 from backend.db.repositories.llm_usage import LLMUsageRepository
 from backend.db.repositories.messages import AgentMessageRepository
+from backend.db.repositories.project_secrets import ProjectSecretsRepository
 from backend.db.repositories.project_settings import ProjectSettingsRepository
 from backend.llm.contracts import ImagePart
 from backend.llm.model_resolver import resolve_provider
@@ -42,6 +43,7 @@ from backend.tools.loop_registry import (
     get_handlers_for_role,
     get_thinking_phase_handlers,
     get_thinking_phase_tool_defs,
+    get_tool_defs_for_agent,
     get_tool_defs_for_role,
     truncate_tool_output,
     validate_tool_input,
@@ -55,29 +57,16 @@ logger = get_logger(__name__)
 # Vision and loop constants
 # ---------------------------------------------------------------------------
 
-# Vision-capable model name prefixes (conservative whitelist).
-# Any model whose name starts with one of these is assumed to support image inputs.
-_VISION_CAPABLE_PREFIXES = (
-    "gpt-4o",
-    "gpt-4.1",
-    "gpt-5",
-    "gpt-oss",
-    "o1",
-    "o3",
-    "o4",
-    "claude-3",
-    "claude-sonnet",
-    "claude-opus",
-    "claude-haiku",
-    "gemini",
-    "kimi-k2.5",
-)
-
-
 def _model_supports_vision(model: str) -> bool:
-    """Return True if the model is known to accept image inputs."""
-    m = model.lower()
-    return any(m.startswith(p) for p in _VISION_CAPABLE_PREFIXES)
+    """Return True if the model supports image inputs (catalog-driven)."""
+    from backend.llm.model_catalog import model_supports_vision
+    return model_supports_vision(model)
+
+
+def _get_max_images(agent: "Agent") -> int:
+    """Return max images per turn for the agent (from token_allocations or default 10)."""
+    alloc = getattr(agent, "token_allocations", None) or {}
+    return int(alloc.get("max_images_per_turn", 10))
 
 
 def _default_model_for_agent(agent: Agent) -> str:
@@ -292,13 +281,10 @@ async def run_inner_loop(
     _unread_ids = [m.id for m in unread if m.id is not None]
     _attachments_by_msg = await _attachment_repo.get_for_messages(_unread_ids)
 
-    # Load last 5 sessions of conversation for context; agent memory is injected into system prompt.
-    history = await agent_msg_repo.list_last_n_sessions(
-        agent.id, session_id, n_sessions=5
-    )
     memory_content = agent.memory
     if isinstance(memory_content, dict):
-        memory_content = str(memory_content) if memory_content else None
+        import json as _json_mem
+        memory_content = _json_mem.dumps(memory_content) if memory_content else None
 
     # Load project-level settings: budget/rate limits (model/prompt overrides deprecated).
     ps_repo = ProjectSettingsRepository(db)
@@ -307,6 +293,11 @@ async def run_inner_loop(
     calls_per_hour_limit = (project_settings.calls_per_hour_limit or 0) if project_settings else 0
     tokens_per_hour_limit = (project_settings.tokens_per_hour_limit or 0) if project_settings else 0
     daily_cost_budget_usd = (project_settings.daily_cost_budget_usd or 0.0) if project_settings else 0.0
+
+    # Load project secrets for agent injection (e.g. API keys)
+    from backend.config import settings as app_settings
+    secrets_repo = ProjectSecretsRepository(db, encryption_key=app_settings.secret_encryption_key)
+    project_secrets = await secrets_repo.get_plaintext_values(project.id)
 
     usage_repo = LLMUsageRepository(db)
 
@@ -323,13 +314,18 @@ async def run_inner_loop(
     # Load prompt block configs for this agent from DB (seeded at agent creation).
     block_configs: list[PromptBlockConfig] = await block_repo.list_for_agent(agent.id)
 
+    # Load DB-customized tool defs for this agent
+    db_tool_defs = await get_tool_defs_for_agent(agent.id, agent.role, db)
+
     # Build prompt: system blocks from DB + tool defs (restricted during thinking Stage 1).
     if thinking_enabled:
         # Stage 1: restricted tool set; thinking_stage block included.
         pa = PromptAssembly(
             agent, project, memory_content,
             block_configs=block_configs,
+            model=resolved_model,
             thinking_stage="thinking",
+            project_secrets=project_secrets,
         )
         pa.tools = get_thinking_phase_tool_defs(agent.role)
         thinking_handlers = get_thinking_phase_handlers()
@@ -338,13 +334,27 @@ async def run_inner_loop(
         pa = PromptAssembly(
             agent, project, memory_content,
             block_configs=block_configs,
+            model=resolved_model,
             thinking_stage=None,
+            project_secrets=project_secrets,
         )
+        # Override with DB-customized tool defs
+        pa.tools = db_tool_defs
+
+    # Load history in two phases: past sessions (budget-fitted) and current session (full)
+    past_session_msgs = await agent_msg_repo.list_past_session_history(
+        agent.id, session_id,
+        budget_tokens=pa._past_session_budget_tokens,
+    )
+    current_session_msgs = await agent_msg_repo.list_current_session(
+        agent.id, session_id,
+    )
 
     pa.load_history(
-        history,
+        past_session_msgs,
+        current_session_msgs,
         new_messages_text,
-        known_tool_names=set(handlers.keys()) | {"thinking_done"},
+        known_tool_names=set(handlers.keys()) | {"thinking_done", "compact_history"},
     )
 
     # If the user attached images, add them to the last user message (or a note if model is text-only).
@@ -355,10 +365,28 @@ async def run_inner_loop(
                 all_image_parts.append(ImagePart(data=att.data, media_type=att.mime_type))
         if all_image_parts:
             if _model_supports_vision(resolved_model):
+                # Enforce per-agent image cap (default 10, Claude-configurable up to 20)
+                max_images = _get_max_images(agent)
+                truncated_note = ""
+                if len(all_image_parts) > max_images:
+                    excess = len(all_image_parts) - max_images
+                    all_image_parts = all_image_parts[:max_images]
+                    truncated_note = (
+                        f"\n[System: {excess} image(s) were dropped — "
+                        f"limit is {max_images} images per turn. "
+                        "Adjust the image cap in the Prompt Builder if needed.]"
+                    )
+                    logger.warning(
+                        "Agent %s: truncated image attachments from %d to %d (cap=%d)",
+                        agent.id, len(all_image_parts) + excess, max_images, max_images,
+                    )
                 # Find and patch the last user message in pa.messages with image parts.
                 for _i in range(len(pa.messages) - 1, -1, -1):
                     if pa.messages[_i].get("role") == "user":
-                        pa.messages[_i] = {**pa.messages[_i], "image_parts": all_image_parts}
+                        patched = {**pa.messages[_i], "image_parts": all_image_parts}
+                        if truncated_note:
+                            patched["content"] = patched.get("content", "") + truncated_note
+                        pa.messages[_i] = patched
                         break
                 logger.info(
                     "Agent %s: attached %d image part(s) from %d message attachment(s)",
@@ -367,7 +395,7 @@ async def run_inner_loop(
                     sum(len(v) for v in _attachments_by_msg.values()),
                 )
             else:
-                # Text-only model: append a note so the agent knows images were sent.
+                # Model does not support vision: append a note so the agent knows.
                 note = (
                     f"\n[System: User attached {len(all_image_parts)} image(s) "
                     f"but model '{resolved_model}' does not support vision. "
@@ -381,7 +409,7 @@ async def run_inner_loop(
                         }
                         break
                 logger.info(
-                    "Agent %s: model '%s' is text-only — injected vision-unavailable note",
+                    "Agent %s: model '%s' has no vision — injected vision-unavailable note",
                     agent.id,
                     resolved_model,
                 )
@@ -421,7 +449,50 @@ async def run_inner_loop(
         len(unread),
     )
 
-    summarization_injected = False
+    # Per-section summarization state (independent triggers)
+    summarization_state = {"memory_injected": False, "history_injected": False}
+    current_thinking_stage = thinking_stage  # track for memory refresh
+
+    def _check_and_inject_summarization():
+        """Check each dynamic section independently and inject appropriate prompts."""
+        triggered = pa.check_summarization_triggers()
+
+        if "memory" in triggered and not summarization_state["memory_injected"]:
+            logger.info(
+                "Agent %s: memory pressure %.0f%% — injecting memory summarization",
+                agent.id,
+                (pa._memory_budget_tokens and
+                 len(pa._current_memory_content) // 4 / pa._memory_budget_tokens * 100) or 0,
+            )
+            _mem_content = next(
+                (b.content for b in block_configs if b.block_key == "summarization_memory" and b.enabled),
+                (
+                    "Your working memory is approaching its budget limit. Compress your memory "
+                    "using update_memory: merge related items, remove redundant entries, "
+                    "keep only actively relevant context. Call update_memory then continue your work."
+                ),
+            )
+            pa.append_summarization(_mem_content)
+            summarization_state["memory_injected"] = True
+
+        if "current_session" in triggered and not summarization_state["history_injected"]:
+            logger.info(
+                "Agent %s: session pressure %.0f%% — injecting history summarization",
+                agent.id,
+                pa.context_pressure_ratio() * 100,
+            )
+            _hist_content = next(
+                (b.content for b in block_configs if b.block_key == "summarization_history" and b.enabled),
+                next(
+                    (b.content for b in block_configs if b.block_key == "summarization" and b.enabled),
+                    PromptAssembly.get_summarization_block(),
+                ),
+            )
+            pa.append_summarization(_hist_content)
+            summarization_state["history_injected"] = True
+
+    # Check summarization at session start (loaded history may already be near budget)
+    _check_and_inject_summarization()
 
     # ========== Main loop: each iteration = one LLM call, then optional tool execution ==========
     while iteration < MAX_ITERATIONS:
@@ -454,19 +525,8 @@ async def run_inner_loop(
                     iteration,
                 )
 
-        # When context is ~70% full, ask the agent to summarize into memory so we can truncate history.
-        if not summarization_injected and pa.context_pressure_ratio() >= 0.70:
-            logger.info(
-                "Agent %s context pressure %.0f%% — injecting summarization block",
-                agent.id,
-                pa.context_pressure_ratio() * 100,
-            )
-            _summarization_content = next(
-                (b.content for b in block_configs if b.block_key == "summarization" and b.enabled),
-                PromptAssembly.get_summarization_block(),
-            )
-            pa.append_summarization(_summarization_content)
-            summarization_injected = True
+        # Check each dynamic section independently for summarization pressure (70% threshold)
+        _check_and_inject_summarization()
 
         # ── Budget/rate-limit gates (checked before each LLM call) ─────────────────────────
         # Gate 1: daily token budget — hard stop, session ends.
@@ -663,14 +723,15 @@ async def run_inner_loop(
             if emit_tool_result:
                 emit_tool_result("thinking_done", result_text)
 
-            # Rebuild system prompt for Stage 2 and switch to full tool set.
+            # Rebuild system prompt for Stage 2 and switch to full (DB-customized) tool set.
             thinking_stage = "execution"
+            current_thinking_stage = "execution"
             memory_content_now = agent.memory
             if isinstance(memory_content_now, dict):
                 import json as _json
                 memory_content_now = _json.dumps(memory_content_now) if memory_content_now else None
             pa.rebuild_for_execution_stage(block_configs, memory_content_now)
-            pa.tools = get_tool_defs_for_role(agent.role)
+            pa.tools = db_tool_defs
             logger.info("Agent %s: thinking_done called — entering Stage 2 (execution)", agent.id)
             # Remove any thinking_done calls from tool_calls so we don't try to dispatch them below.
             tool_calls = [tc for tc in tool_calls if tc.get("name") != "thinking_done"]
@@ -755,8 +816,44 @@ async def run_inner_loop(
             if emit_tool_result:
                 emit_tool_result(name, result_text)
             pa.append_tool_result(name, result_text, tool_use_id)
-            if name == "update_memory" and summarization_injected:
-                summarization_injected = False
+
+            if name == "update_memory":
+                # Enforce memory budget — truncate if content exceeds cap
+                _raw_memory = agent.memory
+                if isinstance(_raw_memory, dict):
+                    _mem_str = _raw_memory.get("content", "") if _raw_memory else ""
+                elif isinstance(_raw_memory, str):
+                    _mem_str = _raw_memory
+                else:
+                    _mem_str = ""
+
+                _mem_budget_chars = pa._memory_budget_chars
+                if len(_mem_str) > _mem_budget_chars:
+                    _mem_str = _mem_str[:_mem_budget_chars] + "\n[Memory truncated to budget limit]"
+                    agent.memory = {"content": _mem_str}
+                    await db.flush()
+                    logger.warning(
+                        "Agent %s: memory exceeded budget (%d chars) — truncated to %d chars",
+                        agent.id,
+                        len(_mem_str),
+                        _mem_budget_chars,
+                    )
+
+                _mem_now = agent.memory
+                if isinstance(_mem_now, dict):
+                    import json as _json_mem2
+                    _mem_now = _json_mem2.dumps(_mem_now) if _mem_now else None
+                pa._refresh_memory_in_system_prompt(
+                    _mem_now, block_configs, current_thinking_stage
+                )
+                # Allow re-trigger on next iteration (pressure may still be high)
+                summarization_state["memory_injected"] = False
+
+            if name == "compact_history":
+                keep_recent = tool_input.get("keep_recent", 20)
+                pa.compact_messages(keep_recent=keep_recent)
+                summarization_state["history_injected"] = False
+
             tool_input_stored = {"__tool_use_id__": tool_use_id, **tool_input}
             await agent_msg_repo.create_message(
                 agent_id=agent.id,

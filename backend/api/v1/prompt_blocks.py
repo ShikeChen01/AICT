@@ -21,11 +21,21 @@ from backend.db.repositories.agent_templates import (
 from backend.db.session import get_db
 from backend.prompts.assembly import (
     BLOCK_REGISTRY,
-    _CONTEXT_WINDOW_TOKENS,
-    _CONVERSATION_BUDGET_TOKENS,
-    _HISTORY_BUDGET_TOKENS,
-    _TOOL_RESULT_BUDGET_TOKENS,
+    _CONDITIONAL_BLOCK_KEYS,
     _INCOMING_MSG_BUDGET_TOKENS,
+    _MEMORY_RATIO,
+    _PAST_SESSION_RATIO,
+    _CHARS_PER_TOKEN,
+    _TOOL_SCHEMA_RESERVE_TOKENS,
+    estimate_tokens,
+)
+from backend.llm.model_catalog import (
+    get_context_window,
+    get_image_budget,
+    get_image_tokens_per_image,
+    model_supports_vision,
+    is_claude_model,
+    DEFAULT_CONTEXT_WINDOW,
 )
 
 router = APIRouter(prefix="/prompt-blocks", tags=["prompt-blocks"])
@@ -205,42 +215,174 @@ async def get_default_blocks(
 
 # ── Meta endpoint ──────────────────────────────────────────────────────────────
 
+_CONDITIONAL_RESERVE_TOKENS = 1_500  # must match assembly.py
+
+
 class BlockMetaResponse(BaseModel):
     kind: str
     max_chars: int | None
     truncation: str
 
 
-class BudgetEntry(BaseModel):
-    tokens: int
-    pct: float
-
-
 class PromptMetaResponse(BaseModel):
     context_window_tokens: int
-    conversation_budget_tokens: int
-    budgets: dict[str, BudgetEntry]
+    total_budget_tokens: int  # context_window + image_reserve (image reserve outside 200k)
+    static_overhead_tokens: int
+    dynamic_pool_tokens: int
+    # Dynamic section budgets (ratio-based, scale with model)
+    memory_budget_tokens: int
+    past_session_budget_tokens: int
+    current_session_budget_tokens: int
+    # Static section details
+    system_prompt_tokens: int
+    tool_schema_tokens: int
+    incoming_msg_budget_tokens: int
+    # Effective allocation percentages (from agent overrides or system defaults)
+    memory_pct: float
+    past_session_pct: float
+    current_session_pct: float
+    # System defaults (for reset)
+    default_memory_pct: float
+    default_past_session_pct: float
+    default_current_session_pct: float
+    default_incoming_msg_tokens: int
+    # Image input budget (outside context_window; total_budget_tokens = context_window + image_reserve)
+    image_tokens_per_image: int       # per-image token cost for this model (0 = not vision-capable)
+    image_default_max_images: int     # system-wide default image cap
+    image_effective_max_images: int   # agent override or system default
+    image_reserve_tokens: int         # total image budget = tokens_per_image × effective_max_images
+    model_supports_vision: bool       # True if model can accept image inputs
+    # Registry
     block_registry: dict[str, BlockMetaResponse]
 
 
 @router.get("/meta", response_model=PromptMetaResponse)
 async def get_prompt_meta(
+    model: str | None = Query(default=None, description="Model name for window-specific budgets"),
+    agent_id: UUID | None = Query(default=None, description="Agent ID to load blocks/tools for"),
     current_user: User | None = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Return context window budget constants and block registry metadata.
 
-    Used by the frontend Prompt Builder dashboard to show per-block token
-    estimates and context allocation breakdown.
+    Accepts optional ?model= and ?agent_id= query params.
+    Returns model-specific budgets and tool schema token counts.
+    Used by the frontend Prompt Builder dashboard.
     """
-    conv = _CONVERSATION_BUDGET_TOKENS
+    import json as _json
+    from backend.tools.loop_registry import get_tool_defs_for_role
+
+    context_window = get_context_window(model or "") if model else DEFAULT_CONTEXT_WINDOW
+
+    # Compute system prompt tokens from actual agent blocks (or estimate if no agent)
+    system_prompt_tokens = 3_500  # conservative default estimate (excl. conditional blocks)
+    tool_schema_tokens_measured = _TOOL_SCHEMA_RESERVE_TOKENS  # matches the assembly floor
+
+    # Per-agent allocation overrides (filled in below if agent found)
+    agent_alloc: dict = {}
+    resolved_model = model or ""
+
+    if agent_id is not None:
+        user_id = current_user.id if isinstance(current_user, User) else None
+        result = await db.execute(select(Agent).where(Agent.id == agent_id))
+        agent = result.scalar_one_or_none()
+        if agent:
+            if user_id:
+                await require_project_access(db, agent.project_id, user_id)
+
+            # Use agent model if no model param provided
+            if not model:
+                resolved_model = agent.model or ""
+                context_window = get_context_window(resolved_model)
+
+            # Read per-agent allocation overrides
+            agent_alloc = agent.token_allocations or {}
+
+            # Measure system prompt from actual blocks (rough estimate without memory).
+            # Excludes conditional blocks (injected at runtime as messages, not system prompt)
+            # and stage blocks (only one is active at a time, managed separately).
+            repo = PromptBlockConfigRepository(db)
+            blocks = await repo.ensure_agent_blocks(agent_id, agent.role)
+            _STAGE_BLOCKS = frozenset({"thinking_stage", "execution_stage"})
+            enabled_content = "\n\n".join(
+                b.content for b in blocks
+                if b.enabled
+                and b.block_key not in _CONDITIONAL_BLOCK_KEYS
+                and b.block_key not in _STAGE_BLOCKS
+            )
+            system_prompt_tokens = estimate_tokens(enabled_content)
+
+            # Measure tool schema tokens from DB tool configs; apply the same floor
+            # as assembly.py so the budget chart matches the actual runtime reservation.
+            from backend.db.repositories.tool_configs import ToolConfigRepository
+            tool_repo = ToolConfigRepository(db)
+            role_map = {"manager": "manager", "cto": "cto", "engineer": "worker"}
+            base_role = role_map.get(agent.role, "worker")
+            tool_configs = await tool_repo.ensure_agent_tools(agent_id, base_role)
+            measured = sum(
+                len(_json.dumps({
+                    "name": tc.tool_name,
+                    "description": tc.description,
+                    "input_schema": tc.input_schema or {},
+                })) // _CHARS_PER_TOKEN
+                for tc in tool_configs if tc.enabled
+            )
+            tool_schema_tokens_measured = max(measured, _TOOL_SCHEMA_RESERVE_TOKENS)
+
+    # Resolve effective allocation values (agent overrides or system defaults)
+    default_memory_pct = _MEMORY_RATIO * 100          # 10.0
+    default_past_pct = _PAST_SESSION_RATIO * 100       # 12.0
+    default_current_pct = (1.0 - _MEMORY_RATIO - _PAST_SESSION_RATIO) * 100  # 78.0
+    default_incoming = _INCOMING_MSG_BUDGET_TOKENS     # 8000
+
+    effective_memory_pct = float(agent_alloc.get("memory_pct", default_memory_pct))
+    effective_past_pct = float(agent_alloc.get("past_session_pct", default_past_pct))
+    effective_current_pct = float(agent_alloc.get("current_session_pct", default_current_pct))
+    effective_incoming = int(agent_alloc.get("incoming_msg_tokens", default_incoming))
+
+    # Image budget
+    _DEFAULT_MAX_IMAGES = 10
+    effective_max_images = int(agent_alloc.get("max_images_per_turn", _DEFAULT_MAX_IMAGES))
+    image_tpi = get_image_tokens_per_image(resolved_model)
+    image_reserve = get_image_budget(resolved_model, effective_max_images)
+    vision_supported = model_supports_vision(resolved_model)
+
+    static_overhead = (
+        system_prompt_tokens
+        + tool_schema_tokens_measured
+        + effective_incoming
+        + _CONDITIONAL_RESERVE_TOKENS
+    )
+    dynamic_pool = max(0, context_window - static_overhead)
+    total_budget_tokens = context_window + image_reserve
+
+    memory_budget = int(dynamic_pool * effective_memory_pct / 100.0)
+    past_session_budget = int(dynamic_pool * effective_past_pct / 100.0)
+    current_session_budget = dynamic_pool - memory_budget - past_session_budget
+
     return PromptMetaResponse(
-        context_window_tokens=_CONTEXT_WINDOW_TOKENS,
-        conversation_budget_tokens=conv,
-        budgets={
-            "history": BudgetEntry(tokens=_HISTORY_BUDGET_TOKENS, pct=round(_HISTORY_BUDGET_TOKENS / conv, 4)),
-            "tool_results": BudgetEntry(tokens=_TOOL_RESULT_BUDGET_TOKENS, pct=round(_TOOL_RESULT_BUDGET_TOKENS / conv, 4)),
-            "incoming_messages": BudgetEntry(tokens=_INCOMING_MSG_BUDGET_TOKENS, pct=round(_INCOMING_MSG_BUDGET_TOKENS / conv, 4)),
-        },
+        context_window_tokens=context_window,
+        total_budget_tokens=total_budget_tokens,
+        static_overhead_tokens=static_overhead,
+        dynamic_pool_tokens=dynamic_pool,
+        memory_budget_tokens=memory_budget,
+        past_session_budget_tokens=past_session_budget,
+        current_session_budget_tokens=current_session_budget,
+        system_prompt_tokens=system_prompt_tokens,
+        tool_schema_tokens=tool_schema_tokens_measured,
+        incoming_msg_budget_tokens=effective_incoming,
+        memory_pct=effective_memory_pct,
+        past_session_pct=effective_past_pct,
+        current_session_pct=effective_current_pct,
+        default_memory_pct=default_memory_pct,
+        default_past_session_pct=default_past_pct,
+        default_current_session_pct=default_current_pct,
+        default_incoming_msg_tokens=default_incoming,
+        image_tokens_per_image=image_tpi,
+        image_default_max_images=_DEFAULT_MAX_IMAGES,
+        image_effective_max_images=effective_max_images,
+        image_reserve_tokens=image_reserve,
+        model_supports_vision=vision_supported,
         block_registry={
             key: BlockMetaResponse(kind=meta.kind, max_chars=meta.max_chars, truncation=meta.truncation)
             for key, meta in BLOCK_REGISTRY.items()

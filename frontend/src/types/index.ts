@@ -67,6 +67,13 @@ export type AgentRole = 'manager' | 'cto' | 'engineer';
 export type AgentStatus = 'sleeping' | 'active' | 'busy';
 export type BaseRole = 'manager' | 'cto' | 'worker';
 
+export interface TokenAllocations {
+  incoming_msg_tokens?: number;
+  memory_pct?: number;
+  past_session_pct?: number;
+  current_session_pct?: number;
+}
+
 export interface Agent {
   id: UUID;
   project_id: UUID;
@@ -81,6 +88,7 @@ export interface Agent {
   sandbox_id: string | null;
   sandbox_persist: boolean;
   memory?: Record<string, unknown> | null;
+  token_allocations?: TokenAllocations | null;
   created_at: string;
   updated_at: string;
 }
@@ -137,6 +145,7 @@ export interface UpdateAgentRequest {
   provider?: string | null;
   thinking_enabled?: boolean;
   display_name?: string;
+  token_allocations?: TokenAllocations | null;
 }
 
 export interface BlockMetaInfo {
@@ -145,16 +154,69 @@ export interface BlockMetaInfo {
   truncation: string;
 }
 
-export interface BudgetEntry {
-  tokens: number;
-  pct: number;
-}
-
 export interface PromptMeta {
   context_window_tokens: number;
-  conversation_budget_tokens: number;
-  budgets: Record<string, BudgetEntry>;
+  total_budget_tokens: number;  // context_window + image_reserve (image reserve outside 200k)
+  static_overhead_tokens: number;
+  dynamic_pool_tokens: number;
+  // Dynamic section budgets
+  memory_budget_tokens: number;
+  past_session_budget_tokens: number;
+  current_session_budget_tokens: number;
+  // Static section details
+  system_prompt_tokens: number;
+  tool_schema_tokens: number;
+  incoming_msg_budget_tokens: number;
+  // Effective allocation percentages (agent overrides or system defaults)
+  memory_pct: number;
+  past_session_pct: number;
+  current_session_pct: number;
+  // System defaults (for reset)
+  default_memory_pct: number;
+  default_past_session_pct: number;
+  default_current_session_pct: number;
+  default_incoming_msg_tokens: number;
+  // Image input budget (outside context_window; total_budget = context_window + image_reserve)
+  image_tokens_per_image: number;      // per-image token cost (0 = not vision-capable)
+  image_default_max_images: number;    // system-wide default cap
+  image_effective_max_images: number;  // agent override or system default
+  image_reserve_tokens: number;        // total = tokens_per_image × effective_max_images
+  model_supports_vision: boolean;      // true if model accepts image inputs
+  // Registry
   block_registry: Record<string, BlockMetaInfo>;
+}
+
+// ─── Tool Config ─────────────────────────────────────────────────────────
+
+export interface ToolConfig {
+  id: UUID;
+  agent_id: UUID | null;
+  template_id: UUID | null;
+  tool_name: string;
+  description: string;
+  detailed_description: string | null;
+  input_schema: Record<string, unknown>;
+  allowed_roles: string[];
+  enabled: boolean;
+  position: number;
+  estimated_tokens: number;
+}
+
+export interface ToolConfigUpdateItem {
+  tool_name: string;
+  description: string;
+  detailed_description?: string | null;
+  enabled: boolean;
+  position: number;
+}
+
+export interface ToolConfigMeta {
+  total_tools: number;
+  enabled_tools: number;
+  total_tokens: number;
+  max_tokens: number;
+  budget_pct_used: number;
+  context_window_tokens: number;
 }
 
 export interface AgentTaskQueueItem {
@@ -258,6 +320,20 @@ export interface ProjectSettingsUpdate {
   calls_per_hour_limit?: number;
   tokens_per_hour_limit?: number;
   daily_cost_budget_usd?: number;
+}
+
+// ─── Project secrets (per-project tokens for agents) ───────────────────
+
+export interface ProjectSecret {
+  id: UUID;
+  name: string;
+  hint: string | null;
+  created_at: string;
+}
+
+export interface ProjectSecretUpsert {
+  name: string;
+  value: string;
 }
 
 // ─── LLM Usage (Phase 4) ─────────────────────────────────────────────

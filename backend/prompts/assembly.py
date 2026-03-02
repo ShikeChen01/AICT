@@ -13,47 +13,56 @@ Stage-specific blocks (thinking_stage, execution_stage) are filtered by thinking
   - thinking_stage="thinking"  → only "thinking_stage" block included
   - thinking_stage="execution" → only "execution_stage" block included
 
-Conversation message ordering:
-    History (last 5 sessions) → Incoming messages → Tool results
-    → Conditional (loopback / end-solo warning / summarization)
+Context window layout (model-specific, scales with context window W):
+    Static overhead (measured at init):
+      System prompt blocks  ~1,900 tokens (excluding memory content)
+      Tool schemas          ~1,700-2,200 tokens (role-dependent)
+      Incoming messages     8,000 tokens cap
+      Conditional reserve   500 tokens (loopback, summarization blocks)
+    Dynamic pool = W - static overhead, split by ratio:
+      Memory                10% of dynamic pool
+      Past session history  12% of dynamic pool
+      Current session       78% of dynamic pool (primary growth area)
 
-Token budget (character-based estimate, 1 token ≈ 4 chars):
-    System prompt (static):  ~7k tokens
-    Tool schemas:             ~3k tokens  (fixed, provider-generated)
-    Conversation budget:      ~190k tokens remaining of a 200k window
-      - History:              up to 60% of conversation budget (~114k tokens)
-      - Tool results:         up to 30% of conversation budget (~57k tokens)
-      - Incoming messages:    8000 tokens aggregate, 6000-word per-message cap
+Summarization triggers (independent per section, 70% threshold):
+    Memory section: triggers when memory content fills 70% of memory_budget
+    Current session: triggers when session messages fill 70% of current_session_budget
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from uuid import UUID
 
 from backend.db.models import Agent, PromptBlockConfig, Repository
+from backend.llm.model_catalog import get_context_window, get_image_budget, get_image_tokens_per_image
 from backend.tools.loop_registry import get_tool_defs_for_role
 from backend.logging.my_logger import get_logger
 
 logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
-# Token budget constants (character-based: 1 token ≈ 4 chars)
+# Static constants
 # ---------------------------------------------------------------------------
 
 _CHARS_PER_TOKEN = 4
-_CONTEXT_WINDOW_TOKENS = 200_000
-_CONVERSATION_BUDGET_TOKENS = 190_000
 
-_HISTORY_BUDGET_TOKENS = int(_CONVERSATION_BUDGET_TOKENS * 0.60)
-_TOOL_RESULT_BUDGET_TOKENS = int(_CONVERSATION_BUDGET_TOKENS * 0.30)
+# Static overhead components (tokens)
 _INCOMING_MSG_BUDGET_TOKENS = 8_000
+_CONDITIONAL_RESERVE_TOKENS = 1_500  # increased: covers loopback + summarization injections
+_TOOL_SCHEMA_RESERVE_TOKENS = 4_000  # minimum reservation for tool schemas
 _INCOMING_MSG_PER_MSG_WORDS = 6_000
-
-_HISTORY_BUDGET_CHARS = _HISTORY_BUDGET_TOKENS * _CHARS_PER_TOKEN
-_TOOL_RESULT_BUDGET_CHARS = _TOOL_RESULT_BUDGET_TOKENS * _CHARS_PER_TOKEN
 _INCOMING_MSG_BUDGET_CHARS = _INCOMING_MSG_BUDGET_TOKENS * _CHARS_PER_TOKEN
 _INCOMING_MSG_PER_MSG_CHARS = _INCOMING_MSG_PER_MSG_WORDS * 5
+
+# Dynamic pool allocation ratios (must sum to 1.0)
+_MEMORY_RATIO = 0.10
+_PAST_SESSION_RATIO = 0.12
+_CURRENT_SESSION_RATIO = 0.78  # remainder after memory + past session
+
+# Summarization fires when a dynamic section reaches this fraction of its budget
+SUMMARIZATION_THRESHOLD = 0.70
 
 _LEGACY_TOOL_NAME_ALIASES: dict[str, str] = {
     "execute_command E2B": "execute_command",
@@ -61,6 +70,12 @@ _LEGACY_TOOL_NAME_ALIASES: dict[str, str] = {
 
 # Stage-specific block keys — only one may be included at a time
 _STAGE_BLOCK_KEYS = frozenset({"thinking_stage", "execution_stage"})
+
+# Conditional blocks are injected at runtime as messages, never in the system prompt
+_CONDITIONAL_BLOCK_KEYS = frozenset({
+    "loopback", "end_solo_warning",
+    "summarization", "summarization_memory", "summarization_history",
+})
 
 
 @dataclass
@@ -74,19 +89,20 @@ class BlockMeta:
 BLOCK_REGISTRY: dict[str, BlockMeta] = {
     "rules":                BlockMeta("rules", "system", None, "never"),
     "history_rules":        BlockMeta("history_rules", "system", None, "never"),
-    "incoming_msg_rules":   BlockMeta("incoming_msg_rules", "system", None, "never"),
+    "incoming_msg_rules":       BlockMeta("incoming_msg_rules", "system", None, "never"),
+    "incoming_message_rules":   BlockMeta("incoming_message_rules", "system", None, "never"),
     "tool_result_rules":    BlockMeta("tool_result_rules", "system", None, "never"),
     "tool_io":              BlockMeta("tool_io", "system", None, "never"),
-    "memory":               BlockMeta("memory", "system", 10_000, "never"),
+    "memory":               BlockMeta("memory", "system", None, "dynamic"),
     "identity":             BlockMeta("identity", "system", None, "never"),
+    "secrets":              BlockMeta("secrets", "system", None, "never"),
     "thinking_stage":       BlockMeta("thinking_stage", "system", None, "never"),
     "execution_stage":      BlockMeta("execution_stage", "system", None, "never"),
-    "history":              BlockMeta("history", "conversation", _HISTORY_BUDGET_CHARS, "oldest_first"),
-    "incoming_messages":    BlockMeta("incoming_messages", "conversation", _INCOMING_MSG_BUDGET_CHARS, "oldest_first"),
-    "tool_result":          BlockMeta("tool_result", "conversation", _TOOL_RESULT_BUDGET_CHARS, "per_item"),
     "loopback":             BlockMeta("loopback", "conditional", 400, "never"),
     "end_solo_warning":     BlockMeta("end_solo_warning", "conditional", 400, "never"),
     "summarization":        BlockMeta("summarization", "conditional", 2_000, "never"),
+    "summarization_memory": BlockMeta("summarization_memory", "conditional", 2_000, "never"),
+    "summarization_history": BlockMeta("summarization_history", "conditional", 2_000, "never"),
 }
 
 
@@ -95,38 +111,47 @@ def estimate_tokens(text: str) -> int:
 
 
 # Placeholder values that are dynamically resolved per session
-_PLACEHOLDER_KEYS = frozenset({"{project_name}", "{agent_name}", "{memory_content}"})
+_PLACEHOLDER_KEYS = frozenset({"{project_name}", "{agent_name}", "{memory_content}", "{project_secrets}"})
 
 
-def _resolve_placeholders(content: str, agent: Agent, project: Repository, memory_content: str | None) -> str:
-    """Replace {project_name}, {agent_name}, {memory_content} in block content."""
-    project_name = (project.name or "Project").replace("{", "{{").replace("}", "}}")
-    agent_name = (agent.display_name or "Agent").replace("{", "{{").replace("}", "}}")
-
+def _resolve_placeholders(
+    content: str,
+    agent: Agent,
+    project: Repository,
+    memory_content: str | None,
+    project_secrets: dict[str, str] | None = None,
+) -> str:
+    """Replace {project_name}, {agent_name}, {memory_content}, {project_secrets} in block content."""
     if memory_content is None:
         memory_text = "No memory recorded yet."
     elif isinstance(memory_content, dict):
-        import json
         memory_text = json.dumps(memory_content, indent=2).strip() or "No memory recorded yet."
     elif isinstance(memory_content, str) and memory_content.strip():
         memory_text = memory_content.strip()
     else:
         memory_text = "No memory recorded yet."
 
-    # Use safe substitution to avoid KeyError on other braces
+    secrets = project_secrets or {}
+    project_secrets_text = (
+        "\n".join(f"{k}={v}" for k, v in sorted(secrets.items()))
+        if secrets
+        else "No project secrets configured."
+    )
+
     try:
         return content.format(
             project_name=project.name or "Project",
             agent_name=agent.display_name or "Agent",
             memory_content=memory_text,
+            project_secrets=project_secrets_text,
         )
     except (KeyError, ValueError):
-        # Content may have literal braces; fall back to simple replacement
         return (
             content
             .replace("{project_name}", project.name or "Project")
             .replace("{agent_name}", agent.display_name or "Agent")
             .replace("{memory_content}", memory_text)
+            .replace("{project_secrets}", project_secrets_text)
         )
 
 
@@ -135,6 +160,7 @@ class PromptAssembly:
     for the entire lifetime of one agent loop session.
 
     block_configs: all PromptBlockConfig rows for the agent (loaded from DB by loop.py).
+    model: the resolved model name used to look up context window size.
     thinking_stage: None = thinking OFF; "thinking" = Stage 1; "execution" = Stage 2.
     """
 
@@ -145,67 +171,180 @@ class PromptAssembly:
         memory_content: str | None,
         *,
         block_configs: list[PromptBlockConfig],
+        model: str = "",
         thinking_stage: str | None = None,
+        project_secrets: dict[str, str] | None = None,
     ) -> None:
         self._agent = agent
         self._project = project
+        self._block_configs = block_configs
+        self._model = model or (agent.model or "")
+        self._project_secrets = project_secrets or {}
 
-        # Load blocks from DB; sort by position
+        # ── Step 1: Load tool defs ────────────────────────────────────────────
+        self.tools: list[dict] = get_tool_defs_for_role(agent.role)
+
+        # ── Step 2: Measure tool schema tokens ────────────────────────────────
+        measured_tool_tokens: int = sum(
+            len(json.dumps({
+                "name": t.get("name", ""),
+                "description": t.get("description", ""),
+                "input_schema": t.get("input_schema", {}),
+            }))
+            for t in self.tools
+        ) // _CHARS_PER_TOKEN
+        # Use the higher of measured or the minimum reserve floor to avoid
+        # underestimating tool overhead when schemas change at runtime
+        self.tool_schema_tokens: int = max(measured_tool_tokens, _TOOL_SCHEMA_RESERVE_TOKENS)
+
+        # ── Step 3: Build system prompt (without memory content) ─────────────
         enabled_blocks = sorted(
             [b for b in block_configs if b.enabled],
             key=lambda b: b.position,
         )
-
-        # Build system prompt parts; filter stage-specific blocks
         parts: list[str] = []
         for block in enabled_blocks:
+            if block.block_key in _CONDITIONAL_BLOCK_KEYS:
+                # Conditional blocks are injected at runtime as messages, never here
+                continue
             if block.block_key in _STAGE_BLOCK_KEYS:
-                # Include only the block matching the current stage
                 expected_key = f"{thinking_stage}_stage" if thinking_stage else None
                 if block.block_key == expected_key:
-                    parts.append(_resolve_placeholders(block.content, agent, project, memory_content))
+                    parts.append(_resolve_placeholders(block.content, agent, project, memory_content, project_secrets or {}))
                 continue
-            parts.append(_resolve_placeholders(block.content, agent, project, memory_content))
+            parts.append(_resolve_placeholders(block.content, agent, project, memory_content, project_secrets or {}))
 
         self.system_prompt: str = "\n\n".join(parts)
-        self.tools: list[dict] = get_tool_defs_for_role(agent.role)
+
+        # Measure system prompt tokens (excluding the current memory content size;
+        # memory_content has already been substituted above for the placeholder)
+        system_prompt_tokens = estimate_tokens(self.system_prompt)
+
+        # ── Step 4: Compute model-specific budgets ────────────────────────────
+        context_window = get_context_window(self._model)
+
+        # Per-agent overrides from token_allocations (falls back to module constants)
+        alloc = getattr(agent, "token_allocations", None) or {}
+        effective_incoming = int(alloc.get("incoming_msg_tokens", _INCOMING_MSG_BUDGET_TOKENS))
+        effective_memory_ratio = float(alloc.get("memory_pct", _MEMORY_RATIO * 100)) / 100.0
+        effective_past_ratio = float(alloc.get("past_session_pct", _PAST_SESSION_RATIO * 100)) / 100.0
+
+        # Image reserve: per-agent cap for Claude; default 10 images for all vision models.
+        # Kept outside the text context window — dynamic pool is computed from context_window only.
+        max_images = int(alloc.get("max_images_per_turn", 10))
+        image_reserve_tokens = get_image_budget(self._model, max_images)
+
+        static_overhead = (
+            system_prompt_tokens
+            + self.tool_schema_tokens
+            + effective_incoming
+            + _CONDITIONAL_RESERVE_TOKENS
+        )
+        dynamic_pool = max(0, context_window - static_overhead)
+
+        self._context_window_tokens: int = context_window
+        self._static_overhead_tokens: int = static_overhead
+        self._dynamic_pool_tokens: int = dynamic_pool
+        self._system_prompt_tokens: int = system_prompt_tokens
+        self._image_reserve_tokens: int = image_reserve_tokens
+        self._image_tokens_per_image: int = get_image_tokens_per_image(self._model)
+        self._max_images_per_turn: int = max_images
+
+        self._memory_budget_tokens: int = int(dynamic_pool * effective_memory_ratio)
+        self._memory_budget_chars: int = self._memory_budget_tokens * _CHARS_PER_TOKEN
+
+        self._past_session_budget_tokens: int = int(dynamic_pool * effective_past_ratio)
+
+        self._current_session_budget_tokens: int = (
+            dynamic_pool - self._memory_budget_tokens - self._past_session_budget_tokens
+        )
+        self._current_session_budget_chars: int = self._current_session_budget_tokens * _CHARS_PER_TOKEN
+
+        # ── Step 5: Message list and session tracking ─────────────────────────
         self.messages: list[dict] = []
         self._current_iteration_tool_result_chars: int = 0
 
-    # ── Loopback text accessors (used by loop.py) ────────────────────────────
+        # Track which messages belong to the current session for compact_messages
+        self._current_session_start_index: int = 0
 
-    def _get_block_content(self, block_key: str) -> str:
-        """Look up a block's raw content from the system prompt context."""
-        # Used for conditional injections (loopback, end_solo_warning, summarization)
-        # These are stored in DB and resolved when needed
-        return ""  # Caller should use the DB-loaded block content directly
+        # Current memory content for pressure tracking
+        self._current_memory_content: str = (
+            memory_content if isinstance(memory_content, str) else ""
+        )
+
+        logger.debug(
+            "PromptAssembly init: model=%s window=%d static=%d pool=%d "
+            "mem=%d past=%d session=%d tools_tokens=%d image_reserve=%d max_images=%d",
+            self._model,
+            context_window,
+            static_overhead,
+            dynamic_pool,
+            self._memory_budget_tokens,
+            self._past_session_budget_tokens,
+            self._current_session_budget_tokens,
+            self.tool_schema_tokens,
+            image_reserve_tokens,
+            max_images,
+        )
 
     # ── Initial population ──────────────────────────────────────────────
     def load_history(
         self,
-        history: list,
+        past_session_msgs: list,
+        current_session_msgs: list,
         new_messages_text: str,
         *,
         known_tool_names: set[str],
     ) -> None:
-        candidate: list[dict] = []
-        for h in history:
+        """Load history in two phases.
+
+        Phase 1: Past sessions (conversation only, pre-budget-fitted by DB query).
+        Phase 2: Current session (all message types, chronological).
+        Phase 3: Incoming new user message.
+        """
+        # Phase 1: Past sessions
+        past_candidate: list[dict] = []
+        current_past_session_id = None
+        for h in past_session_msgs:
+            if h.session_id != current_past_session_id:
+                current_past_session_id = h.session_id
+                past_candidate.append({
+                    "role": "user",
+                    "content": f"--- Session {str(h.session_id)[:8]} ---",
+                })
             if h.role == "user":
-                candidate.append({"role": "user", "content": h.content or ""})
+                past_candidate.append({"role": "user", "content": h.content or ""})
             elif h.role == "assistant":
-                candidate.append(self._build_history_assistant(h, known_tool_names))
+                past_candidate.append(self._build_history_assistant(h, known_tool_names))
+            # tool messages already filtered out by DB query
+
+        if past_candidate:
+            past_candidate.append({
+                "role": "user",
+                "content": (
+                    "[Past session tool results are fully truncated. "
+                    "Use read_history(session_id=...) to view them if needed.]"
+                ),
+            })
+        self.messages.extend(past_candidate)
+
+        # Phase 2: Current session (all message types)
+        current_candidate: list[dict] = []
+        for h in current_session_msgs:
+            if h.role == "user":
+                current_candidate.append({"role": "user", "content": h.content or ""})
+            elif h.role == "assistant":
+                current_candidate.append(self._build_history_assistant(h, known_tool_names))
             elif h.role == "tool":
-                candidate.append(self._build_history_tool(h))
+                current_candidate.append(self._build_history_tool(h))
 
-        candidate = self._repair_dangling_tool_use(candidate)
+        current_candidate = self._repair_dangling_tool_use(current_candidate)
 
-        total_chars = sum(len(m.get("content") or "") for m in candidate)
-        while total_chars > _HISTORY_BUDGET_CHARS and candidate:
-            dropped = candidate.pop(0)
-            total_chars -= len(dropped.get("content") or "")
+        # Mark the start index for current session messages
+        self._current_session_start_index = len(self.messages)
+        self.messages.extend(current_candidate)
 
-        self.messages.extend(candidate)
-
+        # Phase 3: Incoming messages
         if new_messages_text:
             capped = self._cap_incoming_messages(new_messages_text)
             self.messages.append({"role": "user", "content": capped})
@@ -281,7 +420,7 @@ class PromptAssembly:
         )
 
         patched: list[dict] = []
-        for idx, m in enumerate(messages):
+        for m in messages:
             patched.append(m)
             if m.get("role") == "assistant":
                 for tc in m.get("tool_calls", []):
@@ -352,28 +491,112 @@ class PromptAssembly:
         block_configs: list[PromptBlockConfig],
         memory_content: str | None,
     ) -> None:
-        """Rebuild system_prompt for Stage 2 (execution) after thinking_done is called.
-
-        Called by loop.py on stage transition. Replaces system_prompt in-place.
-        Keeps messages list intact so execution stage can see thinking stage history.
-        """
+        """Rebuild system_prompt for Stage 2 (execution) after thinking_done is called."""
         enabled_blocks = sorted(
             [b for b in block_configs if b.enabled],
             key=lambda b: b.position,
         )
         parts: list[str] = []
         for block in enabled_blocks:
+            if block.block_key in _CONDITIONAL_BLOCK_KEYS:
+                continue
             if block.block_key in _STAGE_BLOCK_KEYS:
                 if block.block_key == "execution_stage":
-                    parts.append(_resolve_placeholders(block.content, self._agent, self._project, memory_content))
+                    parts.append(_resolve_placeholders(block.content, self._agent, self._project, memory_content, self._project_secrets))
                 continue
-            parts.append(_resolve_placeholders(block.content, self._agent, self._project, memory_content))
+            parts.append(_resolve_placeholders(block.content, self._agent, self._project, memory_content, self._project_secrets))
         self.system_prompt = "\n\n".join(parts)
+
+    # ── Memory refresh and compaction ────────────────────────────────────────
+
+    def _refresh_memory_in_system_prompt(
+        self,
+        memory_content: str | None,
+        block_configs: list[PromptBlockConfig] | None = None,
+        thinking_stage: str | None = None,
+    ) -> None:
+        """Rebuild system prompt with updated memory content.
+
+        Called after update_memory so the next LLM call sees fresh memory.
+        """
+        configs = block_configs or self._block_configs
+        enabled_blocks = sorted(
+            [b for b in configs if b.enabled],
+            key=lambda b: b.position,
+        )
+        parts: list[str] = []
+        for block in enabled_blocks:
+            if block.block_key in _CONDITIONAL_BLOCK_KEYS:
+                continue
+            if block.block_key in _STAGE_BLOCK_KEYS:
+                expected_key = f"{thinking_stage}_stage" if thinking_stage else None
+                if block.block_key == expected_key:
+                    parts.append(_resolve_placeholders(block.content, self._agent, self._project, memory_content, self._project_secrets))
+                continue
+            parts.append(_resolve_placeholders(block.content, self._agent, self._project, memory_content, self._project_secrets))
+        self.system_prompt = "\n\n".join(parts)
+
+        # Update tracked memory content for pressure calculation
+        if isinstance(memory_content, str):
+            self._current_memory_content = memory_content
+        elif isinstance(memory_content, dict):
+            self._current_memory_content = json.dumps(memory_content)
+        else:
+            self._current_memory_content = ""
+
+    def compact_messages(self, keep_recent: int = 20) -> None:
+        """Remove past session messages and trim older current session messages.
+
+        Called by loop.py after the agent calls compact_history. Removes all messages
+        before _current_session_start_index, then keeps only the most recent
+        keep_recent messages from the current session.
+        """
+        # Keep only current session messages
+        current_msgs = self.messages[self._current_session_start_index:]
+
+        # Trim to most recent keep_recent messages
+        if len(current_msgs) > keep_recent:
+            current_msgs = current_msgs[-keep_recent:]
+
+        self.messages = current_msgs
+        self._current_session_start_index = 0
+        logger.info(
+            "compact_messages: kept %d current session messages",
+            len(self.messages),
+        )
+
+    # ── Summarization pressure checks ───────────────────────────────────────
+
+    def check_summarization_triggers(self) -> list[str]:
+        """Check each dynamic section independently.
+
+        Returns list of section keys that have exceeded SUMMARIZATION_THRESHOLD.
+        Possible values: 'memory', 'current_session'.
+        Both can trigger simultaneously.
+        """
+        triggered = []
+
+        # Memory pressure: compare current memory content tokens to memory budget
+        if self._memory_budget_tokens > 0:
+            memory_used_tokens = estimate_tokens(self._current_memory_content)
+            if memory_used_tokens >= self._memory_budget_tokens * SUMMARIZATION_THRESHOLD:
+                triggered.append("memory")
+
+        # Current session pressure: messages added since current session start
+        current_msgs = self.messages[self._current_session_start_index:]
+        session_used_chars = sum(len(m.get("content") or "") for m in current_msgs)
+        if self._current_session_budget_chars > 0:
+            if session_used_chars >= self._current_session_budget_chars * SUMMARIZATION_THRESHOLD:
+                triggered.append("current_session")
+
+        return triggered
 
     # ── Budget helpers ───────────────────────────────────────────────────────
 
     def _enforce_tool_result_budget(self, result: str) -> str:
-        remaining = _TOOL_RESULT_BUDGET_CHARS - self._current_iteration_tool_result_chars
+        # Use current_session budget for per-iteration tool result cap
+        max_per_iter = self._current_session_budget_chars // 4  # 25% of session budget per iteration
+        remaining = max_per_iter - self._current_iteration_tool_result_chars
         if len(result) <= remaining:
             return result
         if remaining <= 0:
@@ -394,12 +617,21 @@ class PromptAssembly:
             total_chars += len(line)
         return "\n".join(capped_lines)
 
+    def current_session_used_tokens(self) -> int:
+        """Tokens used by current session messages."""
+        current_msgs = self.messages[self._current_session_start_index:]
+        return sum(len(m.get("content") or "") for m in current_msgs) // _CHARS_PER_TOKEN
+
     def context_used_chars(self) -> int:
         return sum(len(m.get("content") or "") for m in self.messages)
 
     def context_pressure_ratio(self) -> float:
-        budget_chars = _CONVERSATION_BUDGET_TOKENS * _CHARS_PER_TOKEN
-        return self.context_used_chars() / budget_chars
+        """Legacy: overall context pressure as fraction of current_session budget."""
+        if self._current_session_budget_chars <= 0:
+            return 0.0
+        current_msgs = self.messages[self._current_session_start_index:]
+        used = sum(len(m.get("content") or "") for m in current_msgs)
+        return used / self._current_session_budget_chars
 
     # ── Message formatting helpers ──────────────────────────────────────────
 

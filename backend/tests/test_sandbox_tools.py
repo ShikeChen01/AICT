@@ -321,6 +321,8 @@ async def test_sandbox_health(session, sample_engineer) -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_screenshot(session, sample_engineer) -> None:
+    from backend.tools.executors.sandbox import ScreenshotResult
+
     sample_engineer.sandbox_id = "sbox-scr"
     ctx = _make_ctx(sample_engineer, MagicMock(), session)
     fake_bytes = b"FAKE_JPEG_DATA"
@@ -332,8 +334,9 @@ async def test_sandbox_screenshot(session, sample_engineer) -> None:
 
         result = await _run_sandbox_screenshot(ctx, {})
 
-    assert str(len(fake_bytes)) in result
-    assert "Base64" in result or "base64" in result.lower()
+    assert isinstance(result, ScreenshotResult)
+    assert result.image_bytes == fake_bytes
+    assert result.media_type == "image/jpeg"
 
 
 # ---------------------------------------------------------------------------

@@ -9,9 +9,10 @@
  *  5. Prompt Customization (per-role prompt overrides — Phase 3)
  *  6. Rate Limits (calls/hour + tokens/hour — Phase 4b)
  *  7. Token Budget & Cost (daily token budget, daily cost budget, rollup — Phase 4/4b)
+ *  8. Secrets (per-project tokens agents can read; enable "secrets" block in Prompt Builder)
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -25,6 +26,9 @@ import {
   Users,
   Gauge,
   DollarSign,
+  Key,
+  Trash2,
+  Upload,
 } from 'lucide-react';
 import {
   getProject,
@@ -32,9 +36,13 @@ import {
   getProjectSettings,
   updateProjectSettings,
   getProjectUsage,
+  listProjectSecrets,
+  upsertProjectSecret,
+  deleteProjectSecret,
 } from '../api/client';
 import type {
   Project,
+  ProjectSecret,
   ProjectSettings,
   ModelOverrides,
   PromptOverrides,
@@ -112,6 +120,24 @@ function fmtCost(usd: number): string {
   return `$${usd.toFixed(4)}`;
 }
 
+/** Parse .env-style content into key-value pairs. Skips comments and empty lines. */
+function parseEnvFile(content: string): { name: string; value: string }[] {
+  const pairs: { name: string; value: string }[] = [];
+  const lines = content.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) continue;
+    const name = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+    if (!name) continue;
+    pairs.push({ name, value });
+  }
+  return pairs;
+}
+
 // ── Component ──────────────────────────────────────────────────────────
 
 export function SettingsPage() {
@@ -140,16 +166,26 @@ export function SettingsPage() {
   // Budgets
   const [dailyTokenBudget, setDailyTokenBudget] = useState(0);
   const [dailyCostBudget, setDailyCostBudget] = useState(0);
+  // Secrets
+  const [secrets, setSecrets] = useState<ProjectSecret[]>([]);
+  const [secretName, setSecretName] = useState('');
+  const [secretValue, setSecretValue] = useState('');
+  const [secretsSaving, setSecretsSaving] = useState(false);
+  // .env upload
+  const [envPreview, setEnvPreview] = useState<{ count: number; names: string[]; pairs: { name: string; value: string }[] } | null>(null);
+  const [envUploading, setEnvUploading] = useState(false);
+  const envFileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Data loading ────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     if (!projectId) return;
     try {
       setIsLoading(true);
-      const [proj, settings, usageData] = await Promise.all([
+      const [proj, settings, usageData, secretsList] = await Promise.all([
         getProject(projectId),
         getProjectSettings(projectId),
         getProjectUsage(projectId).catch(() => null),
+        listProjectSecrets(projectId).catch(() => []),
       ]);
       setProject(proj);
       setPs(settings);
@@ -164,6 +200,7 @@ export function SettingsPage() {
       setTokensPerHour(settings.tokens_per_hour_limit || 0);
       setDailyTokenBudget(settings.daily_token_budget || 0);
       setDailyCostBudget(settings.daily_cost_budget_usd || 0);
+      setSecrets(secretsList);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -674,6 +711,205 @@ export function SettingsPage() {
                 )}
               </>
             )}
+          </Card>
+
+          {/* ── 8. Project secrets ── */}
+          <Card className="p-6">
+            <div className="flex items-center gap-2 mb-1">
+              <Key className="w-5 h-5 text-gray-500" />
+              <h2 className="text-lg font-semibold text-gray-900">Project secrets</h2>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              Key-value secrets (e.g. API keys) that agents can read at runtime. Values are never shown after save.
+              Enable the &quot;secrets&quot; block in Prompt Builder for each agent that should receive them.
+            </p>
+
+            <input
+              ref={envFileInputRef}
+              type="file"
+              accept=".env,.env.development,.env.local,text/plain"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                try {
+                  const text = await new Promise<string>((resolve, reject) => {
+                    const r = new FileReader();
+                    r.onload = () => resolve(String(r.result ?? ''));
+                    r.onerror = () => reject(new Error('Failed to read file'));
+                    r.readAsText(file);
+                  });
+                  const pairs = parseEnvFile(text);
+                  if (pairs.length === 0) {
+                    setError('No valid KEY=VALUE pairs found in file');
+                    return;
+                  }
+                  setEnvPreview({
+                    count: pairs.length,
+                    names: pairs.map((p) => p.name),
+                    pairs,
+                  });
+                  setError(null);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : 'Failed to parse .env file');
+                }
+                e.target.value = '';
+              }}
+            />
+
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-2 items-center">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={secretsSaving || envUploading}
+                  onClick={() => envFileInputRef.current?.click()}
+                >
+                  <Upload className="w-4 h-4" />
+                  Upload .env file
+                </Button>
+                {envPreview && (
+                  <>
+                    <span className="text-sm text-gray-600">
+                      Found {envPreview.count} variable{envPreview.count !== 1 ? 's' : ''}: {envPreview.names.slice(0, 5).join(', ')}
+                      {envPreview.names.length > 5 ? ` …` : ''}
+                    </span>
+                    <Button
+                      type="button"
+                      disabled={!projectId || envUploading}
+                      onClick={async () => {
+                        if (!projectId || !envPreview.pairs.length) return;
+                        setEnvUploading(true);
+                        setError(null);
+                        try {
+                          for (const { name, value } of envPreview.pairs) {
+                            const created = await upsertProjectSecret(projectId, { name, value });
+                            setSecrets((prev) => {
+                              const rest = prev.filter((s) => s.name !== created.name);
+                              return [...rest, created].sort((a, b) => a.name.localeCompare(b.name));
+                            });
+                          }
+                          setSuccess(`Imported ${envPreview.pairs.length} secret(s). Existing secrets with the same name were updated.`);
+                          setEnvPreview(null);
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : 'Failed to import secrets');
+                        } finally {
+                          setEnvUploading(false);
+                        }
+                      }}
+                    >
+                      {envUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Add all'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={envUploading}
+                      onClick={() => setEnvPreview(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </>
+                )}
+              </div>
+              {envPreview && (
+                <p className="text-xs text-gray-500">
+                  Existing secrets with the same name will be updated.
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2 items-end">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Name</label>
+                  <Input
+                    value={secretName}
+                    onChange={(e) => setSecretName(e.target.value)}
+                    placeholder="e.g. GITHUB_TOKEN"
+                    className="w-48"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Value</label>
+                  <Input
+                    type="password"
+                    value={secretValue}
+                    onChange={(e) => setSecretValue(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-56"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  disabled={!secretName.trim() || !secretValue.trim() || secretsSaving}
+                  onClick={async () => {
+                    if (!projectId || !secretName.trim() || !secretValue.trim()) return;
+                    setSecretsSaving(true);
+                    try {
+                      const created = await upsertProjectSecret(projectId, {
+                        name: secretName.trim(),
+                        value: secretValue,
+                      });
+                      setSecrets((prev) => {
+                        const rest = prev.filter((s) => s.name !== created.name);
+                        return [...rest, created].sort((a, b) => a.name.localeCompare(b.name));
+                      });
+                      setSecretName('');
+                      setSecretValue('');
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : 'Failed to save secret');
+                    } finally {
+                      setSecretsSaving(false);
+                    }
+                  }}
+                >
+                  {secretsSaving ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    'Add / Update'
+                  )}
+                </Button>
+              </div>
+
+              {secrets.length > 0 && (
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-left py-2 px-3 font-medium text-gray-700">Name</th>
+                        <th className="text-left py-2 px-3 font-medium text-gray-700">Hint</th>
+                        <th className="w-10 py-2 px-2" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {secrets.map((s) => (
+                        <tr key={s.id} className="border-t border-gray-100 hover:bg-gray-50/50">
+                          <td className="py-2 px-3 font-mono text-gray-900">{s.name}</td>
+                          <td className="py-2 px-3 text-gray-500">
+                            {s.hint ? `••••${s.hint}` : '—'}
+                          </td>
+                          <td className="py-2 px-2">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (!projectId) return;
+                                try {
+                                  await deleteProjectSecret(projectId, s.name);
+                                  setSecrets((prev) => prev.filter((x) => x.id !== s.id));
+                                } catch (err) {
+                                  setError(err instanceof Error ? err.message : 'Failed to delete secret');
+                                }
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-red-600 rounded"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </Card>
 
           <div className="flex justify-end">

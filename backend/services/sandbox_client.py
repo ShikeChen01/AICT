@@ -124,10 +124,12 @@ class SandboxClient:
 
         Strategy:
           1. Open WS to /ws/shell
-          2. Send command + a unique end-marker echo
-          3. Collect output until end-marker appears or timeout
-          4. Parse exit code from shell (via $? read after marker)
-          5. Close WS
+          2. Drain the initial bash prompt / startup noise
+          3. Disable PTY echo and prompt so only real command output is returned
+          4. Send command + a unique end-marker echo
+          5. Collect output until end-marker appears or timeout
+          6. Parse exit code from shell (via $? captured after command)
+          7. Close WS
         """
         import secrets
         import websockets
@@ -137,7 +139,15 @@ class SandboxClient:
 
         marker = secrets.token_hex(8)
         end_sentinel = _CMD_END_MARKER.format(marker=marker)
-        # After the real command, echo the exit code, then print the marker
+
+        # Preamble: disable PTY echo and silence the bash prompt so that the
+        # only bytes coming back over the WebSocket are real command stdout/stderr.
+        # Without this the PTY echoes each byte we send back to us, which means
+        # the sentinel string appears in the stream BEFORE the command executes,
+        # causing the reader to break immediately with an empty (or echoed) result.
+        setup_preamble = "stty -echo 2>/dev/null; PS1=''; PS2=''; export TERM=dumb\n"
+
+        # After the real command, capture $? and echo the end-marker with exit code.
         full_cmd = f"{command}\n__exit__=$?\necho '{end_sentinel}:'$__exit__\n"
 
         output_chunks: list[bytes] = []
@@ -147,31 +157,57 @@ class SandboxClient:
 
         try:
             async with websockets.connect(ws_url, open_timeout=10) as ws:
+                # Step 1: send setup preamble and drain its output. PTY echo is still on
+                # when we send, so the sentinel appears twice: once echoed, once from the
+                # real echo command. Wait for the second occurrence so the shell is ready.
+                drain_sentinel = f"__AICT_DRAIN_{marker}__"
+                sentinel_bytes = drain_sentinel.encode()
+                await ws.send(f"{setup_preamble}echo '{drain_sentinel}'\n".encode())
+
+                drain_buf = b""
+                seen_count = 0
+
+                async def _drain() -> None:
+                    nonlocal drain_buf, seen_count
+                    while True:
+                        raw = await ws.recv()
+                        if isinstance(raw, str):
+                            raw = raw.encode()
+                        drain_buf += raw
+                        seen_count = drain_buf.count(sentinel_bytes)
+                        if seen_count >= 2:
+                            break
+
+                await asyncio.wait_for(_drain(), timeout=10)
+
+                # Brief delay so any remaining preamble output flushes before we send the command.
+                await asyncio.sleep(0.05)
+
+                # Step 2: send the real command and collect output until end sentinel.
                 await ws.send(full_cmd.encode())
 
                 async def _read() -> None:
                     nonlocal total_bytes, truncated, exit_code
-                    async for raw in ws:
+                    while True:
+                        raw = await ws.recv()
                         if isinstance(raw, str):
                             raw = raw.encode()
-                        # Check for end-sentinel in accumulated output
                         output_chunks.append(raw)
                         total_bytes += len(raw)
                         if total_bytes > _MAX_SHELL_OUTPUT_BYTES:
                             truncated = True
-                            # Keep only last portion
-                            while total_bytes > _MAX_SHELL_OUTPUT_BYTES // 2:
+                            while total_bytes > _MAX_SHELL_OUTPUT_BYTES // 2 and len(output_chunks) > 1:
                                 dropped = output_chunks.pop(0)
                                 total_bytes -= len(dropped)
 
                         combined = b"".join(output_chunks).decode("utf-8", errors="replace")
                         if end_sentinel in combined:
-                            # Extract exit code
                             idx = combined.find(end_sentinel)
                             marker_line = combined[idx:]
-                            if ":" in marker_line:
+                            colon_idx = marker_line.find(":")
+                            if colon_idx != -1:
                                 try:
-                                    exit_code = int(marker_line.split(":")[1].split()[0])
+                                    exit_code = int(marker_line[colon_idx + 1:].split()[0])
                                 except (ValueError, IndexError):
                                     exit_code = None
                             break
@@ -186,7 +222,7 @@ class SandboxClient:
             raise RuntimeError(f"Shell execution failed: {exc}") from exc
 
         combined = b"".join(output_chunks).decode("utf-8", errors="replace")
-        # Strip the sentinel line from output
+        # Strip the sentinel line (and anything after it) from the output
         if end_sentinel in combined:
             combined = combined[: combined.find(end_sentinel)].rstrip()
 

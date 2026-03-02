@@ -15,23 +15,31 @@ import { ChevronRight, ChevronDown, Pencil, Eye, EyeOff, Zap } from 'lucide-reac
 import type { PromptBlockConfig, BlockMetaInfo } from '../../types';
 import { estimateTokens } from './ContextBudgetChart';
 
-const CONDITIONAL_BLOCK_KEYS = new Set(['loopback', 'end_solo_warning', 'summarization']);
+const CONDITIONAL_BLOCK_KEYS = new Set([
+  'loopback', 'end_solo_warning',
+  'summarization', 'summarization_memory', 'summarization_history',
+]);
 
 const TRIGGER_LABELS: Record<string, string> = {
   loopback: 'Injected when agent responds without tool calls',
   end_solo_warning: 'Injected when END is called with other tools',
-  summarization: 'Injected when context window reaches ~70% capacity',
+  summarization: 'Injected when context is full (session start or mid-loop)',
+  summarization_memory: 'Injected when memory fills ≥70% of memory budget',
+  summarization_history: 'Injected when current session fills ≥70% of session budget',
 };
 
 const BLOCK_LABELS: Record<string, string> = {
   loopback: 'Loopback',
   end_solo_warning: 'End Solo Warning',
-  summarization: 'Summarization',
+  summarization: 'Summarization (Legacy)',
+  summarization_memory: 'Memory Summarization',
+  summarization_history: 'Session Summarization',
 };
 
 interface RuntimeInjectionsGroupProps {
   blocks: PromptBlockConfig[];
   blockRegistry: Record<string, BlockMetaInfo>;
+  mutationsDisabled?: boolean;
   onEdit: (blockId: string) => void;
   onToggle: (blockId: string) => void;
 }
@@ -39,6 +47,7 @@ interface RuntimeInjectionsGroupProps {
 export function RuntimeInjectionsGroup({
   blocks,
   blockRegistry,
+  mutationsDisabled = false,
   onEdit,
   onToggle,
 }: RuntimeInjectionsGroupProps) {
@@ -113,8 +122,9 @@ export function RuntimeInjectionsGroup({
                 >
                   <button
                     type="button"
-                    className="p-1 rounded hover:bg-amber-100 text-amber-600 transition-colors"
+                    className="p-1 rounded hover:bg-amber-100 text-amber-600 transition-colors disabled:opacity-50"
                     title={block.enabled ? 'Disable' : 'Enable'}
+                    disabled={mutationsDisabled}
                     onClick={() => onToggle(block.id)}
                   >
                     {block.enabled ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}

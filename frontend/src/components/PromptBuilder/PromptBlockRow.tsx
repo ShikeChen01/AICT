@@ -61,6 +61,7 @@ interface PromptBlockRowProps {
   totalSystemTokens: number;
   isFirst: boolean;
   isLast: boolean;
+  mutationsDisabled?: boolean;
   onEdit: () => void;
   onToggle: () => void;
   onMoveUp: () => void;
@@ -73,6 +74,7 @@ export function PromptBlockRow({
   totalSystemTokens,
   isFirst,
   isLast,
+  mutationsDisabled = false,
   onEdit,
   onToggle,
   onMoveUp,
@@ -137,7 +139,7 @@ export function PromptBlockRow({
           type="button"
           className="p-1 rounded hover:bg-gray-100 disabled:opacity-20 text-gray-500 transition-colors"
           title="Move up"
-          disabled={isFirst}
+          disabled={isFirst || mutationsDisabled}
           onClick={onMoveUp}
         >
           <ChevronUp className="w-3.5 h-3.5" />
@@ -146,7 +148,7 @@ export function PromptBlockRow({
           type="button"
           className="p-1 rounded hover:bg-gray-100 disabled:opacity-20 text-gray-500 transition-colors"
           title="Move down"
-          disabled={isLast}
+          disabled={isLast || mutationsDisabled}
           onClick={onMoveDown}
         >
           <ChevronDown className="w-3.5 h-3.5" />
@@ -155,8 +157,9 @@ export function PromptBlockRow({
         {/* Toggle enable/disable */}
         <button
           type="button"
-          className="p-1 rounded hover:bg-gray-100 text-gray-500 transition-colors"
+          className="p-1 rounded hover:bg-gray-100 text-gray-500 transition-colors disabled:opacity-50"
           title={block.enabled ? 'Disable block' : 'Enable block'}
+          disabled={mutationsDisabled}
           onClick={onToggle}
         >
           {block.enabled

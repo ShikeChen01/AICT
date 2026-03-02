@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://aict:aict@localhost:5432/aict"
     db_ssl_mode: str = "disable"  # "disable" (local dev) | "require" (VM)
 
+    # Project secrets encryption (Fernet). If blank, values stored unencrypted (dev only).
+    secret_encryption_key: str = ""
+
     # Auth
     api_token: str = "change-me-in-production"
     firebase_credentials_path: str = ""

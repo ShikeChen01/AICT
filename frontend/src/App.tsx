@@ -99,7 +99,7 @@ function AppShell() {
           />
           <Route path="/repository/:projectId/workspace" element={<WorkspacePage view="workspace" />} />
           <Route path="/repository/:projectId/kanban" element={<WorkspacePage view="kanban" />} />
-          <Route path="/repository/:projectId/workflow" element={<WorkspacePage view="workflow" />} />
+          <Route path="/repository/:projectId/prompt_assembly" element={<WorkspacePage view="workflow" />} />
           <Route path="/repository/:projectId/artifacts" element={<WorkspacePage view="artifacts" />} />
           <Route path="/repository/:projectId/backend-logs" element={<BackendLogsPage />} />
         </Route>
