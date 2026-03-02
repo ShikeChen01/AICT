@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     engineer_senior_model: str = "claude-opus-4-6"
     llm_request_timeout_seconds: int = Field(default=60, ge=5, le=300)
     llm_max_tokens: int = Field(default=1024, ge=128, le=8192)
+    llm_max_tokens_agent_loop: int = Field(
+        default=10000,
+        ge=128,
+        le=65536,
+        description="Max output tokens for the universal agent loop (enables large tool payloads e.g. write_architecture_doc).",
+    )
     llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     llm_fallback_enabled: bool = True
     llm_use_legacy_http: bool = False

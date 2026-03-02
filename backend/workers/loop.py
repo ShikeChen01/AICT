@@ -602,6 +602,7 @@ async def run_inner_loop(
                 system_prompt=pa.system_prompt,
                 messages=pa.messages,
                 tools=pa.tools,
+                max_tokens=app_settings.llm_max_tokens_agent_loop,
             )
         except Exception as exc:
             logger.exception("LLM call failed for agent %s: %s", agent.id, exc)

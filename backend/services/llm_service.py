@@ -269,6 +269,8 @@ class LLMService:
         system_prompt: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        *,
+        max_tokens: int | None = None,
     ) -> tuple[str, list[dict[str, Any]], Any]:
         """
         Non-streaming chat with tool support. Used by the universal agent loop.
@@ -290,6 +292,7 @@ class LLMService:
                 "Set CLAUDE_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY."
             )
 
+        effective_max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
         if not settings.llm_use_legacy_http:
             response = await self._facade.complete_from_legacy_messages(
                 model=model,
@@ -297,6 +300,7 @@ class LLMService:
                 messages=messages,
                 tools=tools,
                 provider=provider,
+                max_tokens=effective_max_tokens,
             )
             logger.info(
                 "LLM facade response: provider=%s model=%s request_id=%s tool_calls=%d in=%d out=%d",
@@ -315,9 +319,13 @@ class LLMService:
 
         # Legacy direct-HTTP paths — wrap result in a minimal LLMResponse stub
         if provider == "google":
-            text, calls = await self._call_google_with_tools(model, system_prompt, messages, tools)
+            text, calls = await self._call_google_with_tools(
+                model, system_prompt, messages, tools, max_tokens=effective_max_tokens
+            )
         elif provider == "anthropic":
-            text, calls = await self._call_anthropic_with_tools(model, system_prompt, messages, tools)
+            text, calls = await self._call_anthropic_with_tools(
+                model, system_prompt, messages, tools, max_tokens=effective_max_tokens
+            )
         else:
             raise RuntimeError(
                 f"Provider '{provider}' is not supported in legacy HTTP mode. "
@@ -332,6 +340,8 @@ class LLMService:
         system_prompt: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        *,
+        max_tokens: int = 10000,
     ) -> tuple[str, list[dict[str, Any]]]:
         """Anthropic messages API with tool use."""
         model = self._require_model(model)
@@ -422,7 +432,7 @@ class LLMService:
 
         payload = {
             "model": model,
-            "max_tokens": settings.llm_max_tokens,
+            "max_tokens": max_tokens,
             "temperature": settings.llm_temperature,
             "system": system_prompt,
             "messages": api_messages,
@@ -472,6 +482,8 @@ class LLMService:
         system_prompt: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        *,
+        max_tokens: int = 10000,
     ) -> tuple[str, list[dict[str, Any]]]:
         """Gemini with function calling. Returns (text, tool_calls)."""
         model = self._require_model(model)
@@ -554,7 +566,7 @@ class LLMService:
             "contents": contents,
             "generationConfig": {
                 "temperature": settings.llm_temperature,
-                "maxOutputTokens": settings.llm_max_tokens,
+                "maxOutputTokens": max_tokens,
             },
         }
         if declarations:

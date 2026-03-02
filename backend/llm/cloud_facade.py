@@ -35,6 +35,7 @@ class CloudLLMFacade:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         provider: str | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
         canonical_messages: list[LLMMessage] = []
         for msg in messages:
@@ -75,6 +76,9 @@ class CloudLLMFacade:
             if isinstance(t, dict) and t.get("name")
         ]
 
+        effective_max_tokens = (
+            max_tokens if max_tokens is not None else settings.llm_max_tokens
+        )
         return await self.complete(
             LLMRequest(
                 model=model,
@@ -83,7 +87,7 @@ class CloudLLMFacade:
                 messages=canonical_messages,
                 tools=canonical_tools,
                 temperature=settings.llm_temperature,
-                max_tokens=settings.llm_max_tokens,
+                max_tokens=effective_max_tokens,
             )
         )
 
