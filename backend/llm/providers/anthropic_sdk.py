@@ -192,5 +192,16 @@ class AnthropicSDKProvider(BaseLLMProvider):
                 if not am["content"]:
                     am["content"] = [{"type": "text", "text": "\u200b"}]
 
+        # Anthropic requires the conversation to end with a user-role message.
+        # Stripping dangling tool_use blocks or orphaned tool_results can leave an
+        # assistant message last, which triggers a 400 "does not support assistant
+        # message prefill" error. Guard against this here rather than at every call site.
+        if api_messages and api_messages[-1].get("role") == "assistant":
+            logger.warning(
+                "Last message after build is 'assistant' — appending sentinel user turn "
+                "to satisfy Anthropic's conversation-must-end-with-user constraint."
+            )
+            api_messages.append({"role": "user", "content": [{"type": "text", "text": "\u200b"}]})
+
         return api_messages, issued_tool_use_ids
 
