@@ -15,6 +15,7 @@ from config import DISPLAY, PORT
 from display_handler import router as display_router
 from recording_handler import router as record_router
 from shell_handler import handle_shell_ws
+from stream_handler import ScreenStreamer
 
 _start_time = time.time()
 
@@ -43,9 +44,11 @@ async def lifespan(app: FastAPI):
         # Non-fatal — log and continue; Xvfb may still be starting
         print(f"[sandbox-server] WARNING: Xvfb not detected on {DISPLAY}")
 
+    app.state.screen_streamer = ScreenStreamer()
+
     yield  # app is running
 
-    # Nothing to clean up — container teardown handles everything
+    await app.state.screen_streamer.shutdown()
 
 
 app = FastAPI(title="Sandbox Server", lifespan=lifespan)
@@ -66,3 +69,25 @@ async def health() -> JSONResponse:
 @app.websocket("/ws/shell")
 async def shell_ws(ws: WebSocket, token: str = Depends(validate_ws_token)):
     await handle_shell_ws(ws, token)
+
+
+@app.websocket("/ws/screen")
+async def screen_ws(ws: WebSocket, token: str = Depends(validate_ws_token)):
+    """Stream MJPEG frames from Xvfb to the client."""
+    await ws.accept()
+    streamer: ScreenStreamer = app.state.screen_streamer
+    await streamer.add_client(ws)
+    try:
+        while True:
+            data = await ws.receive()
+            if data.get("type") == "websocket.disconnect":
+                break
+            # Handle text control messages (quality/fps)
+            if "text" in data:
+                await streamer.handle_client_message(data["text"])
+            elif "bytes" in data:
+                await streamer.handle_client_message(data["bytes"])
+    except Exception:
+        pass
+    finally:
+        await streamer.remove_client(ws)

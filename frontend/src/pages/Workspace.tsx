@@ -15,6 +15,8 @@ import { ArchitecturePage } from '../components/Architecture/ArchitecturePage';
 import { AgentsPanel } from '../components/Agents';
 import { ActivityFeed } from '../components/ActivityFeed';
 import { AgentStream } from '../components/AgentChat/AgentStream';
+import { ScreenStreamView } from '../components/ScreenStream';
+import { useAgents } from '../hooks';
 import { Panel } from '../components/ui';
 export type WorkspaceView = 'workspace' | 'kanban' | 'workflow' | 'artifacts';
 
@@ -37,6 +39,10 @@ function WorkspaceContent({
     activityLogs,
   } = useAgentStreamContext();
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [streamTab, setStreamTab] = useState<'text' | 'screen'>('text');
+  const { agents } = useAgents(projectId);
+  const selectedAgent = agents.find((a) => a.id === selectedAgentId);
+  const selectedSandboxId = streamTab === 'screen' ? (selectedAgent?.sandbox_id ?? null) : null;
   const [streamRatio, setStreamRatio] = useState(0.38);
   const [agentsRatio, setAgentsRatio] = useState(0.45);
   const [isResizingStream, setIsResizingStream] = useState(false);
@@ -121,11 +127,41 @@ function WorkspaceContent({
           className="min-h-0"
           bodyClassName="min-h-0"
           style={{ flex: `0 0 ${Math.round(streamRatio * 100)}%` }}
+          headerActions={(
+            <div className="flex rounded-md border border-[var(--border-color)] bg-[var(--surface-card)] text-xs">
+              <button
+                type="button"
+                onClick={() => setStreamTab('text')}
+                className={`px-2.5 py-1 font-medium rounded-l-md ${
+                  streamTab === 'text'
+                    ? 'bg-[var(--color-primary)] text-white'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
+                }`}
+              >
+                Text
+              </button>
+              <button
+                type="button"
+                onClick={() => setStreamTab('screen')}
+                className={`px-2.5 py-1 font-medium rounded-r-md ${
+                  streamTab === 'screen'
+                    ? 'bg-[var(--color-primary)] text-white'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
+                }`}
+              >
+                Screen
+              </button>
+            </div>
+          )}
         >
-          <AgentStream
-            buffer={selectedAgentId ? getBuffer(selectedAgentId) : getBuffer('')}
-            onClear={selectedAgentId ? () => clearBuffer(selectedAgentId) : undefined}
-          />
+          {streamTab === 'text' ? (
+            <AgentStream
+              buffer={selectedAgentId ? getBuffer(selectedAgentId) : getBuffer('')}
+              onClear={selectedAgentId ? () => clearBuffer(selectedAgentId) : undefined}
+            />
+          ) : (
+            <ScreenStreamView sandboxId={selectedSandboxId} />
+          )}
         </Panel>
         <div
           role="separator"

@@ -56,11 +56,11 @@ class PoolManagerClient:
             "Authorization": f"Bearer {settings.sandbox_vm_master_token}",
         }
 
-    async def session_start(self, agent_id: str) -> dict:
+    async def session_start(self, agent_id: str, persistent: bool = False) -> dict:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 f"{self._base}/sandbox/session/start",
-                json={"agent_id": agent_id},
+                json={"agent_id": agent_id, "persistent": persistent},
                 headers=self._headers,
             )
             resp.raise_for_status()
@@ -92,6 +92,25 @@ class PoolManagerClient:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.delete(
                 f"{self._base}/sandbox/{sandbox_id}",
+                headers=self._headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def restart_sandbox(self, sandbox_id: str) -> dict:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{self._base}/sandbox/{sandbox_id}/restart",
+                headers=self._headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def set_persistent(self, sandbox_id: str, persistent: bool) -> dict:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{self._base}/sandbox/{sandbox_id}/persistent",
+                json={"persistent": persistent},
                 headers=self._headers,
             )
             resp.raise_for_status()
@@ -143,8 +162,9 @@ class SandboxService:
             )
 
         agent_id = str(agent.id)
+        is_persistent = persistent if persistent is not None else bool(agent.sandbox_persist)
         try:
-            data = await self._pool.session_start(agent_id)
+            data = await self._pool.session_start(agent_id, persistent=is_persistent)
         except httpx.HTTPStatusError as exc:
             raise RuntimeError(
                 f"Pool manager error for agent {agent_id}: "
@@ -314,3 +334,43 @@ class SandboxService:
         if not agent.sandbox_id:
             raise SandboxNotFoundError(str(agent.id))
         return await self._client.health_check(agent.sandbox_id)
+
+    # ── Management operations ────────────────────────────────────────────────
+
+    async def list_all_sandboxes(self) -> list[dict]:
+        """List all sandboxes from the pool manager."""
+        if not self._vm_configured():
+            return []
+        return await self._pool.list_sandboxes()
+
+    async def restart_sandbox(self, agent: Agent) -> dict:
+        """Restart a sandbox container (keeps volume / installed apps)."""
+        if not agent.sandbox_id:
+            raise SandboxNotFoundError(str(agent.id))
+        return await self._pool.restart_sandbox(agent.sandbox_id)
+
+    async def set_sandbox_persistent(
+        self,
+        session: AsyncSession,
+        agent: Agent,
+        persistent: bool,
+    ) -> dict:
+        """Toggle the persistent flag on a sandbox."""
+        if not agent.sandbox_id:
+            raise SandboxNotFoundError(str(agent.id))
+        result = await self._pool.set_persistent(agent.sandbox_id, persistent)
+        agent.sandbox_persist = persistent
+        await session.flush()
+        return result
+
+    async def destroy_sandbox(self, session: AsyncSession, agent: Agent) -> dict:
+        """Permanently destroy a sandbox and its volume."""
+        if not agent.sandbox_id:
+            raise SandboxNotFoundError(str(agent.id))
+        sandbox_id = agent.sandbox_id
+        result = await self._pool.destroy(sandbox_id)
+        self._client.unregister(sandbox_id)
+        agent.sandbox_id = None
+        agent.sandbox_persist = False
+        await session.flush()
+        return result

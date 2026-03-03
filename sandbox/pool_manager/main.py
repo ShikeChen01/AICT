@@ -345,6 +345,76 @@ async def destroy_sandbox(
     return JSONResponse({"ok": True, "sandbox_id": sandbox_id})
 
 
+# ── Restart sandbox (preserves volume) ────────────────────────────────────────
+
+
+@app.post("/api/sandbox/{sandbox_id}/restart")
+async def restart_sandbox(
+    sandbox_id: str,
+    _: None = Depends(require_master_token),
+) -> JSONResponse:
+    """Restart a sandbox container but keep its volume (installed apps persist)."""
+    s = _pool.get(sandbox_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Sandbox not found")
+
+    prev_agent = s.assigned_agent_id
+    _pool.mark_resetting(sandbox_id)
+
+    loop = asyncio.get_event_loop()
+    try:
+        new_container_id = await loop.run_in_executor(
+            None,
+            _docker.reset_container,
+            sandbox_id,
+            s.host_port,
+            s.auth_token,
+            s.volume_name,
+        )
+        s2 = _pool.get(sandbox_id)
+        if s2:
+            s2.container_id = new_container_id
+            _pool.update(s2)
+
+        ready = await _wait_for_container_ready(s.host_port, s.auth_token, timeout=30.0)
+        if not ready:
+            if s2:
+                s2.status = "unhealthy"
+                _pool.update(s2)
+            return JSONResponse({"ok": False, "sandbox_id": sandbox_id, "status": "unhealthy"})
+
+        _pool.release(sandbox_id)
+        # Re-assign to the previous agent if it had one
+        if prev_agent:
+            _pool.assign(sandbox_id, prev_agent)
+
+        return JSONResponse({"ok": True, "sandbox_id": sandbox_id, "status": "running"})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Restart failed: {exc}") from exc
+
+
+# ── Toggle persistence ───────────────────────────────────────────────────────
+
+
+class PersistentRequest(BaseModel):
+    persistent: bool
+
+
+@app.post("/api/sandbox/{sandbox_id}/persistent")
+async def set_persistent(
+    sandbox_id: str,
+    body: PersistentRequest,
+    _: None = Depends(require_master_token),
+) -> JSONResponse:
+    """Toggle the persistent flag on a sandbox."""
+    s = _pool.get(sandbox_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Sandbox not found")
+    s.persistent = body.persistent
+    _pool.update(s)
+    return JSONResponse({"ok": True, "sandbox_id": sandbox_id, "persistent": s.persistent})
+
+
 # ── Debug / observability ─────────────────────────────────────────────────────
 
 
@@ -387,6 +457,7 @@ async def pool_debug(_: None = Depends(require_master_token)) -> JSONResponse:
 
 class SessionStartRequest(BaseModel):
     agent_id: str
+    persistent: bool = False
 
 
 @app.post("/api/sandbox/session/start")
@@ -461,6 +532,7 @@ async def session_start(
         volume_name=volume_name,
         auth_token=auth_token,
         status="idle",
+        persistent=body.persistent,
     )
     _pool.add(s)
     _pool.assign(sandbox_id, body.agent_id)
@@ -506,6 +578,13 @@ async def session_end(
         return JSONResponse({"ok": True, "message": "No sandbox assigned to this agent"})
 
     sandbox_id = s.sandbox_id
+
+    if s.persistent:
+        # Persistent sandboxes keep running — just release the agent assignment.
+        # Container stays alive, volume intact, apps installed by the agent persist.
+        _pool.release(sandbox_id)
+        return JSONResponse({"ok": True, "sandbox_id": sandbox_id, "persistent": True})
+
     _pool.mark_resetting(sandbox_id)
     asyncio.create_task(_background_reset_and_idle(sandbox_id))
 

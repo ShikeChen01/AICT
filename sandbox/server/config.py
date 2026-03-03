@@ -20,3 +20,7 @@ SCREEN_DEPTH: int = 24
 # Recording settings
 RECORD_FPS: int = 2
 RECORD_OUTPUT: str = "/tmp/recording.mp4"
+
+# Screen streaming settings
+STREAM_FPS: int = 3
+STREAM_QUALITY: int = 8  # JPEG quality for streaming (1=best, 31=worst)

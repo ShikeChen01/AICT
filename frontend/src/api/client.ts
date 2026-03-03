@@ -604,6 +604,36 @@ export async function revertDocument(
   return request<ProjectDocument>('POST', `/repositories/${repositoryId}/documents/${docType}/revert`, { version_number: versionNumber });
 }
 
+// ─── Sandboxes ──────────────────────────────────────────────────────
+
+export interface SandboxInfo {
+  agent_id: string;
+  agent_name: string;
+  agent_role: string;
+  sandbox_id: string;
+  persistent: boolean;
+  status: string | null;
+}
+
+export async function listSandboxes(projectId: string): Promise<SandboxInfo[]> {
+  return request<SandboxInfo[]>('GET', `/sandboxes?project_id=${projectId}`);
+}
+
+export async function toggleSandboxPersistence(
+  agentId: string,
+  persistent: boolean,
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('POST', `/sandboxes/${agentId}/persistent`, { persistent });
+}
+
+export async function restartSandbox(agentId: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('POST', `/sandboxes/${agentId}/restart`, undefined, 60_000);
+}
+
+export async function destroySandbox(agentId: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('DELETE', `/sandboxes/${agentId}`);
+}
+
 // ─── WebSocket Client ────────────────────────────────────────────────
 
 type WSEventHandler = (event: WSEvent) => void;

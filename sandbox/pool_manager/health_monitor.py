@@ -51,17 +51,14 @@ class HealthMonitor:
         if s.status == "resetting":
             return
 
-        # TTL-based idle cleanup
-        if s.status == "idle" and s.idle_seconds() > IDLE_TTL_SECONDS:
+        # TTL-based idle cleanup — skip for persistent sandboxes (they live indefinitely)
+        if s.status == "idle" and not s.persistent and s.idle_seconds() > IDLE_TTL_SECONDS:
             print(f"[health-monitor] Evicting idle sandbox {s.sandbox_id} (TTL exceeded)")
             await self._evict(s)
             return
 
-        # Zombie assigned-sandbox guard.  If an agent's session_end call
-        # timed out or the backend crashed without calling session_end, the
-        # slot stays "assigned" even though no live agent holds it.  Release
-        # it back to the reset pipeline so the slot becomes available again.
-        if s.status == "assigned" and s.idle_seconds() > ASSIGNED_TTL_SECONDS:
+        # Zombie assigned-sandbox guard — skip for persistent sandboxes
+        if s.status == "assigned" and not s.persistent and s.idle_seconds() > ASSIGNED_TTL_SECONDS:
             print(
                 f"[health-monitor] Releasing zombie assigned sandbox {s.sandbox_id} "
                 f"(idle for {s.idle_seconds():.0f}s > ASSIGNED_TTL={ASSIGNED_TTL_SECONDS}s)"

@@ -29,6 +29,7 @@ import {
   Key,
   Trash2,
   Upload,
+  Monitor,
 } from 'lucide-react';
 import {
   getProject,
@@ -49,6 +50,7 @@ import type {
   ProjectUsageResponse,
 } from '../types';
 import { Button, Card, Input, Textarea } from '../components/ui';
+import { SandboxManager } from '../components/Sandbox/SandboxManager';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -923,6 +925,19 @@ export function SettingsPage() {
             </Button>
           </div>
         </form>
+
+        {/* ── 9. Sandbox Management (outside form — has its own actions) ── */}
+        <Card className="mt-8 p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <Monitor className="w-5 h-5 text-gray-500" />
+            <h2 className="text-lg font-semibold text-gray-900">Sandboxes</h2>
+          </div>
+          <p className="text-sm text-gray-500 mb-4">
+            Manage sandbox containers for this project's agents. Persistent sandboxes
+            survive session restarts — agents can install and use GUI applications long-term.
+          </p>
+          <SandboxManager projectId={projectId!} />
+        </Card>
 
       </main>
     </div>
