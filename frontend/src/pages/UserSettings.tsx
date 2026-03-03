@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Monitor } from 'lucide-react';
 
 import { updateMe } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { Button, Card, Input } from '../components/ui';
+import { SandboxConfigEditor } from '../components/Sandbox/SandboxConfigEditor';
 
 export function UserSettingsPage() {
   const { user, refreshProfile, logout } = useAuth();
@@ -89,6 +91,20 @@ export function UserSettingsPage() {
             </Button>
           </div>
         </form>
+      </Card>
+
+      {/* Sandbox Configs — user-level reusable setup profiles */}
+      <Card className="mx-auto max-w-2xl mt-6 p-6">
+        <div className="flex items-center gap-2 mb-1">
+          <Monitor className="w-5 h-5 text-gray-500" />
+          <h2 className="text-lg font-semibold">Sandbox Configs</h2>
+        </div>
+        <p className="text-sm text-gray-500 mb-4">
+          Reusable sandbox setup profiles. Each config defines a shell script that runs
+          inside agent sandboxes to install apps, load data, or configure the environment.
+          Assign configs to agents from the project Settings page.
+        </p>
+        <SandboxConfigEditor />
       </Card>
     </div>
   );

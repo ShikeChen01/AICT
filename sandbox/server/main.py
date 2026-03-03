@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, WebSocket
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from auth import require_token, validate_ws_token
 from config import DISPLAY, PORT
@@ -64,6 +65,36 @@ async def health() -> JSONResponse:
         "uptime_seconds": round(time.time() - _start_time, 1),
         "display": DISPLAY,
     })
+
+
+class ShellExecuteRequest(BaseModel):
+    command: str
+    timeout: int = 120
+
+
+@app.post("/shell/execute", dependencies=[Depends(require_token)])
+async def shell_execute(body: ShellExecuteRequest) -> JSONResponse:
+    """Execute a shell command and return stdout + exit code (REST alternative to WS shell)."""
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            body.command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env={"DISPLAY": DISPLAY, "HOME": "/root", "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},
+        )
+        stdout_bytes, _ = await asyncio.wait_for(
+            proc.communicate(), timeout=body.timeout,
+        )
+        stdout = stdout_bytes.decode(errors="replace") if stdout_bytes else ""
+        return JSONResponse({
+            "stdout": stdout,
+            "exit_code": proc.returncode,
+        })
+    except asyncio.TimeoutError:
+        proc.kill()
+        return JSONResponse({"stdout": "Command timed out", "exit_code": -1}, status_code=408)
+    except Exception as exc:
+        return JSONResponse({"stdout": str(exc), "exit_code": -1}, status_code=500)
 
 
 @app.websocket("/ws/shell")

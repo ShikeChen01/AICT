@@ -56,11 +56,32 @@ class PoolManagerClient:
             "Authorization": f"Bearer {settings.sandbox_vm_master_token}",
         }
 
-    async def session_start(self, agent_id: str, persistent: bool = False) -> dict:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+    async def session_start(
+        self,
+        agent_id: str,
+        persistent: bool = False,
+        setup_script: str | None = None,
+    ) -> dict:
+        body: dict = {"agent_id": agent_id, "persistent": persistent}
+        if setup_script:
+            body["setup_script"] = setup_script
+        # Longer timeout when setup_script is provided (scripts can install packages)
+        timeout = 300.0 if setup_script else 30.0
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 f"{self._base}/sandbox/session/start",
-                json={"agent_id": agent_id, "persistent": persistent},
+                json=body,
+                headers=self._headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def run_setup(self, sandbox_id: str, setup_script: str) -> dict:
+        """Run a setup script on an existing sandbox."""
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            resp = await client.post(
+                f"{self._base}/sandbox/{sandbox_id}/run-setup",
+                json={"setup_script": setup_script},
                 headers=self._headers,
             )
             resp.raise_for_status()
@@ -163,8 +184,25 @@ class SandboxService:
 
         agent_id = str(agent.id)
         is_persistent = persistent if persistent is not None else bool(agent.sandbox_persist)
+
+        # Load the agent's sandbox config setup script (if assigned)
+        setup_script: str | None = None
+        if agent.sandbox_config_id:
+            from backend.db.models import SandboxConfig
+            from sqlalchemy import select
+            result = await session.execute(
+                select(SandboxConfig.setup_script).where(SandboxConfig.id == agent.sandbox_config_id)
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                setup_script = row
+
         try:
-            data = await self._pool.session_start(agent_id, persistent=is_persistent)
+            data = await self._pool.session_start(
+                agent_id,
+                persistent=is_persistent,
+                setup_script=setup_script,
+            )
         except httpx.HTTPStatusError as exc:
             raise RuntimeError(
                 f"Pool manager error for agent {agent_id}: "
@@ -374,3 +412,19 @@ class SandboxService:
         agent.sandbox_persist = False
         await session.flush()
         return result
+
+    async def apply_config(self, session: AsyncSession, agent: Agent) -> dict:
+        """Run the agent's sandbox config setup script on its current sandbox."""
+        if not agent.sandbox_id:
+            raise SandboxNotFoundError(str(agent.id))
+        if not agent.sandbox_config_id:
+            return {"ok": True, "skipped": True, "message": "No config assigned"}
+        from backend.db.models import SandboxConfig
+        from sqlalchemy import select
+        result = await session.execute(
+            select(SandboxConfig.setup_script).where(SandboxConfig.id == agent.sandbox_config_id)
+        )
+        script = result.scalar_one_or_none()
+        if not script:
+            return {"ok": True, "skipped": True, "message": "Config has empty setup script"}
+        return await self._pool.run_setup(agent.sandbox_id, script)

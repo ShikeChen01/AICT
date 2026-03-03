@@ -28,6 +28,7 @@ class AgentResponse(BaseModel):
     current_task_id: UUID | None
     sandbox_id: str | None
     sandbox_persist: bool
+    sandbox_config_id: UUID | None = None
     memory: dict | None = None
     created_at: datetime
     updated_at: datetime
