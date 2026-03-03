@@ -28,13 +28,16 @@ class ProjectDocumentRepository(BaseRepository[ProjectDocument]):
         )
         return list(result.scalars().all())
 
-    async def get_by_type(self, project_id: UUID, doc_type: str) -> ProjectDocument | None:
-        result = await self.session.execute(
+    async def get_by_type(self, project_id: UUID, doc_type: str, *, for_update: bool = False) -> ProjectDocument | None:
+        q = (
             select(ProjectDocument).where(
                 ProjectDocument.project_id == project_id,
                 ProjectDocument.doc_type == doc_type,
             )
         )
+        if for_update:
+            q = q.with_for_update()
+        result = await self.session.execute(q)
         return result.scalar_one_or_none()
 
     async def _snapshot_version(
@@ -95,8 +98,9 @@ class ProjectDocumentRepository(BaseRepository[ProjectDocument]):
         """Insert or update a document (agent write). Snapshots previous version."""
         now = datetime.now(timezone.utc)
 
-        # Get or create the document
-        existing = await self.get_by_type(project_id, doc_type)
+        # Get or create the document; lock the row if it exists to prevent concurrent
+        # version-number collisions during the snapshot + increment sequence.
+        existing = await self.get_by_type(project_id, doc_type, for_update=True)
         if existing:
             # Snapshot current content before overwriting
             await self._snapshot_version(
@@ -154,7 +158,9 @@ class ProjectDocumentRepository(BaseRepository[ProjectDocument]):
     ) -> ProjectDocument:
         """User edits a document. Creates or updates with version snapshot."""
         now = datetime.now(timezone.utc)
-        existing = await self.get_by_type(project_id, doc_type)
+        # Lock the row (if it exists) to serialise concurrent edits and prevent
+        # version-number collisions in _snapshot_version.
+        existing = await self.get_by_type(project_id, doc_type, for_update=True)
 
         if existing:
             # Snapshot current content before overwriting
@@ -174,22 +180,40 @@ class ProjectDocumentRepository(BaseRepository[ProjectDocument]):
             await self.session.refresh(existing)
             return existing
         else:
-            doc = ProjectDocument(
-                id=uuid.uuid4(),
-                project_id=project_id,
-                doc_type=doc_type,
-                content=content,
-                title=title,
-                updated_by_user_id=user_id,
-                updated_by_agent_id=None,
-                current_version=1,
-                created_at=now,
-                updated_at=now,
+            # Use INSERT ... ON CONFLICT DO UPDATE so that a concurrent insert
+            # (another request that also saw no document and races to create one)
+            # results in an update instead of a duplicate-entry error.
+            stmt = (
+                pg_insert(ProjectDocument)
+                .values(
+                    project_id=project_id,
+                    doc_type=doc_type,
+                    content=content,
+                    title=title,
+                    updated_by_user_id=user_id,
+                    updated_by_agent_id=None,
+                    current_version=1,
+                    created_at=now,
+                    updated_at=now,
+                )
+                .on_conflict_do_update(
+                    constraint="uq_project_documents_project_type",
+                    set_={
+                        "content": content,
+                        "title": title,
+                        "updated_by_user_id": user_id,
+                        "updated_by_agent_id": None,
+                        "updated_at": now,
+                        # Treat the conflict as an update: increment version so the
+                        # document version counter is never stuck at 1 after a race.
+                        "current_version": ProjectDocument.__table__.c.current_version + 1,
+                    },
+                )
+                .returning(ProjectDocument)
             )
-            self.session.add(doc)
+            result = await self.session.execute(stmt)
             await self.session.flush()
-            await self.session.refresh(doc)
-            return doc
+            return result.scalar_one()
 
     async def list_versions(
         self, project_id: UUID, doc_type: str

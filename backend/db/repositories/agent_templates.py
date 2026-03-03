@@ -269,6 +269,13 @@ class PromptBlockConfigRepository(BaseRepository[PromptBlockConfig]):
 
         Each dict in blocks: {block_key, content, position, enabled}.
         """
+        # Lock the agent row to serialize concurrent block replacements.
+        # Without this lock, two concurrent requests can both DELETE then INSERT,
+        # interleaving as: D1-delete → D2-delete → D2-insert → D1-insert, producing
+        # duplicate PromptBlockConfig rows and causing wrong prompt/budget calculations.
+        await self.session.execute(
+            select(Agent).where(Agent.id == agent_id).with_for_update()
+        )
         await self.session.execute(
             delete(PromptBlockConfig).where(PromptBlockConfig.agent_id == agent_id)
         )
@@ -292,6 +299,11 @@ class PromptBlockConfigRepository(BaseRepository[PromptBlockConfig]):
         self, template_id: UUID, blocks: list[dict]
     ) -> list[PromptBlockConfig]:
         """Replace all template-level blocks with the provided list."""
+        # Lock the template row to serialize concurrent block replacements.
+        # Same race condition fix as bulk_replace_agent_blocks.
+        await self.session.execute(
+            select(AgentTemplate).where(AgentTemplate.id == template_id).with_for_update()
+        )
         await self.session.execute(
             delete(PromptBlockConfig).where(PromptBlockConfig.template_id == template_id)
         )
