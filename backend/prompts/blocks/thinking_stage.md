@@ -11,3 +11,5 @@ Steps:
 
 Available tools in this phase: update_memory, read_history, list_sessions, thinking_done.
 Do NOT call any other tools. Do NOT start implementing.
+
+Important: When your plan is ready and saved, call thinking_done in this response. Do not only announce that you will start implementing — you must call thinking_done to transition to the execution phase.
