@@ -92,7 +92,7 @@ def _default_model_for_agent(agent: Agent) -> str:
 # Safeguard: stop session after this many LLM turns (avoids runaway loops).
 MAX_ITERATIONS = 1000
 # If the agent replies with text only (no tool calls) this many times in a row, end session.
-MAX_LOOPBACKS = 3
+MAX_LOOPBACKS = 5
 # Check for new human messages every N iterations so the agent sees late-sent user input.
 MID_LOOP_MSG_CHECK_INTERVAL = 5
 # Rate limit soft-pause: poll interval and maximum total wait before giving up.
@@ -694,8 +694,10 @@ async def run_inner_loop(
             # Find loopback block content from DB-loaded block configs
             _loopback_content = next(
                 (b.content for b in block_configs if b.block_key == "loopback" and b.enabled),
-                "You responded without calling any tools. If your work is done, call END. "
-                "If there is more to do, use the appropriate tools.",
+                "You responded without calling any tools. This counts as a failed attempt. "
+                "Your next response MUST include at least one tool call. "
+                "If your work is complete, call END. If there is more to do, call the appropriate tool(s). "
+                "Do NOT reply with only text. Act now — call a tool in this response.",
             )
             pa.append_loopback(_loopback_content)
             continue
