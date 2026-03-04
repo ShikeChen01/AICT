@@ -299,7 +299,7 @@ async def test_run_inner_loop_normalizes_legacy_tool_name_in_history(
         ]
     }
     monkeypatch.setattr(
-        "backend.db.repositories.messages.AgentMessageRepository.list_last_n_sessions",
+        "backend.db.repositories.messages.AgentMessageRepository.list_past_session_history",
         AsyncMock(return_value=[history_row]),
     )
     monkeypatch.setattr(
