@@ -77,7 +77,7 @@ async def test_agent_worker_recovers_from_cycle_failure(monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr(
-        "backend.workers.agent_worker.run_inner_loop",
+        "backend.agents.agent.Agent.run",
         AsyncMock(side_effect=RuntimeError("cycle failed")),
     )
 
@@ -86,8 +86,8 @@ async def test_agent_worker_recovers_from_cycle_failure(monkeypatch) -> None:
     await asyncio.sleep(0)
 
     worker._queue.put_nowait(None)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
+    for _ in range(10):
+        await asyncio.sleep(0)
 
     assert db.rollback_called is True
     end_session_error.assert_awaited_once()

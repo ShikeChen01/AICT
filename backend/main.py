@@ -144,6 +144,29 @@ async def _run_reconciler_forever() -> None:
             await asyncio.sleep(5)
 
 
+async def _run_config_listener_forever() -> None:
+    """Keep the ConfigListener running indefinitely.
+
+    ConfigListener holds a dedicated asyncpg LISTEN connection and marks agent
+    config dirty when the DB fires pg_notify on 'agent_config_changed'.
+    If it crashes or disconnects, run_forever() already handles reconnection;
+    this outer wrapper restarts the entire listener on unexpected exits.
+    """
+    from backend.agents.config_listener import ConfigListener, _asyncpg_dsn
+
+    wm = get_worker_manager()
+    dsn = _asyncpg_dsn(settings.database_url)
+    listener = ConfigListener(dsn=dsn, worker_manager=wm)
+    try:
+        await listener.run_forever()
+    except asyncio.CancelledError:
+        await listener.stop()
+        raise
+    except Exception as exc:
+        logger.error("ConfigListener exited unexpectedly: %s", exc)
+        raise
+
+
 async def _run_broadcaster_forever() -> None:
     """
     Keep the backend-log broadcaster running indefinitely.
@@ -207,6 +230,7 @@ async def lifespan(app: FastAPI):
         )
     _background_tasks.append(asyncio.create_task(_run_broadcaster_forever()))
     _background_tasks.append(asyncio.create_task(_run_reconciler_forever()))
+    _background_tasks.append(asyncio.create_task(_run_config_listener_forever()))
     yield
     # Shutdown
     await _stop_background_tasks()

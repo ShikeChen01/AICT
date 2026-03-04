@@ -163,6 +163,10 @@ class WorkerManager:
             except asyncio.TimeoutError:
                 logger.warning("Worker for agent %s did not become ready in time", agent_id)
 
+    def get_worker(self, agent_id: UUID) -> "AgentWorker | None":
+        """Return the AgentWorker for the given agent, or None if not registered."""
+        return next((w for w in self._workers if w.agent_id == agent_id), None)
+
     def interrupt_agent(self, agent_id: UUID) -> None:
         """Signal a specific agent's worker to interrupt at next iteration."""
         for w in self._workers:

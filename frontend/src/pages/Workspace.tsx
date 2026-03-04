@@ -50,6 +50,21 @@ function WorkspaceContent({
   const monitoringRef = useRef<HTMLDivElement | null>(null);
   const lowerStackRef = useRef<HTMLDivElement | null>(null);
 
+  // Track the previous sandbox_id so we can detect when a sandbox is first assigned
+  const prevSandboxIdRef = useRef<string | null | undefined>(undefined);
+  const currentSandboxId = selectedAgent?.sandbox_id ?? null;
+  useEffect(() => {
+    // Auto-switch to Screen tab when the selected agent gets a new sandbox_id
+    if (
+      prevSandboxIdRef.current !== undefined &&
+      prevSandboxIdRef.current === null &&
+      currentSandboxId !== null
+    ) {
+      setStreamTab('screen');
+    }
+    prevSandboxIdRef.current = currentSandboxId;
+  }, [currentSandboxId]);
+
   useEffect(() => {
     if (!isResizingStream) return;
     const onMove = (event: MouseEvent) => {
