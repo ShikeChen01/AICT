@@ -15,7 +15,7 @@ import { ArchitecturePage } from '../components/Architecture/ArchitecturePage';
 import { AgentsPanel } from '../components/Agents';
 import { ActivityFeed } from '../components/ActivityFeed';
 import { AgentStream } from '../components/AgentChat/AgentStream';
-import { ScreenStreamView } from '../components/ScreenStream';
+import { VncView } from '../components/ScreenStream';
 import { useAgents } from '../hooks';
 import { Panel } from '../components/ui';
 export type WorkspaceView = 'workspace' | 'kanban' | 'workflow' | 'artifacts';
@@ -160,7 +160,7 @@ function WorkspaceContent({
               onClear={selectedAgentId ? () => clearBuffer(selectedAgentId) : undefined}
             />
           ) : (
-            <ScreenStreamView sandboxId={selectedSandboxId} />
+            <VncView sandboxId={selectedSandboxId} />
           )}
         </Panel>
         <div

@@ -17,6 +17,7 @@ from display_handler import router as display_router
 from recording_handler import router as record_router
 from shell_handler import handle_shell_ws
 from stream_handler import ScreenStreamer
+from vnc_handler import handle_vnc_ws
 
 _start_time = time.time()
 
@@ -122,3 +123,9 @@ async def screen_ws(ws: WebSocket, token: str = Depends(validate_ws_token)):
         pass
     finally:
         await streamer.remove_client(ws)
+
+
+@app.websocket("/ws/vnc")
+async def vnc_ws(ws: WebSocket, token: str = Depends(validate_ws_token)):
+    """Bridge WebSocket to local VNC server for interactive remote desktop."""
+    await handle_vnc_ws(ws)

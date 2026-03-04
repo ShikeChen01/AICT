@@ -23,6 +23,10 @@ export DISPLAY="${DISPLAY_NUM}"
 echo "[sandbox] Starting openbox window manager..."
 openbox --sm-disable &
 
+# Start x11vnc — VNC server attached to the Xvfb display for remote desktop
+echo "[sandbox] Starting x11vnc on display ${DISPLAY_NUM}..."
+x11vnc -display "${DISPLAY_NUM}" -forever -nopw -rfbport 5900 -shared -noxdamage -noxfixes &
+
 echo "[sandbox] Starting sandbox server on port ${PORT:-8080}..."
 exec python3 -m uvicorn main:app \
     --host 0.0.0.0 \

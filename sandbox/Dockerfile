@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         xdotool \
         ffmpeg \
         x11-utils \
+        x11vnc \
         openbox \
         dbus-x11 \
         python3 \
