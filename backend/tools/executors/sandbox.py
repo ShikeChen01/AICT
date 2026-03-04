@@ -24,8 +24,12 @@ def _get_sandbox_service():
 async def run_execute_command(ctx: RunContext, tool_input: dict) -> str:
     command = str(tool_input["command"])
     timeout = int(tool_input.get("timeout", 120))
+    prev_sandbox_id = ctx.agent.sandbox_id
     svc = _get_sandbox_service()
     result = await svc.execute_command(ctx.db, ctx.agent, command, timeout=timeout)
+    # If sandbox was just created (first execute_command), commit and broadcast
+    if ctx.agent.sandbox_id != prev_sandbox_id:
+        await _commit_and_broadcast_sandbox(ctx)
     parts: list[str] = [f"Sandbox: {ctx.agent.sandbox_id}"]
     if result.truncated:
         parts.append("[output truncated]")
@@ -41,9 +45,19 @@ async def run_execute_command(ctx: RunContext, tool_input: dict) -> str:
     return "\n".join(parts).strip()
 
 
+async def _commit_and_broadcast_sandbox(ctx: RunContext) -> None:
+    """Commit sandbox_id to DB and broadcast so the frontend sees it immediately."""
+    await ctx.db.commit()
+    from backend.websocket.manager import ws_manager
+    await ws_manager.broadcast_agent_status(ctx.agent)
+
+
 async def run_sandbox_start_session(ctx: RunContext, tool_input: dict) -> str:
     svc = _get_sandbox_service()
     meta = await svc.ensure_running_sandbox(ctx.db, ctx.agent)
+    # Commit immediately so sandbox_id is visible to other DB sessions (API endpoints)
+    # and broadcast agent_status so the frontend refreshes and picks up the new sandbox_id.
+    await _commit_and_broadcast_sandbox(ctx)
     return meta.message or f"Sandbox ready: {meta.sandbox_id}"
 
 
@@ -52,6 +66,7 @@ async def run_sandbox_end_session(ctx: RunContext, tool_input: dict) -> str:
         return "No active sandbox to end."
     svc = _get_sandbox_service()
     await svc.close_sandbox(ctx.db, ctx.agent)
+    await _commit_and_broadcast_sandbox(ctx)
     return "Sandbox session ended. Container returned to pool."
 
 

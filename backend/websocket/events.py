@@ -92,6 +92,7 @@ class AgentStatusPayload(BaseModel):
     display_name: str
     status: str  # 'sleeping', 'active', 'busy'
     current_task_id: UUID | None
+    sandbox_id: str | None = None
 
 
 # ── Workflow Events (Frontend V2) ─────────────────────────────────
@@ -248,6 +249,7 @@ def create_agent_status_event(agent) -> WebSocketEvent:
             display_name=agent.display_name,
             status=agent.status,
             current_task_id=agent.current_task_id,
+            sandbox_id=getattr(agent, "sandbox_id", None),
         ).model_dump(mode="json"),
     )
 
