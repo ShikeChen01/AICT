@@ -37,8 +37,10 @@ class AgentWorker:
         self._ready = asyncio.Event()
 
     def interrupt(self) -> None:
-        """Signal the worker to break the inner loop at next iteration."""
+        """Signal the worker to stop the inner loop immediately."""
         self._interrupt = True
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
 
     def _interrupt_flag(self) -> bool:
         return self._interrupt
@@ -96,8 +98,8 @@ class AgentWorker:
                             trigger_message_id=None,
                         )
 
-                        try:
-                            end_reason = await run_inner_loop(
+                        self._task = asyncio.create_task(
+                            run_inner_loop(
                                 agent,
                                 project,
                                 sess.id,
@@ -149,6 +151,17 @@ class AgentWorker:
                                     )
                                 ),
                             )
+                        )
+                        try:
+                            end_reason = await self._task
+                        except asyncio.CancelledError:
+                            # Stop was requested: end session immediately without
+                            # waiting for the current LLM call to finish.
+                            end_reason = "interrupted"
+                            try:
+                                await session_service.end_session_force(sess.id, "interrupted")
+                            except Exception:
+                                pass
                         except Exception as loop_exc:
                             # run_inner_loop already calls end_session_error
                             # internally for LLM failures; ensure session ends
@@ -163,6 +176,8 @@ class AgentWorker:
                             except Exception:
                                 pass
                             raise
+                        finally:
+                            self._task = None
 
                         logger.info("Agent %s session ended: %s", self.agent_id, end_reason)
 
