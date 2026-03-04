@@ -13,6 +13,7 @@ from backend.core.ws_backend_log_stream import ws_backend_log_stream
 from backend.websocket.events import create_backend_log_snapshot_event
 from backend.websocket.manager import Channel, ws_manager
 from backend.websocket.screen_stream import get_screen_stream_proxy
+from backend.websocket.vnc_proxy import proxy_vnc
 
 router = APIRouter()
 
@@ -135,3 +136,24 @@ async def screen_stream_endpoint(
         pass
     finally:
         await proxy.remove_viewer(sandbox_id, websocket)
+
+
+@router.websocket("/ws/vnc")
+async def vnc_endpoint(
+    websocket: WebSocket,
+    token: str = Query(..., description="API token for authentication"),
+    sandbox_id: str = Query(..., description="Sandbox ID to connect to"),
+):
+    """
+    WebSocket endpoint for interactive VNC remote desktop.
+
+    Bidirectionally relays VNC/RFB protocol bytes between a frontend noVNC
+    client and a sandbox container's /ws/vnc endpoint.  Unlike the MJPEG
+    screen stream, each VNC session is stateful and dedicated to one viewer.
+    """
+    if not verify_ws_token(token):
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    await websocket.accept(subprotocol="binary")
+    await proxy_vnc(sandbox_id, websocket)
