@@ -9,6 +9,10 @@ const WS_BACKEND_URL = BACKEND_URL.replace('https://', 'wss://').replace('http:/
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  optimizeDeps: {
+    // Pre-bundle noVNC (patch node_modules browser.js top-level await for esbuild)
+    include: ['@novnc/novnc'],
+  },
   server: {
     port: 3000,
     proxy: {
