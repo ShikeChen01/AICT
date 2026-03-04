@@ -51,6 +51,37 @@ class User(Base):
 
     repositories = relationship("Repository", back_populates="owner")
     memberships = relationship("RepositoryMembership", back_populates="user", cascade="all, delete-orphan")
+    sandbox_configs = relationship("SandboxConfig", back_populates="user", cascade="all, delete-orphan")
+
+
+# ── Sandbox Configs ────────────────────────────────────────────────
+
+
+class SandboxConfig(Base):
+    """User-level sandbox configuration profile.
+
+    Stores a setup script (shell commands) that runs inside a sandbox container
+    after creation.  Users create configs (e.g. "Chrome + Slack + VS Code")
+    and assign them to agents.  Configs are user-owned and reusable across
+    projects.
+    """
+
+    __tablename__ = "sandbox_configs"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id = Column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    setup_script = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    user = relationship("User", back_populates="sandbox_configs")
+    agents = relationship("Agent", back_populates="sandbox_config")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_sandbox_configs_user_name"),
+    )
 
 
 # ── Repositories ────────────────────────────────────────────────────
@@ -334,6 +365,9 @@ class Agent(Base):
     )
     sandbox_id = Column(String(255), nullable=True)
     sandbox_persist = Column(Boolean, default=False, nullable=False)
+    sandbox_config_id = Column(
+        Uuid, ForeignKey("sandbox_configs.id", ondelete="SET NULL"), nullable=True
+    )
     memory = Column(JSON, nullable=True)  # Layer 1 self-define block
     # Per-agent dynamic pool overrides. NULL = use system defaults.
     # Shape: {incoming_msg_tokens, memory_pct, past_session_pct, current_session_pct}
@@ -343,6 +377,7 @@ class Agent(Base):
 
     project = relationship("Repository", back_populates="agents")
     template = relationship("AgentTemplate", back_populates="agents", foreign_keys=[template_id])
+    sandbox_config = relationship("SandboxConfig", back_populates="agents")
     current_task = relationship("Task", foreign_keys=[current_task_id])
     agent_sessions = relationship(
         "AgentSession", back_populates="agent", cascade="all, delete-orphan"

@@ -12,6 +12,7 @@ from backend.core.auth import verify_ws_token
 from backend.core.ws_backend_log_stream import ws_backend_log_stream
 from backend.websocket.events import create_backend_log_snapshot_event
 from backend.websocket.manager import Channel, ws_manager
+from backend.websocket.screen_stream import get_screen_stream_proxy
 
 router = APIRouter()
 
@@ -92,3 +93,45 @@ async def websocket_endpoint(
         pass
     finally:
         await ws_manager.disconnect(websocket)
+
+
+@router.websocket("/ws/screen")
+async def screen_stream_endpoint(
+    websocket: WebSocket,
+    token: str = Query(..., description="API token for authentication"),
+    sandbox_id: str = Query(..., description="Sandbox ID to stream"),
+):
+    """
+    WebSocket endpoint for live screen streaming from a sandbox container.
+
+    Transparently relays binary JPEG frames from the sandbox's /ws/screen
+    endpoint to the frontend viewer.  The upstream connection is shared
+    across multiple viewers of the same sandbox.
+    """
+    if not verify_ws_token(token):
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    await websocket.accept()
+    proxy = get_screen_stream_proxy()
+    await proxy.add_viewer(sandbox_id, websocket)
+    try:
+        while True:
+            data = await websocket.receive()
+            if data.get("type") == "websocket.disconnect":
+                break
+            # Handle ping/pong
+            if "text" in data:
+                import json
+                try:
+                    msg = json.loads(data["text"])
+                    if msg.get("type") == "ping":
+                        await websocket.send_json({"type": "pong"})
+                except (json.JSONDecodeError, TypeError):
+                    pass
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        await proxy.remove_viewer(sandbox_id, websocket)

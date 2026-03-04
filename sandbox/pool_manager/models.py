@@ -21,6 +21,7 @@ class SandboxState:
     volume_name: str
     auth_token: str
     status: str  # "idle" | "assigned" | "resetting" | "unhealthy"
+    persistent: bool = False
     assigned_agent_id: Optional[str] = None
     created_at: str = field(default_factory=lambda: _now().isoformat())
     last_used_at: str = field(default_factory=lambda: _now().isoformat())

@@ -345,6 +345,76 @@ async def destroy_sandbox(
     return JSONResponse({"ok": True, "sandbox_id": sandbox_id})
 
 
+# ── Restart sandbox (preserves volume) ────────────────────────────────────────
+
+
+@app.post("/api/sandbox/{sandbox_id}/restart")
+async def restart_sandbox(
+    sandbox_id: str,
+    _: None = Depends(require_master_token),
+) -> JSONResponse:
+    """Restart a sandbox container but keep its volume (installed apps persist)."""
+    s = _pool.get(sandbox_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Sandbox not found")
+
+    prev_agent = s.assigned_agent_id
+    _pool.mark_resetting(sandbox_id)
+
+    loop = asyncio.get_event_loop()
+    try:
+        new_container_id = await loop.run_in_executor(
+            None,
+            _docker.reset_container,
+            sandbox_id,
+            s.host_port,
+            s.auth_token,
+            s.volume_name,
+        )
+        s2 = _pool.get(sandbox_id)
+        if s2:
+            s2.container_id = new_container_id
+            _pool.update(s2)
+
+        ready = await _wait_for_container_ready(s.host_port, s.auth_token, timeout=30.0)
+        if not ready:
+            if s2:
+                s2.status = "unhealthy"
+                _pool.update(s2)
+            return JSONResponse({"ok": False, "sandbox_id": sandbox_id, "status": "unhealthy"})
+
+        _pool.release(sandbox_id)
+        # Re-assign to the previous agent if it had one
+        if prev_agent:
+            _pool.assign(sandbox_id, prev_agent)
+
+        return JSONResponse({"ok": True, "sandbox_id": sandbox_id, "status": "running"})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Restart failed: {exc}") from exc
+
+
+# ── Toggle persistence ───────────────────────────────────────────────────────
+
+
+class PersistentRequest(BaseModel):
+    persistent: bool
+
+
+@app.post("/api/sandbox/{sandbox_id}/persistent")
+async def set_persistent(
+    sandbox_id: str,
+    body: PersistentRequest,
+    _: None = Depends(require_master_token),
+) -> JSONResponse:
+    """Toggle the persistent flag on a sandbox."""
+    s = _pool.get(sandbox_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Sandbox not found")
+    s.persistent = body.persistent
+    _pool.update(s)
+    return JSONResponse({"ok": True, "sandbox_id": sandbox_id, "persistent": s.persistent})
+
+
 # ── Debug / observability ─────────────────────────────────────────────────────
 
 
@@ -382,11 +452,73 @@ async def pool_debug(_: None = Depends(require_master_token)) -> JSONResponse:
     })
 
 
+# ── Setup script execution ────────────────────────────────────────────────────
+
+
+async def _run_setup_script(
+    host_port: int,
+    auth_token: str,
+    script: str,
+    timeout: float = 300.0,
+) -> dict:
+    """
+    Execute a setup script inside a running sandbox container.
+
+    Uses the sandbox server's shell execute endpoint (POST /shell/execute)
+    to run the setup script as a bash command.  The script is wrapped in
+    bash -c so multi-line scripts work correctly.
+
+    Returns {"ok": bool, "stdout": str, "exit_code": int|None}.
+    """
+    if not script or not script.strip():
+        return {"ok": True, "stdout": "", "exit_code": 0, "skipped": True}
+
+    url = f"http://127.0.0.1:{host_port}/shell/execute"
+    headers = {"Authorization": f"Bearer {auth_token}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                url,
+                json={"command": script, "timeout": int(timeout)},
+                headers=headers,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return {"ok": True, **data}
+            return {"ok": False, "stdout": resp.text, "exit_code": None}
+    except Exception as exc:
+        return {"ok": False, "stdout": str(exc), "exit_code": None}
+
+
+class RunSetupRequest(BaseModel):
+    setup_script: str
+
+
+@app.post("/api/sandbox/{sandbox_id}/run-setup")
+async def run_setup(
+    sandbox_id: str,
+    body: RunSetupRequest,
+    _: None = Depends(require_master_token),
+) -> JSONResponse:
+    """Run a setup script inside a sandbox container."""
+    s = _pool.get(sandbox_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Sandbox not found")
+    if s.status not in ("assigned", "idle"):
+        raise HTTPException(status_code=409, detail=f"Sandbox is {s.status}, cannot run setup")
+
+    result = await _run_setup_script(s.host_port, s.auth_token, body.setup_script)
+    return JSONResponse(result)
+
+
 # ── Session helpers (main entry point for backend) ────────────────────────────
 
 
 class SessionStartRequest(BaseModel):
     agent_id: str
+    persistent: bool = False
+    setup_script: str | None = None  # Shell commands to run after container is ready
 
 
 @app.post("/api/sandbox/session/start")
@@ -461,6 +593,7 @@ async def session_start(
         volume_name=volume_name,
         auth_token=auth_token,
         status="idle",
+        persistent=body.persistent,
     )
     _pool.add(s)
     _pool.assign(sandbox_id, body.agent_id)
@@ -472,12 +605,21 @@ async def session_start(
     if not ready:
         print(f"[pool-manager] WARNING: sandbox {sandbox_id} did not become ready in 30s")
 
+    # Run setup script if provided (non-blocking — errors are logged but don't
+    # prevent the sandbox from being returned)
+    setup_result = None
+    if body.setup_script and ready:
+        setup_result = await _run_setup_script(host_port, auth_token, body.setup_script)
+        if not setup_result.get("ok"):
+            print(f"[pool-manager] WARNING: setup script failed for {sandbox_id}: {setup_result}")
+
     return JSONResponse({
         "sandbox_id": sandbox_id,
         "host_port": host_port,
         "auth_token": auth_token,
         "created": True,
         "ready": ready,
+        "setup_result": setup_result,
     }, status_code=201)
 
 
@@ -506,6 +648,13 @@ async def session_end(
         return JSONResponse({"ok": True, "message": "No sandbox assigned to this agent"})
 
     sandbox_id = s.sandbox_id
+
+    if s.persistent:
+        # Persistent sandboxes keep running — just release the agent assignment.
+        # Container stays alive, volume intact, apps installed by the agent persist.
+        _pool.release(sandbox_id)
+        return JSONResponse({"ok": True, "sandbox_id": sandbox_id, "persistent": True})
+
     _pool.mark_resetting(sandbox_id)
     asyncio.create_task(_background_reset_and_idle(sandbox_id))
 

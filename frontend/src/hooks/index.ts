@@ -5,3 +5,4 @@ export { useMessages } from './useMessages';
 export { useAgentStream } from './useAgentStream';
 export { useSessions } from './useSessions';
 export { useAutoFollow } from './useAutoFollow';
+export { useScreenStream } from './useScreenStream';

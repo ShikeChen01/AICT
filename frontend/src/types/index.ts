@@ -87,6 +87,7 @@ export interface Agent {
   current_task_id: UUID | null;
   sandbox_id: string | null;
   sandbox_persist: boolean;
+  sandbox_config_id: UUID | null;
   memory?: Record<string, unknown> | null;
   token_allocations?: TokenAllocations | null;
   created_at: string;
@@ -764,6 +765,30 @@ export interface DocumentUpdatedData {
   project_id: UUID;
   doc_type: string;
   title: string;
+}
+
+// ─── Sandbox Configs ──────────────────────────────────────────────────
+
+export interface SandboxConfig {
+  id: UUID;
+  user_id: UUID;
+  name: string;
+  description: string | null;
+  setup_script: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SandboxConfigCreate {
+  name: string;
+  description?: string | null;
+  setup_script?: string;
+}
+
+export interface SandboxConfigUpdate {
+  name?: string;
+  description?: string | null;
+  setup_script?: string;
 }
 
 // ─── API Response ────────────────────────────────────────────────────

@@ -9,12 +9,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, WebSocket
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from auth import require_token, validate_ws_token
 from config import DISPLAY, PORT
 from display_handler import router as display_router
 from recording_handler import router as record_router
 from shell_handler import handle_shell_ws
+from stream_handler import ScreenStreamer
 
 _start_time = time.time()
 
@@ -43,9 +45,11 @@ async def lifespan(app: FastAPI):
         # Non-fatal — log and continue; Xvfb may still be starting
         print(f"[sandbox-server] WARNING: Xvfb not detected on {DISPLAY}")
 
+    app.state.screen_streamer = ScreenStreamer()
+
     yield  # app is running
 
-    # Nothing to clean up — container teardown handles everything
+    await app.state.screen_streamer.shutdown()
 
 
 app = FastAPI(title="Sandbox Server", lifespan=lifespan)
@@ -63,6 +67,58 @@ async def health() -> JSONResponse:
     })
 
 
+class ShellExecuteRequest(BaseModel):
+    command: str
+    timeout: int = 120
+
+
+@app.post("/shell/execute", dependencies=[Depends(require_token)])
+async def shell_execute(body: ShellExecuteRequest) -> JSONResponse:
+    """Execute a shell command and return stdout + exit code (REST alternative to WS shell)."""
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            body.command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env={"DISPLAY": DISPLAY, "HOME": "/root", "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},
+        )
+        stdout_bytes, _ = await asyncio.wait_for(
+            proc.communicate(), timeout=body.timeout,
+        )
+        stdout = stdout_bytes.decode(errors="replace") if stdout_bytes else ""
+        return JSONResponse({
+            "stdout": stdout,
+            "exit_code": proc.returncode,
+        })
+    except asyncio.TimeoutError:
+        proc.kill()
+        return JSONResponse({"stdout": "Command timed out", "exit_code": -1}, status_code=408)
+    except Exception as exc:
+        return JSONResponse({"stdout": str(exc), "exit_code": -1}, status_code=500)
+
+
 @app.websocket("/ws/shell")
 async def shell_ws(ws: WebSocket, token: str = Depends(validate_ws_token)):
     await handle_shell_ws(ws, token)
+
+
+@app.websocket("/ws/screen")
+async def screen_ws(ws: WebSocket, token: str = Depends(validate_ws_token)):
+    """Stream MJPEG frames from Xvfb to the client."""
+    await ws.accept()
+    streamer: ScreenStreamer = app.state.screen_streamer
+    await streamer.add_client(ws)
+    try:
+        while True:
+            data = await ws.receive()
+            if data.get("type") == "websocket.disconnect":
+                break
+            # Handle text control messages (quality/fps)
+            if "text" in data:
+                await streamer.handle_client_message(data["text"])
+            elif "bytes" in data:
+                await streamer.handle_client_message(data["bytes"])
+    except Exception:
+        pass
+    finally:
+        await streamer.remove_client(ws)
