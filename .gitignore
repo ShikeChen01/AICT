@@ -35,12 +35,13 @@ htmlcov/
 *.cover
 .hypothesis/
 
-# IDE / editor
+# IDE / editor / AI
 .vscode/
 .vscode-test/
 *.code-workspace
 .idea/
 .cursor/
+.claude/
 
 # OS
 .DS_Store

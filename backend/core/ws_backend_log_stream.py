@@ -18,7 +18,10 @@ import logging
 import sys
 import threading
 from collections import deque
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+
+# datetime.UTC was added in Python 3.11; fall back to timezone.utc for 3.10
+UTC = getattr(__import__("datetime"), "UTC", timezone.utc)
 from typing import TypedDict
 
 _MAX_MESSAGE_LEN = 10_000

@@ -4,6 +4,11 @@ tool_descriptions.json consistency.
 
 All sandbox I/O is mocked — no network or Docker required.
 Tests run with sandbox_vm_enabled=False (default) unless patched.
+
+IMPORTANT: Any executor that calls _flush_and_broadcast_sandbox must also
+mock the WebSocket manager.  We patch it once in a module-scoped fixture
+(_patch_ws_manager) so every test in this file sees an AsyncMock rather
+than the real ws_manager singleton (which doesn't exist in tests).
 """
 
 from __future__ import annotations
@@ -39,9 +44,17 @@ from backend.tools.loop_registry import (
 
 
 def _make_ctx(agent, project, session=None) -> RunContext:
-    """Minimal RunContext for tool executor tests."""
+    """Minimal RunContext for tool executor tests.
+
+    When *session* is a real AsyncSession (from the conftest fixture) it is
+    used as-is.  When no session is provided we create an AsyncMock that
+    supports ``await ctx.db.flush()`` and ``await ctx.db.commit()`` so
+    executors that touch the DB don't crash.
+    """
+    if session is None:
+        session = _make_mock_db()
     return RunContext(
-        db=session or MagicMock(),
+        db=session,
         agent=agent,
         project=project,
         session_id=None,
@@ -65,6 +78,31 @@ def _make_agent(sandbox_id: str | None = "sbox-1") -> MagicMock:
 def _patch_sandbox_service():
     """Context manager that patches _get_sandbox_service to return a mock."""
     return patch("backend.tools.executors.sandbox._get_sandbox_service")
+
+
+def _make_mock_db():
+    """Create a mock AsyncSession whose flush/commit/rollback are AsyncMocks.
+
+    Using a plain ``AsyncMock(spec=...)`` with a list doesn't produce awaitable
+    child mocks, so we build them explicitly.
+    """
+    mock_db = MagicMock()
+    mock_db.flush = AsyncMock()
+    mock_db.commit = AsyncMock()
+    mock_db.rollback = AsyncMock()
+    return mock_db
+
+
+def _patch_ws_broadcast():
+    """Patch ws_manager.broadcast_agent_status inside _flush_and_broadcast_sandbox.
+
+    This prevents the lazy import of backend.websocket.manager from firing in
+    tests (where the singleton may not be initialised) and lets us assert on
+    broadcast calls.
+    """
+    mock_ws = MagicMock()
+    mock_ws.broadcast_agent_status = AsyncMock()
+    return patch("backend.websocket.manager.ws_manager", mock_ws), mock_ws
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +220,7 @@ def test_get_handlers_for_engineer_wires_all_sandbox_executors() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_command(session, sample_engineer) -> None:
+    """Agent calls execute_command when sandbox already exists — no broadcast."""
     from backend.services.sandbox_client import ShellResult
 
     sample_engineer.sandbox_id = "vm-sbox-01"
@@ -200,6 +239,74 @@ async def test_execute_command(session, sample_engineer) -> None:
     mock_svc.execute_command.assert_awaited_once_with(session, sample_engineer, "ls -la", timeout=30)
 
 
+@pytest.mark.asyncio
+async def test_execute_command_creates_sandbox_and_broadcasts(session, sample_engineer) -> None:
+    """Agent calls execute_command when no sandbox exists — sandbox is created,
+    _flush_and_broadcast_sandbox fires to persist sandbox_id and notify the
+    frontend via WebSocket."""
+    from backend.services.sandbox_client import ShellResult
+
+    sample_engineer.sandbox_id = None  # No sandbox yet
+    shell_result = ShellResult(stdout="hello\n", exit_code=0)
+    # Use a mock DB so we can assert flush/commit calls
+    mock_db = _make_mock_db()
+    ctx = _make_ctx(sample_engineer, MagicMock(), mock_db)
+
+    ws_patch, mock_ws = _patch_ws_broadcast()
+
+    with _patch_sandbox_service() as mock_f, ws_patch:
+        mock_svc = MagicMock()
+
+        async def _execute_side_effect(db, agent, cmd, timeout=120):
+            # Simulate sandbox_service.execute_command creating a sandbox:
+            # ensure_running_sandbox sets agent.sandbox_id as a side effect
+            agent.sandbox_id = "new-sbox-99"
+            return shell_result
+
+        mock_svc.execute_command = AsyncMock(side_effect=_execute_side_effect)
+        mock_f.return_value = mock_svc
+
+        result = await _run_execute_command(ctx, {"command": "echo hello", "timeout": 30})
+
+    assert "hello" in result
+    assert "new-sbox-99" in result
+    # flush() should have been called (not commit()) — matching sandbox_service pattern
+    mock_db.flush.assert_awaited_once()
+    mock_db.commit.assert_not_awaited()
+    # ws_manager.broadcast_agent_status should have been called with the agent
+    mock_ws.broadcast_agent_status.assert_awaited_once_with(sample_engineer)
+
+
+@pytest.mark.asyncio
+async def test_execute_command_broadcast_failure_does_not_crash(session, sample_engineer) -> None:
+    """When the WS broadcast fails, execute_command should still return
+    normally — the broadcast is best-effort."""
+    from backend.services.sandbox_client import ShellResult
+
+    sample_engineer.sandbox_id = None
+    shell_result = ShellResult(stdout="ok\n", exit_code=0)
+    ctx = _make_ctx(sample_engineer, MagicMock(), session)
+
+    ws_patch, mock_ws = _patch_ws_broadcast()
+    mock_ws.broadcast_agent_status = AsyncMock(side_effect=RuntimeError("No WS connections"))
+
+    with _patch_sandbox_service() as mock_f, ws_patch:
+        mock_svc = MagicMock()
+
+        async def _execute_side_effect(db, agent, cmd, timeout=120):
+            agent.sandbox_id = "sbox-new"
+            return shell_result
+
+        mock_svc.execute_command = AsyncMock(side_effect=_execute_side_effect)
+        mock_f.return_value = mock_svc
+
+        # Should NOT raise despite WS broadcast failure
+        result = await _run_execute_command(ctx, {"command": "echo ok"})
+
+    assert "ok" in result
+    assert "sbox-new" in result
+
+
 # ---------------------------------------------------------------------------
 # _run_start_sandbox
 # ---------------------------------------------------------------------------
@@ -207,6 +314,8 @@ async def test_execute_command(session, sample_engineer) -> None:
 
 @pytest.mark.asyncio
 async def test_start_sandbox(session, sample_engineer) -> None:
+    """Agent calls sandbox_start_session — sandbox is allocated, sandbox_id
+    is flushed (not committed), and WS broadcast fires."""
     from backend.services.sandbox_service import SandboxMetadata
 
     sample_engineer.sandbox_id = None
@@ -218,9 +327,12 @@ async def test_start_sandbox(session, sample_engineer) -> None:
         message="Sandbox created: vm-sbox-02",
         created=True,
     )
-    ctx = _make_ctx(sample_engineer, MagicMock(), session)
+    mock_db = _make_mock_db()
+    ctx = _make_ctx(sample_engineer, MagicMock(), mock_db)
 
-    with _patch_sandbox_service() as mock_f:
+    ws_patch, mock_ws = _patch_ws_broadcast()
+
+    with _patch_sandbox_service() as mock_f, ws_patch:
         mock_svc = MagicMock()
         mock_svc.ensure_running_sandbox = AsyncMock(return_value=fake_meta)
         mock_f.return_value = mock_svc
@@ -228,6 +340,10 @@ async def test_start_sandbox(session, sample_engineer) -> None:
         result = await _run_start_sandbox(ctx, {})
 
     assert "vm-sbox-02" in result
+    # Verify flush (not commit) and broadcast
+    mock_db.flush.assert_awaited_once()
+    mock_db.commit.assert_not_awaited()
+    mock_ws.broadcast_agent_status.assert_awaited_once_with(sample_engineer)
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +353,8 @@ async def test_start_sandbox(session, sample_engineer) -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_start_session(session, sample_engineer) -> None:
+    """Full agent call path: sandbox_start_session → ensure_running_sandbox
+    → _flush_and_broadcast_sandbox."""
     from backend.services.sandbox_service import SandboxMetadata
 
     fake_meta = SandboxMetadata(
@@ -246,9 +364,12 @@ async def test_sandbox_start_session(session, sample_engineer) -> None:
         status="running",
         message="Sandbox ready: s1",
     )
-    ctx = _make_ctx(sample_engineer, MagicMock(), session)
+    mock_db = _make_mock_db()
+    ctx = _make_ctx(sample_engineer, MagicMock(), mock_db)
 
-    with _patch_sandbox_service() as mock_f:
+    ws_patch, mock_ws = _patch_ws_broadcast()
+
+    with _patch_sandbox_service() as mock_f, ws_patch:
         mock_svc = MagicMock()
         mock_svc.ensure_running_sandbox = AsyncMock(return_value=fake_meta)
         mock_f.return_value = mock_svc
@@ -256,6 +377,71 @@ async def test_sandbox_start_session(session, sample_engineer) -> None:
         result = await _run_sandbox_start_session(ctx, {})
 
     assert "s1" in result
+    mock_db.flush.assert_awaited_once()
+    mock_db.commit.assert_not_awaited()
+    mock_ws.broadcast_agent_status.assert_awaited_once_with(sample_engineer)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_start_session_broadcast_failure_is_swallowed(session, sample_engineer) -> None:
+    """If WS broadcast fails, sandbox_start_session should still succeed.
+    This is the exact scenario that was breaking before the fix: the agent
+    creates a sandbox but the WS manager is unreachable/uninitialised, and
+    the entire tool call was reported as failed."""
+    from backend.services.sandbox_service import SandboxMetadata
+
+    fake_meta = SandboxMetadata(
+        sandbox_id="s-broadcast-fail",
+        agent_id=str(sample_engineer.id),
+        persistent=False,
+        status="running",
+        message="Sandbox ready: s-broadcast-fail",
+    )
+    ctx = _make_ctx(sample_engineer, MagicMock(), session)
+
+    ws_patch, mock_ws = _patch_ws_broadcast()
+    mock_ws.broadcast_agent_status = AsyncMock(side_effect=ConnectionError("WS down"))
+
+    with _patch_sandbox_service() as mock_f, ws_patch:
+        mock_svc = MagicMock()
+        mock_svc.ensure_running_sandbox = AsyncMock(return_value=fake_meta)
+        mock_f.return_value = mock_svc
+
+        # Must NOT raise
+        result = await _run_sandbox_start_session(ctx, {})
+
+    assert "s-broadcast-fail" in result
+
+
+@pytest.mark.asyncio
+async def test_sandbox_start_session_uses_flush_not_commit(session, sample_engineer) -> None:
+    """Regression test: the old code called ctx.db.commit() inside
+    _commit_and_broadcast_sandbox, breaking the transaction boundary that
+    sandbox_service.py expects.  Now we must use flush()."""
+    from backend.services.sandbox_service import SandboxMetadata
+
+    fake_meta = SandboxMetadata(
+        sandbox_id="s-flush-check",
+        agent_id=str(sample_engineer.id),
+        persistent=False,
+        status="running",
+        message="Sandbox ready: s-flush-check",
+    )
+    mock_db = _make_mock_db()
+    ctx = _make_ctx(sample_engineer, MagicMock(), mock_db)
+
+    ws_patch, mock_ws = _patch_ws_broadcast()
+
+    with _patch_sandbox_service() as mock_f, ws_patch:
+        mock_svc = MagicMock()
+        mock_svc.ensure_running_sandbox = AsyncMock(return_value=fake_meta)
+        mock_f.return_value = mock_svc
+
+        await _run_sandbox_start_session(ctx, {})
+
+    # flush must be called, commit must NOT
+    mock_db.flush.assert_awaited_once()
+    mock_db.commit.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -265,10 +451,15 @@ async def test_sandbox_start_session(session, sample_engineer) -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_end_session_with_active_sandbox(session, sample_engineer) -> None:
+    """Agent ends an active sandbox — close_sandbox is called, then
+    _flush_and_broadcast_sandbox fires to persist the cleared sandbox_id."""
     sample_engineer.sandbox_id = "sbox-active"
-    ctx = _make_ctx(sample_engineer, MagicMock(), session)
+    mock_db = _make_mock_db()
+    ctx = _make_ctx(sample_engineer, MagicMock(), mock_db)
 
-    with _patch_sandbox_service() as mock_f:
+    ws_patch, mock_ws = _patch_ws_broadcast()
+
+    with _patch_sandbox_service() as mock_f, ws_patch:
         mock_svc = MagicMock()
         mock_svc.close_sandbox = AsyncMock()
         mock_f.return_value = mock_svc
@@ -277,10 +468,15 @@ async def test_sandbox_end_session_with_active_sandbox(session, sample_engineer)
 
     assert "ended" in result.lower() or "pool" in result.lower()
     mock_svc.close_sandbox.assert_awaited_once()
+    mock_db.flush.assert_awaited_once()
+    mock_db.commit.assert_not_awaited()
+    mock_ws.broadcast_agent_status.assert_awaited_once_with(sample_engineer)
 
 
 @pytest.mark.asyncio
 async def test_sandbox_end_session_no_sandbox(session, sample_engineer) -> None:
+    """Agent tries to end a sandbox but none exists — returns a message,
+    does NOT call _flush_and_broadcast_sandbox."""
     sample_engineer.sandbox_id = None
     ctx = _make_ctx(sample_engineer, MagicMock(), session)
 

@@ -5,8 +5,11 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 
+from backend.logging.my_logger import get_logger
 from backend.tools.base import RunContext
 from backend.tools.result import ToolExecutionError
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -29,7 +32,7 @@ async def run_execute_command(ctx: RunContext, tool_input: dict) -> str:
     result = await svc.execute_command(ctx.db, ctx.agent, command, timeout=timeout)
     # If sandbox was just created (first execute_command), commit and broadcast
     if ctx.agent.sandbox_id != prev_sandbox_id:
-        await _commit_and_broadcast_sandbox(ctx)
+        await _flush_and_broadcast_sandbox(ctx)
     parts: list[str] = [f"Sandbox: {ctx.agent.sandbox_id}"]
     if result.truncated:
         parts.append("[output truncated]")
@@ -45,11 +48,25 @@ async def run_execute_command(ctx: RunContext, tool_input: dict) -> str:
     return "\n".join(parts).strip()
 
 
-async def _commit_and_broadcast_sandbox(ctx: RunContext) -> None:
-    """Commit sandbox_id to DB and broadcast so the frontend sees it immediately."""
-    await ctx.db.commit()
-    from backend.websocket.manager import ws_manager
-    await ws_manager.broadcast_agent_status(ctx.agent)
+async def _flush_and_broadcast_sandbox(ctx: RunContext) -> None:
+    """Flush sandbox_id to DB and broadcast so the frontend sees it immediately.
+
+    Uses flush() (not commit()) to stay consistent with the transaction pattern
+    used by sandbox_service.py — the caller / agent loop owns the final commit.
+    The WebSocket broadcast is best-effort: failures are logged but never
+    propagated so that sandbox operations are not reported as failed when
+    the only issue is a missing WS connection.
+    """
+    await ctx.db.flush()
+    try:
+        from backend.websocket.manager import ws_manager
+        await ws_manager.broadcast_agent_status(ctx.agent)
+    except Exception:
+        logger.warning(
+            "Failed to broadcast sandbox status for agent %s — will be synced on next poll",
+            ctx.agent.id,
+            exc_info=True,
+        )
 
 
 async def run_sandbox_start_session(ctx: RunContext, tool_input: dict) -> str:
@@ -57,7 +74,7 @@ async def run_sandbox_start_session(ctx: RunContext, tool_input: dict) -> str:
     meta = await svc.ensure_running_sandbox(ctx.db, ctx.agent)
     # Commit immediately so sandbox_id is visible to other DB sessions (API endpoints)
     # and broadcast agent_status so the frontend refreshes and picks up the new sandbox_id.
-    await _commit_and_broadcast_sandbox(ctx)
+    await _flush_and_broadcast_sandbox(ctx)
     return meta.message or f"Sandbox ready: {meta.sandbox_id}"
 
 
@@ -66,7 +83,7 @@ async def run_sandbox_end_session(ctx: RunContext, tool_input: dict) -> str:
         return "No active sandbox to end."
     svc = _get_sandbox_service()
     await svc.close_sandbox(ctx.db, ctx.agent)
-    await _commit_and_broadcast_sandbox(ctx)
+    await _flush_and_broadcast_sandbox(ctx)
     return "Sandbox session ended. Container returned to pool."
 
 
