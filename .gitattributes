@@ -1,0 +1,5 @@
+# Shell scripts: always LF so they run on Linux (e.g. in VMs / Docker)
+*.sh text eol=lf
+
+# Sandbox files run inside Linux containers — always LF
+sandbox/** text eol=lf

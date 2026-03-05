@@ -2,6 +2,11 @@
  * Firebase Configuration
  * Initialize Firebase with environment variables for Google authentication.
  *
+ * The frontend loads .env from the repo root (see vite.config.ts envDir).
+ * You need VITE_FIREBASE_* in that file — the backend's service account JSON
+ * and FIREBASE_PROJECT_ID are not enough; get apiKey/authDomain from
+ * Firebase Console → Project settings → Your apps → Web app (SDK snippet).
+ *
  * Google Sign-In redirect: Set the Authorized redirect URI to the exact callback URL
  * so the user lands on /auth/callback with the OAuth hash intact.
  * - Firebase Console: Authentication → Sign-in method → Google

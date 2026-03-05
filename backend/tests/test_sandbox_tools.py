@@ -508,6 +508,69 @@ async def test_sandbox_health(session, sample_engineer) -> None:
 
     assert "ok" in result
     assert "123" in result
+    # Verify that the DB session is passed so sandbox_health can re-register
+    mock_svc.sandbox_health.assert_awaited_once_with(sample_engineer, session=session)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_health_passes_session_for_reregistration(session, sample_engineer) -> None:
+    """run_sandbox_health must pass the DB session to sandbox_health so that
+    the service layer can re-register in the multiplexer on ConnectError.
+    This covers the case where the backend process restarted (losing the
+    in-memory connections) or the container was restarted with a different port."""
+    sample_engineer.sandbox_id = "sbox-rereg"
+    mock_db = _make_mock_db()
+    ctx = _make_ctx(sample_engineer, MagicMock(), mock_db)
+
+    with _patch_sandbox_service() as mock_f:
+        mock_svc = MagicMock()
+        mock_svc.sandbox_health = AsyncMock(
+            return_value={"status": "ok", "uptime_seconds": 5.0, "display": ":99"}
+        )
+        mock_f.return_value = mock_svc
+
+        result = await _run_sandbox_health(ctx, {})
+
+    assert "ok" in result
+    # The critical assertion: session must be passed so SandboxService can
+    # re-register the connection if needed
+    mock_svc.sandbox_health.assert_awaited_once_with(sample_engineer, session=mock_db)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_health_service_retries_on_connect_error() -> None:
+    """SandboxService.sandbox_health retries after re-registering when the
+    first health_check raises ConnectError."""
+    import httpx
+    from backend.services.sandbox_service import SandboxService
+
+    agent = _make_agent(sandbox_id="sbox-retry")
+    mock_db = _make_mock_db()
+
+    call_count = 0
+
+    async def _health_check_side_effect(sandbox_id):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 1:
+            raise httpx.ConnectError("All connection attempts failed")
+        return {"status": "ok", "uptime_seconds": 1.0, "display": ":99"}
+
+    mock_client = MagicMock()
+    mock_client.has_connection = MagicMock(return_value=True)
+    mock_client.health_check = AsyncMock(side_effect=_health_check_side_effect)
+    mock_client.register = MagicMock()
+
+    svc = SandboxService()
+    svc._client = mock_client
+    svc.ensure_running_sandbox = AsyncMock()
+
+    result = await svc.sandbox_health(agent, session=mock_db)
+
+    assert result["status"] == "ok"
+    assert call_count == 2
+    # ensure_running_sandbox should have been called once for the retry
+    svc.ensure_running_sandbox.assert_awaited_once_with(mock_db, agent)
 
 
 # ---------------------------------------------------------------------------
@@ -665,3 +728,25 @@ def test_all_described_tools_have_executors_or_are_end() -> None:
         assert name in _TOOL_EXECUTORS, (
             f"Tool '{name}' is in tool_descriptions.json but missing from _TOOL_EXECUTORS"
         )
+
+
+# ---------------------------------------------------------------------------
+# SandboxClient.has_connection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sandbox_client_has_connection() -> None:
+    """has_connection returns True only when a sandbox is registered."""
+    from backend.services.sandbox_client import SandboxClient
+
+    client = SandboxClient()
+    assert not client.has_connection("no-such-id")
+
+    client.register("abc-123", "10.0.0.1", 30001, "token")
+    assert client.has_connection("abc-123")
+    assert not client.has_connection("xyz-456")
+
+    # unregister creates an asyncio task for cleanup — needs running loop
+    client.unregister("abc-123")
+    assert not client.has_connection("abc-123")

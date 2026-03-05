@@ -51,6 +51,13 @@ class HealthMonitor:
         if s.status == "resetting":
             return
 
+        # "unhealthy" sandboxes already failed restart — evict them so we
+        # don't spin in a tight restart loop.
+        if s.status == "unhealthy":
+            print(f"[health-monitor] Evicting permanently unhealthy sandbox {s.sandbox_id}")
+            await self._evict(s)
+            return
+
         # TTL-based idle cleanup — skip for persistent sandboxes (they live indefinitely)
         if s.status == "idle" and not s.persistent and s.idle_seconds() > IDLE_TTL_SECONDS:
             print(f"[health-monitor] Evicting idle sandbox {s.sandbox_id} (TTL exceeded)")
@@ -143,7 +150,13 @@ class HealthMonitor:
             await self._evict(self._pool.get(sandbox_id) or s)
 
     async def _restart(self, s: SandboxState) -> None:
-        """Restart an unhealthy container, keeping its assignment if it had one."""
+        """Restart an unhealthy container, keeping its assignment if it had one.
+
+        Waits for the new container to be reachable before changing status.
+        Without this wait, the backend can receive a sandbox that is still
+        booting, resulting in ConnectError on the first health check or
+        shell execution attempt.
+        """
         print(f"[health-monitor] Restarting container for sandbox {s.sandbox_id}...")
         loop = asyncio.get_event_loop()
         try:
@@ -157,6 +170,21 @@ class HealthMonitor:
             )
             s.container_id = new_id
             s.health_failures = 0
+            self._pool.update(s)
+
+            # Wait for the new container to be reachable before advertising
+            # it as assigned/idle.  This prevents a race where the backend
+            # gets connection info for a still-booting container.
+            ready = await self._wait_ready(s, timeout=30.0)
+            if not ready:
+                print(
+                    f"[health-monitor] Sandbox {s.sandbox_id} not ready after restart "
+                    "— marking unhealthy"
+                )
+                s.status = "unhealthy"
+                self._pool.update(s)
+                return
+
             # Preserve "assigned" only when an agent still holds the sandbox.
             # If assigned_agent_id was cleared (zombie), default to idle.
             s.status = "assigned" if s.assigned_agent_id else "idle"
@@ -165,6 +193,22 @@ class HealthMonitor:
         except Exception as exc:
             print(f"[health-monitor] Restart failed for {s.sandbox_id}: {exc} — evicting")
             await self._evict(s)
+
+    async def _wait_ready(self, s: SandboxState, timeout: float = 30.0) -> bool:
+        """Poll /health until the container responds 200 or timeout."""
+        url = f"http://127.0.0.1:{s.host_port}/health"
+        headers = {"Authorization": f"Bearer {s.auth_token}"}
+        deadline = asyncio.get_event_loop().time() + timeout
+        while asyncio.get_event_loop().time() < deadline:
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    resp = await client.get(url, headers=headers)
+                    if resp.status_code == 200:
+                        return True
+            except Exception:
+                pass
+            await asyncio.sleep(1.0)
+        return False
 
     async def _evict(self, s: SandboxState) -> None:
         loop = asyncio.get_event_loop()

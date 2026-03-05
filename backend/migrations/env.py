@@ -1,14 +1,36 @@
 """
 Alembic environment configuration.
+
+When run from the CLI (``alembic upgrade head``), the .env file is not loaded
+automatically — only pydantic_settings does that at app startup.  We use
+dotenv here so that DATABASE_URL is always available regardless of how
+Alembic is invoked.
 """
 
 import asyncio
 import os
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config, create_async_engine
+
+# Load the correct .env file before anything else so DATABASE_URL is set.
+# Mirrors the logic in backend/config.py: ENV=development → .env.development,
+# otherwise .env.
+try:
+    from dotenv import load_dotenv
+
+    _env = os.getenv("ENV", "").lower()
+    _env_filename = ".env.development" if _env == "development" else ".env"
+    # Walk up from backend/migrations/ to the repo root to find the .env file
+    _repo_root = Path(__file__).resolve().parents[2]
+    _env_path = _repo_root / _env_filename
+    if _env_path.exists():
+        load_dotenv(_env_path, override=False)
+except ImportError:
+    pass  # python-dotenv not installed — rely on OS env vars
 
 from backend.db.models import Base
 

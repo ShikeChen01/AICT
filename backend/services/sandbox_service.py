@@ -213,6 +213,7 @@ class SandboxService:
         host_port: int = data["host_port"]
         auth_token: str = data["auth_token"]
         created: bool = data.get("created", False)
+        ready: bool = data.get("ready", True)  # older pool managers don't send this
 
         # Register (or re-register) this sandbox in the client multiplexer
         self._client.register(
@@ -221,6 +222,38 @@ class SandboxService:
             host_port=host_port,
             auth_token=auth_token,
         )
+
+        # Verify the sandbox is actually reachable from this backend process.
+        # The pool manager checks health via 127.0.0.1 (localhost) but the
+        # backend connects via the external VM host — firewalls, DNS, or a
+        # not-yet-ready container can make the external path fail even when
+        # the local one succeeds.
+        if not ready:
+            logger.warning(
+                "Pool manager reported sandbox %s as not ready — "
+                "container may still be starting",
+                sandbox_id,
+            )
+        try:
+            await self._client.health_check(sandbox_id)
+        except Exception as probe_exc:
+            logger.warning(
+                "Sandbox %s registered but health probe failed (%s) — "
+                "will retry once after brief delay",
+                sandbox_id,
+                probe_exc,
+            )
+            # Brief back-off: the container may still be booting
+            import asyncio
+            await asyncio.sleep(3)
+            try:
+                await self._client.health_check(sandbox_id)
+            except Exception:
+                logger.error(
+                    "Sandbox %s still unreachable after retry — "
+                    "returning metadata but sandbox may be unhealthy",
+                    sandbox_id,
+                )
 
         prev_id = agent.sandbox_id
         restarted = bool(prev_id and prev_id != sandbox_id)
@@ -368,10 +401,40 @@ class SandboxService:
             raise SandboxNotFoundError(str(agent.id))
         return await self._client.stop_recording(agent.sandbox_id)
 
-    async def sandbox_health(self, agent: Agent) -> dict:
+    async def sandbox_health(
+        self,
+        agent: Agent,
+        session: AsyncSession | None = None,
+    ) -> dict:
+        """Check sandbox health.  Optionally pass a DB session to enable
+        automatic re-registration when the in-memory connection is missing
+        (e.g. after a backend process restart).
+        """
         if not agent.sandbox_id:
             raise SandboxNotFoundError(str(agent.id))
-        return await self._client.health_check(agent.sandbox_id)
+
+        # If the connection is not registered in the multiplexer (backend
+        # restarted, losing the in-memory singleton), re-register via
+        # ensure_running_sandbox before attempting the health check.
+        if not self._client.has_connection(agent.sandbox_id) and session is not None:
+            logger.info(
+                "Sandbox %s not registered in multiplexer — re-registering via pool manager",
+                agent.sandbox_id,
+            )
+            await self.ensure_running_sandbox(session, agent)
+
+        try:
+            return await self._client.health_check(agent.sandbox_id)
+        except Exception:
+            # Connection exists but request failed — try re-registering once
+            if session is not None:
+                logger.warning(
+                    "Health check failed for sandbox %s — re-registering and retrying",
+                    agent.sandbox_id,
+                )
+                await self.ensure_running_sandbox(session, agent)
+                return await self._client.health_check(agent.sandbox_id)
+            raise
 
     # ── Management operations ────────────────────────────────────────────────
 

@@ -42,7 +42,7 @@ COPY server/ /opt/sandbox-server/
 RUN pip3 install --no-cache-dir -r /opt/sandbox-server/requirements.txt
 
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 WORKDIR /opt/sandbox-server
 

@@ -219,6 +219,15 @@ CODE_REPO_PATH=./data/repos
 # Startup
 AUTO_RUN_MIGRATIONS_ON_STARTUP=true
 PROVISION_REPOS_ON_STARTUP=false
+
+# Frontend (Google sign-in) — Vite loads .env.development from repo root.
+# Get the client config from Firebase Console → Project settings → Your apps → Web app (SDK snippet).
+# The service account JSON (FIREBASE_CREDENTIALS_PATH) is for the backend only; the frontend needs:
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your-firebase-project
+# Optional: token fallback when Firebase is not configured
+VITE_API_TOKEN=dev-api-token-change-me
 ```
 
 **Start the backend:**

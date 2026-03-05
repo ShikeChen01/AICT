@@ -96,7 +96,10 @@ async def run_sandbox_health(ctx: RunContext, tool_input: dict) -> str:
         )
     svc = _get_sandbox_service()
     try:
-        data = await svc.sandbox_health(ctx.agent)
+        # Pass the DB session so sandbox_health can re-register the connection
+        # in the multiplexer if it was lost (e.g. after backend process restart)
+        # and retry on ConnectError.
+        data = await svc.sandbox_health(ctx.agent, session=ctx.db)
         return (
             f"status={data.get('status')} "
             f"uptime={data.get('uptime_seconds')}s "

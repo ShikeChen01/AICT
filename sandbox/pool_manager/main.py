@@ -538,11 +538,19 @@ async def session_start(
     if existing and existing.status in ("assigned", "idle"):
         if existing.status == "idle":
             _pool.assign(existing.sandbox_id, body.agent_id)
+        # Quick health probe — ensure the container is actually reachable
+        # before returning it to the backend.  Without this, a container that
+        # crashed (Docker still shows "running" but the server inside is dead)
+        # gets handed to the agent, resulting in ConnectError.
+        ready = await _wait_for_container_ready(
+            existing.host_port, existing.auth_token, timeout=5.0, poll_interval=0.5,
+        )
         return JSONResponse({
             "sandbox_id": existing.sandbox_id,
             "host_port": existing.host_port,
             "auth_token": existing.auth_token,
             "created": False,
+            "ready": ready,
         })
 
     # 2. Take an idle sandbox
@@ -550,11 +558,15 @@ async def session_start(
     if idle:
         s = idle[0]
         _pool.assign(s.sandbox_id, body.agent_id)
+        ready = await _wait_for_container_ready(
+            s.host_port, s.auth_token, timeout=5.0, poll_interval=0.5,
+        )
         return JSONResponse({
             "sandbox_id": s.sandbox_id,
             "host_port": s.host_port,
             "auth_token": s.auth_token,
             "created": False,
+            "ready": ready,
         })
 
     # 3. Create new

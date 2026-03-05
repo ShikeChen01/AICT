@@ -120,6 +120,15 @@ try {
     gcloud run jobs execute $JobName --project $ProjectId --region $Region --wait
 
     if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "--- Recent container logs (to see the actual error) ---" -ForegroundColor Yellow
+        gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=$JobName" `
+            --project $ProjectId `
+            --limit 50 `
+            --format "value(timestamp,textPayload)" `
+            --freshness 15m `
+            2>$null
+        Write-Host "---" -ForegroundColor Yellow
         Write-Error "Migration execution failed."
         exit 1
     }

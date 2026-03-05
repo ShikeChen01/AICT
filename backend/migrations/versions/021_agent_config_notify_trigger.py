@@ -16,7 +16,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "021"
-down_revision = "020"
+down_revision = "020_sandbox_configs"
 branch_labels = None
 depends_on = None
 

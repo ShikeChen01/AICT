@@ -105,6 +105,10 @@ class SandboxClient:
         if conn:
             asyncio.create_task(conn.close())
 
+    def has_connection(self, sandbox_id: str) -> bool:
+        """Check if a connection is registered for the given sandbox_id."""
+        return sandbox_id in self._connections
+
     def _get_conn(self, sandbox_id: str) -> SandboxConnection:
         conn = self._connections.get(sandbox_id)
         if not conn:

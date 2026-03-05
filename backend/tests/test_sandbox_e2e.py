@@ -438,6 +438,7 @@ class TestSandboxHealthExecutor:
 
         ctx = MagicMock(spec=RunContext)
         ctx.agent = _make_agent()
+        ctx.db = MagicMock()  # sandbox_health now receives session=ctx.db
 
         mock_svc = AsyncMock()
         mock_svc.sandbox_health = AsyncMock(
@@ -465,6 +466,7 @@ class TestSandboxHealthExecutor:
 
         ctx = MagicMock(spec=RunContext)
         ctx.agent = _make_agent()
+        ctx.db = MagicMock()  # sandbox_health now receives session=ctx.db
 
         mock_svc = AsyncMock()
         mock_svc.sandbox_health = AsyncMock(
@@ -488,6 +490,7 @@ class TestSandboxHealthExecutor:
 
         ctx = MagicMock(spec=RunContext)
         ctx.agent = _make_agent()
+        ctx.db = MagicMock()  # sandbox_health now receives session=ctx.db
 
         mock_svc = AsyncMock()
         mock_svc.sandbox_health = AsyncMock(return_value={
