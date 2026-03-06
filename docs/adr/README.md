@@ -24,6 +24,7 @@ Each ADR follows the [Michael Nygard template](https://cognitect.com/blog/2011/1
 | [008](008-firebase-auth-separate-github-credentials.md) | Firebase auth with separate GitHub credentials | Accepted |
 | [009](009-ephemeral-vs-persistent-sandboxes.md) | Ephemeral vs. persistent sandboxes | Accepted |
 | [010](010-frontend-react-context-only.md) | Frontend: React context only | Accepted |
+| [011](011-tenant-aware-sandbox-scheduling.md) | Tenant-aware sandbox scheduling | Proposed |
 
 ## Adding a New ADR
 
