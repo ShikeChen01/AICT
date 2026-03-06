@@ -144,7 +144,8 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
       });
 
       rfbRef.current = rfb;
-    } catch {
+    } catch (err) {
+      console.error('[VNC] Failed to create RFB connection:', err);
       setStatus('disconnected');
     }
   }, [buildWsUrl, interactive]);
@@ -174,14 +175,14 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
 
   if (!sandboxId) {
     return (
-      <div className="flex h-full items-center justify-center p-4 text-sm text-gray-500">
+      <div className="flex flex-1 items-center justify-center p-4 text-sm text-gray-500">
         Select an agent with a sandbox to view its screen.
       </div>
     );
   }
 
   return (
-    <div className="relative flex h-full flex-col bg-black">
+    <div className="relative flex flex-1 min-h-0 flex-col bg-black">
       {/* Top bar: status indicator + interactive toggle */}
       <div className="absolute top-2 right-2 z-10 flex items-center gap-2">
         {/* Interactive toggle */}
@@ -219,16 +220,12 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
         </div>
       </div>
 
-      {/* noVNC canvas container */}
+      {/* noVNC canvas container — uses relative positioning so noVNC's
+          internal 100% width/height screen wrapper resolves against this
+          element's flex-computed dimensions. */}
       <div
         ref={containerRef}
-        className="flex-1 min-h-0"
-        style={{
-          /* noVNC creates a canvas inside; this ensures it fills the space */
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
+        className="relative flex-1 min-h-0 overflow-hidden"
       />
 
       {/* Overlay message when disconnected */}
