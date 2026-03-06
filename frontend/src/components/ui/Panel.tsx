@@ -29,7 +29,7 @@ export function Panel({
           {headerActions}
         </div>
       )}
-      <div className={cn('min-h-0 flex-1', bodyClassName)}>{children}</div>
+      <div className={cn('min-h-0 flex-1 flex flex-col overflow-hidden', bodyClassName)}>{children}</div>
     </Card>
   );
 }

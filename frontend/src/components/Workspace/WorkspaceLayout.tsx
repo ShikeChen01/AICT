@@ -71,7 +71,7 @@ export function WorkspaceLayout({
               className="w-1.5 cursor-col-resize rounded bg-transparent hover:bg-[var(--border-color)] active:bg-[var(--color-primary)]/40"
             />
             <aside
-              className="min-w-0 overflow-hidden"
+              className="min-w-0 h-full overflow-hidden"
               style={{ width: `${monitoringWidth}px` }}
             >
               {monitoringPanel}

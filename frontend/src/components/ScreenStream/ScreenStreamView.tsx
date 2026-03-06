@@ -16,14 +16,14 @@ export function ScreenStreamView({ sandboxId }: ScreenStreamViewProps) {
 
   if (!sandboxId) {
     return (
-      <div className="flex h-full items-center justify-center p-4 text-sm text-gray-500">
+      <div className="flex flex-1 items-center justify-center p-4 text-sm text-gray-500">
         Select an agent with a sandbox to view its screen.
       </div>
     );
   }
 
   return (
-    <div className="relative flex h-full items-center justify-center bg-black">
+    <div className="relative flex flex-1 min-h-0 items-center justify-center bg-black overflow-hidden">
       {/* Connection indicator */}
       <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5 rounded-full bg-black/60 px-2 py-1 text-xs text-white">
         <span
