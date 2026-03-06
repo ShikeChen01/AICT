@@ -90,6 +90,10 @@ $yamlLines = @(
 [System.IO.File]::WriteAllLines($EnvFile, $yamlLines)
 
 try {
+    # --timeout 3600 : Allow WebSocket connections (VNC, screen stream) to live up
+    #   to 1 hour.  The default (300s) kills long-lived VNC sessions prematurely.
+    # --session-affinity : Sticky sessions so that WebSocket connections are always
+    #   routed to the same instance (required for stateful VNC proxy).
     gcloud run deploy $ServiceName `
         --project $ProjectId `
         --image $ImageTag `
@@ -100,7 +104,9 @@ try {
         --vpc-egress private-ranges-only `
         --env-vars-file $EnvFile `
         --min-instances 1 `
-        --cpu-boost
+        --cpu-boost `
+        --timeout 3600 `
+        --session-affinity
 }
 finally {
     Remove-Item $EnvFile -Force -ErrorAction SilentlyContinue

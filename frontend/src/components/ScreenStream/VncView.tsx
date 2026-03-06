@@ -6,6 +6,11 @@
  *
  * The connection path:
  *   Browser (noVNC) → Backend /ws/vnc proxy → Sandbox /ws/vnc → x11vnc TCP
+ *
+ * Features:
+ *   - Auto-reconnect with exponential backoff on disconnect
+ *   - Interactive/view-only toggle
+ *   - Connection status indicator
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -20,11 +25,23 @@ interface VncViewProps {
   viewOnly?: boolean;
 }
 
+/** Max reconnect attempts before giving up */
+const MAX_RECONNECT_ATTEMPTS = 10;
+/** Base delay between reconnect attempts (ms). Doubles each attempt, max 30s. */
+const BASE_RECONNECT_DELAY_MS = 1000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
+
 export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [interactive, setInteractive] = useState(!viewOnly);
+
+  // Reconnect state — kept in refs so the effect closure always sees the latest.
+  const reconnectAttemptRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Set to true when the component is unmounted or sandboxId changes */
+  const shouldStopRef = useRef(false);
 
   // Sync interactive mode with viewOnly prop changes
   useEffect(() => {
@@ -38,40 +55,45 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
     }
   }, [interactive]);
 
-  const handleConnect = useCallback(() => {
-    setStatus('connected');
-    if (rfbRef.current) {
-      rfbRef.current.scaleViewport = true;
-      rfbRef.current.resizeSession = false;
-      rfbRef.current.viewOnly = !interactive;
-      rfbRef.current.focusOnClick = true;
-    }
-  }, [interactive]);
-
-  const handleDisconnect = useCallback(() => {
-    setStatus('disconnected');
-    rfbRef.current = null;
-  }, []);
-
-  useEffect(() => {
-    if (!sandboxId || !containerRef.current) {
-      // Clean up any existing connection
-      if (rfbRef.current) {
-        rfbRef.current.disconnect();
-        rfbRef.current = null;
-      }
-      setStatus('disconnected');
-      return;
-    }
-
+  /** Build the WebSocket URL for the VNC proxy endpoint. */
+  const buildWsUrl = useCallback(() => {
     const token = getAuthToken();
-    if (!token) return;
+    if (!token || !sandboxId) return null;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl =
+    return (
       `${protocol}//${window.location.host}/ws/vnc` +
       `?token=${encodeURIComponent(token)}` +
-      `&sandbox_id=${encodeURIComponent(sandboxId)}`;
+      `&sandbox_id=${encodeURIComponent(sandboxId)}`
+    );
+  }, [sandboxId]);
+
+  /** Tear down any existing RFB connection. */
+  const destroyRfb = useCallback(() => {
+    if (rfbRef.current) {
+      try {
+        rfbRef.current.disconnect();
+      } catch {
+        // Ignore errors during teardown
+      }
+      rfbRef.current = null;
+    }
+  }, []);
+
+  /** Cancel any pending reconnect timer. */
+  const cancelReconnect = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  /** Create a new RFB connection. */
+  const connect = useCallback(() => {
+    if (!containerRef.current || shouldStopRef.current) return;
+
+    const wsUrl = buildWsUrl();
+    if (!wsUrl) return;
 
     setStatus('connecting');
 
@@ -88,21 +110,63 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
       rfb.qualityLevel = 6;
       rfb.compressionLevel = 2;
 
-      rfb.addEventListener('connect', handleConnect);
-      rfb.addEventListener('disconnect', handleDisconnect);
+      rfb.addEventListener('connect', () => {
+        setStatus('connected');
+        reconnectAttemptRef.current = 0; // Reset backoff on success
+        if (rfbRef.current) {
+          rfbRef.current.scaleViewport = true;
+          rfbRef.current.resizeSession = false;
+          rfbRef.current.viewOnly = !interactive;
+          rfbRef.current.focusOnClick = true;
+        }
+      });
+
+      rfb.addEventListener('disconnect', () => {
+        setStatus('disconnected');
+        rfbRef.current = null;
+
+        // Auto-reconnect unless we intentionally tore down
+        if (!shouldStopRef.current && reconnectAttemptRef.current < MAX_RECONNECT_ATTEMPTS) {
+          const attempt = reconnectAttemptRef.current;
+          const delay = Math.min(
+            BASE_RECONNECT_DELAY_MS * Math.pow(2, attempt),
+            MAX_RECONNECT_DELAY_MS,
+          );
+          reconnectAttemptRef.current = attempt + 1;
+          console.log(
+            `[VNC] Reconnecting in ${delay}ms (attempt ${attempt + 1}/${MAX_RECONNECT_ATTEMPTS})`,
+          );
+          reconnectTimerRef.current = setTimeout(() => {
+            reconnectTimerRef.current = null;
+            connect();
+          }, delay);
+        }
+      });
 
       rfbRef.current = rfb;
     } catch {
       setStatus('disconnected');
     }
+  }, [buildWsUrl, interactive]);
+
+  // Main effect: connect when sandboxId changes
+  useEffect(() => {
+    shouldStopRef.current = false;
+    reconnectAttemptRef.current = 0;
+    cancelReconnect();
+    destroyRfb();
+
+    if (!sandboxId) {
+      setStatus('disconnected');
+      return;
+    }
+
+    connect();
 
     return () => {
-      if (rfbRef.current) {
-        rfbRef.current.removeEventListener('connect', handleConnect);
-        rfbRef.current.removeEventListener('disconnect', handleDisconnect);
-        rfbRef.current.disconnect();
-        rfbRef.current = null;
-      }
+      shouldStopRef.current = true;
+      cancelReconnect();
+      destroyRfb();
     };
     // Reconnect when sandboxId changes; interactive is handled via separate effect
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -145,7 +209,13 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
                   : 'bg-red-400'
             }`}
           />
-          {status === 'connected' ? 'VNC Live' : status === 'connecting' ? 'Connecting...' : 'Disconnected'}
+          {status === 'connected'
+            ? 'VNC Live'
+            : status === 'connecting'
+              ? 'Connecting...'
+              : reconnectAttemptRef.current > 0 && reconnectAttemptRef.current < MAX_RECONNECT_ATTEMPTS
+                ? 'Reconnecting...'
+                : 'Disconnected'}
         </div>
       </div>
 
@@ -165,7 +235,9 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
       {status === 'disconnected' && (
         <div className="absolute inset-0 flex items-center justify-center">
           <span className="text-sm text-gray-400">
-            Connecting to sandbox display...
+            {reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS
+              ? 'Connection lost. Reload the page to retry.'
+              : 'Connecting to sandbox display...'}
           </span>
         </div>
       )}
