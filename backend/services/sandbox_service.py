@@ -137,6 +137,16 @@ class PoolManagerClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def get_sandbox_by_id(self, sandbox_id: str) -> dict:
+        """Fetch a single sandbox's metadata from the pool manager."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{self._base}/sandbox/{sandbox_id}",
+                headers=self._headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
 
 # ── Sandbox Service ───────────────────────────────────────────────────────────
 
