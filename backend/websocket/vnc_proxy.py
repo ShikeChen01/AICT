@@ -44,9 +44,26 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
     client = get_sandbox_client()
     conn = client._connections.get(sandbox_id)
     if not conn:
-        logger.warning("VNC proxy: sandbox %s not registered", sandbox_id)
-        await viewer_ws.close(code=4004, reason="Sandbox not registered")
-        return
+        # Backend may have restarted — try to re-register from pool manager
+        from backend.services.sandbox_service import PoolManagerClient
+        from backend.config import settings
+        try:
+            pool = PoolManagerClient()
+            data = await pool.get_sandbox_by_id(sandbox_id)
+            client.register(
+                sandbox_id=sandbox_id,
+                vm_host=settings.sandbox_vm_host,
+                host_port=data["host_port"],
+                auth_token=data["auth_token"],
+            )
+            conn = client._connections.get(sandbox_id)
+        except Exception as exc:
+            logger.warning("VNC proxy: sandbox %s not registered and re-registration failed: %s", sandbox_id, exc)
+            await viewer_ws.close(code=4004, reason="Sandbox not registered")
+            return
+        if not conn:
+            await viewer_ws.close(code=4004, reason="Sandbox not registered")
+            return
 
     upstream_url = (
         conn.rest_base_url.replace("http://", "ws://")

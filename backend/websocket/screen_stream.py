@@ -96,8 +96,23 @@ class ScreenStreamProxy:
             client = get_sandbox_client()
             conn = client._connections.get(sandbox_id)
             if not conn:
-                logger.warning("Cannot relay screen stream: sandbox %s not registered", sandbox_id)
-                return
+                from backend.services.sandbox_service import PoolManagerClient
+                from backend.config import settings
+                try:
+                    pool = PoolManagerClient()
+                    data = await pool.get_sandbox_by_id(sandbox_id)
+                    client.register(
+                        sandbox_id=sandbox_id,
+                        vm_host=settings.sandbox_vm_host,
+                        host_port=data["host_port"],
+                        auth_token=data["auth_token"],
+                    )
+                    conn = client._connections.get(sandbox_id)
+                except Exception as exc:
+                    logger.warning("Cannot relay screen stream: sandbox %s not registered and re-registration failed: %s", sandbox_id, exc)
+                    return
+                if not conn:
+                    return
 
             ws_url = (
                 conn.rest_base_url.replace("http://", "ws://")
