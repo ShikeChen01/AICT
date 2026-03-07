@@ -146,6 +146,15 @@ async def start_sandbox(
     svc = _get_sandbox_service()
     meta = await svc.ensure_running_sandbox(db, agent, persistent=bool(agent.sandbox_persist))
     await db.commit()
+
+    # Broadcast agent status so all WebSocket clients learn about the new
+    # sandbox_id without needing to poll.
+    try:
+        from backend.websocket.manager import ws_manager
+        await ws_manager.broadcast_agent_status(agent)
+    except Exception:
+        pass  # Best-effort — the REST response already contains sandbox_id
+
     return {
         "ok": True,
         "sandbox_id": meta.sandbox_id,

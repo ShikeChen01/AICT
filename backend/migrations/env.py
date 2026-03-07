@@ -9,6 +9,7 @@ Alembic is invoked.
 
 import asyncio
 import os
+import ssl as _ssl
 from logging.config import fileConfig
 from pathlib import Path
 
@@ -35,6 +36,23 @@ except ImportError:
 from backend.db.models import Base
 
 config = context.config
+
+
+def _build_connect_args() -> dict:
+    """Build asyncpg connect_args, optionally enabling SSL.
+
+    Mirrors the logic in backend/db/session.py so that Alembic migrations
+    use the same SSL settings as the running application.
+    """
+    ssl_mode = os.getenv("DB_SSL_MODE", "").lower()
+    if ssl_mode == "require":
+        ctx = _ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl.CERT_NONE
+        return {"ssl": ctx}
+    return {}
+
+
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
@@ -64,13 +82,17 @@ def do_run_migrations(connection):
 
 
 async def run_async_migrations() -> None:
+    connect_args = _build_connect_args()
     if url:
-        connectable = create_async_engine(url, poolclass=pool.NullPool)
+        connectable = create_async_engine(
+            url, poolclass=pool.NullPool, connect_args=connect_args,
+        )
     else:
         connectable = async_engine_from_config(
             config.get_section(config.config_ini_section, {}),
             prefix="sqlalchemy.",
             poolclass=pool.NullPool,
+            connect_args=connect_args,
         )
 
     async with connectable.connect() as connection:

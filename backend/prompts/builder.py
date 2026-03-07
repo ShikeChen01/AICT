@@ -23,7 +23,11 @@ from backend.prompts.loader import (
 
 
 def get_identity_block(agent: Agent, project_name: str) -> str:
-    """Return Identity block for the agent's role."""
+    """Return Identity block for the agent's role.
+
+    For custom roles (not manager/cto/engineer), returns a generic identity
+    that uses the agent's display_name and project name.
+    """
     if agent.role == "manager":
         return IDENTITY_GM_TEMPLATE.format(project_name=project_name)
     if agent.role == "cto":
@@ -33,7 +37,11 @@ def get_identity_block(agent: Agent, project_name: str) -> str:
             agent_name=agent.display_name,
             project_name=project_name,
         )
-    return f"You are {agent.display_name} on project \"{project_name}\"."
+    # Custom roles: use a generic identity block
+    return (
+        f"You are **{agent.display_name}**, a specialized agent on project \"{project_name}\".\n\n"
+        f"Your role is: {agent.role}. Follow your prompt instructions and use your available tools to complete tasks."
+    )
 
 
 def get_memory_block(memory_content: str | dict | None) -> str:
@@ -50,11 +58,16 @@ def get_memory_block(memory_content: str | dict | None) -> str:
 
 
 def get_tool_io_block(role: str) -> str:
-    """Return tool input/output contract for the agent role."""
+    """Return tool input/output contract for the agent role.
+
+    Custom roles get the base tool I/O block plus the engineer-specific
+    block (most permissive) as a reasonable default.
+    """
     if role == "manager":
         return TOOL_IO_BASE_BLOCK + "\n" + TOOL_IO_MANAGER_BLOCK
     if role == "cto":
         return TOOL_IO_BASE_BLOCK + "\n" + TOOL_IO_CTO_BLOCK
     if role == "engineer":
         return TOOL_IO_BASE_BLOCK + "\n" + TOOL_IO_ENGINEER_BLOCK
-    return TOOL_IO_BASE_BLOCK
+    # Custom roles: use engineer (worker) tool I/O as default — most permissive
+    return TOOL_IO_BASE_BLOCK + "\n" + TOOL_IO_ENGINEER_BLOCK

@@ -39,8 +39,8 @@ def upgrade() -> None:
         $$ LANGUAGE plpgsql;
     """)
 
+    op.execute("DROP TRIGGER IF EXISTS trg_agent_config_changed_agents ON agents;")
     op.execute("""
-        DROP TRIGGER IF EXISTS trg_agent_config_changed_agents ON agents;
         CREATE TRIGGER trg_agent_config_changed_agents
             AFTER UPDATE ON agents
             FOR EACH ROW
@@ -64,8 +64,8 @@ def upgrade() -> None:
         $$ LANGUAGE plpgsql;
     """)
 
+    op.execute("DROP TRIGGER IF EXISTS trg_agent_config_changed_blocks ON prompt_block_configs;")
     op.execute("""
-        DROP TRIGGER IF EXISTS trg_agent_config_changed_blocks ON prompt_block_configs;
         CREATE TRIGGER trg_agent_config_changed_blocks
             AFTER UPDATE ON prompt_block_configs
             FOR EACH ROW
@@ -89,8 +89,8 @@ def upgrade() -> None:
         $$ LANGUAGE plpgsql;
     """)
 
+    op.execute("DROP TRIGGER IF EXISTS trg_agent_config_changed_tools ON tool_configs;")
     op.execute("""
-        DROP TRIGGER IF EXISTS trg_agent_config_changed_tools ON tool_configs;
         CREATE TRIGGER trg_agent_config_changed_tools
             AFTER UPDATE ON tool_configs
             FOR EACH ROW

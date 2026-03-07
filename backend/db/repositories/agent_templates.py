@@ -160,8 +160,13 @@ class AgentTemplateRepository(BaseRepository[AgentTemplate]):
         provider: str | None = None,
         thinking_enabled: bool = False,
         is_system_default: bool = False,
+        description: str | None = None,
+        sandbox_template: str | None = None,
+        knowledge_sources: dict | list | None = None,
+        trigger_config: dict | None = None,
+        cost_limits: dict | None = None,
     ) -> AgentTemplate:
-        """Create a template and seed its prompt block configs."""
+        """Create a template (agent design) and seed its prompt block configs."""
         if not provider:
             provider = infer_provider(model)
 
@@ -169,10 +174,15 @@ class AgentTemplateRepository(BaseRepository[AgentTemplate]):
             id=uuid.uuid4(),
             project_id=project_id,
             name=name,
+            description=description,
             base_role=base_role,
             model=model,
             provider=provider,
             thinking_enabled=thinking_enabled,
+            sandbox_template=sandbox_template,
+            knowledge_sources=knowledge_sources,
+            trigger_config=trigger_config,
+            cost_limits=cost_limits,
             is_system_default=is_system_default,
         )
         self.session.add(template)

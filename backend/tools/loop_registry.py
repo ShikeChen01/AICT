@@ -244,7 +244,7 @@ async def get_tool_defs_for_agent(agent_id, role: str, db) -> list[dict]:
 
     repo = ToolConfigRepository(db)
     role_map = {"manager": "manager", "cto": "cto", "engineer": "worker"}
-    base_role = role_map.get(role, "worker")
+    base_role = role_map.get(role, role if role in ("manager", "cto", "worker", "custom") else "worker")
     db_tools = await repo.ensure_agent_tools(agent_id, base_role)
 
     result = []

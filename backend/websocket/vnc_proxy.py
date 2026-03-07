@@ -144,55 +144,57 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
         await _safe_close_viewer(viewer_ws, 1011, reason)
         return
 
+    # NOTE: `upstream` was obtained via manual `__aenter__()` so it is
+    # already an open WebSocketClientProtocol — do NOT wrap it in another
+    # ``async with`` (it doesn't support the context manager protocol).
     try:
-        async with upstream:
-            logger.info("VNC proxy connected to sandbox %s", sandbox_id)
+        logger.info("VNC proxy connected to sandbox %s", sandbox_id)
 
-            async def frontend_to_sandbox() -> None:
-                """Forward binary frames from noVNC client to sandbox VNC server."""
-                try:
-                    while True:
-                        data = await viewer_ws.receive()
-                        msg_type = data.get("type")
-                        if msg_type == "websocket.disconnect":
-                            break
-                        if msg_type != "websocket.receive":
-                            continue
-                        payload = data.get("bytes") or data.get("text")
-                        if payload:
-                            if isinstance(payload, str):
-                                await upstream.send(payload.encode("latin-1"))
-                            else:
-                                await upstream.send(payload)
-                except WebSocketDisconnect:
-                    logger.debug("VNC proxy: frontend disconnected (sandbox %s)", sandbox_id)
-                except Exception as exc:
-                    logger.debug("VNC proxy frontend_to_sandbox error (sandbox %s): %s", sandbox_id, exc)
-
-            async def sandbox_to_frontend() -> None:
-                """Forward VNC server responses to the noVNC client."""
-                try:
-                    async for message in upstream:
-                        if viewer_ws.client_state != WebSocketState.CONNECTED:
-                            break
-                        if isinstance(message, bytes):
-                            await viewer_ws.send_bytes(message)
+        async def frontend_to_sandbox() -> None:
+            """Forward binary frames from noVNC client to sandbox VNC server."""
+            try:
+                while True:
+                    data = await viewer_ws.receive()
+                    msg_type = data.get("type")
+                    if msg_type == "websocket.disconnect":
+                        break
+                    if msg_type != "websocket.receive":
+                        continue
+                    payload = data.get("bytes") or data.get("text")
+                    if payload:
+                        if isinstance(payload, str):
+                            await upstream.send(payload.encode("latin-1"))
                         else:
-                            await viewer_ws.send_text(message)
-                except WebSocketDisconnect:
-                    logger.debug("VNC proxy: frontend gone during relay (sandbox %s)", sandbox_id)
-                except Exception as exc:
-                    logger.debug("VNC proxy sandbox_to_frontend error (sandbox %s): %s", sandbox_id, exc)
+                            await upstream.send(payload)
+            except WebSocketDisconnect:
+                logger.debug("VNC proxy: frontend disconnected (sandbox %s)", sandbox_id)
+            except Exception as exc:
+                logger.debug("VNC proxy frontend_to_sandbox error (sandbox %s): %s", sandbox_id, exc)
 
-            done, pending = await asyncio.wait(
-                [
-                    asyncio.create_task(frontend_to_sandbox()),
-                    asyncio.create_task(sandbox_to_frontend()),
-                ],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in pending:
-                task.cancel()
+        async def sandbox_to_frontend() -> None:
+            """Forward VNC server responses to the noVNC client."""
+            try:
+                async for message in upstream:
+                    if viewer_ws.client_state != WebSocketState.CONNECTED:
+                        break
+                    if isinstance(message, bytes):
+                        await viewer_ws.send_bytes(message)
+                    else:
+                        await viewer_ws.send_text(message)
+            except WebSocketDisconnect:
+                logger.debug("VNC proxy: frontend gone during relay (sandbox %s)", sandbox_id)
+            except Exception as exc:
+                logger.debug("VNC proxy sandbox_to_frontend error (sandbox %s): %s", sandbox_id, exc)
+
+        done, pending = await asyncio.wait(
+            [
+                asyncio.create_task(frontend_to_sandbox()),
+                asyncio.create_task(sandbox_to_frontend()),
+            ],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
 
     except (ConnectionRefusedError, OSError) as exc:
         logger.warning("VNC proxy connection refused for sandbox %s: %s", sandbox_id, exc)
@@ -205,6 +207,14 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
         await _safe_close_viewer(viewer_ws, 1011, f"Upstream error: {exc}")
     except Exception as exc:
         logger.exception("VNC proxy unexpected error for sandbox %s: %s", sandbox_id, exc)
-        await _safe_close_viewer(viewer_ws, 1011, "Internal proxy error")
+        await _safe_close_viewer(
+            viewer_ws, 1011,
+            _short_reason(f"Proxy error: {type(exc).__name__}: {exc}"),
+        )
     finally:
+        # Close the upstream connection (since we bypassed the context manager)
+        try:
+            await upstream.close()
+        except Exception:
+            pass
         logger.info("VNC proxy session ended for sandbox %s", sandbox_id)

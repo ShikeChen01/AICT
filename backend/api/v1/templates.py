@@ -28,10 +28,15 @@ class AgentTemplateResponse(BaseModel):
     id: UUID
     project_id: UUID
     name: str
+    description: str | None = None
     base_role: str
     model: str
     provider: str | None
     thinking_enabled: bool
+    sandbox_template: str | None = None
+    knowledge_sources: dict | list | None = None
+    trigger_config: dict | None = None
+    cost_limits: dict | None = None
     is_system_default: bool
 
     model_config = {"from_attributes": True}
@@ -39,17 +44,27 @@ class AgentTemplateResponse(BaseModel):
 
 class CreateTemplateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    base_role: str = Field(default="worker", pattern="^(worker)$")  # only worker for user-created
+    description: str | None = Field(None, max_length=2000)
+    base_role: str = Field(default="worker", max_length=50)  # any role string allowed
     model: str = Field(..., min_length=1, max_length=100)
     provider: str | None = Field(None, max_length=50)
     thinking_enabled: bool = Field(default=False)
+    sandbox_template: str | None = Field(None, max_length=100)
+    knowledge_sources: dict | list | None = None
+    trigger_config: dict | None = None
+    cost_limits: dict | None = None
 
 
 class UpdateTemplateRequest(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
+    description: str | None = Field(None, max_length=2000)
     model: str | None = Field(None, min_length=1, max_length=100)
     provider: str | None = Field(None, max_length=50)
     thinking_enabled: bool | None = None
+    sandbox_template: str | None = None
+    knowledge_sources: dict | list | None = None
+    trigger_config: dict | None = None
+    cost_limits: dict | None = None
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -86,6 +101,11 @@ async def create_template(
         provider=body.provider,
         thinking_enabled=body.thinking_enabled,
         is_system_default=False,
+        description=body.description,
+        sandbox_template=body.sandbox_template,
+        knowledge_sources=body.knowledge_sources,
+        trigger_config=body.trigger_config,
+        cost_limits=body.cost_limits,
     )
     await db.commit()
     await db.refresh(template)
@@ -109,6 +129,8 @@ async def update_template(
 
     if body.name is not None:
         template.name = body.name
+    if body.description is not None:
+        template.description = body.description
     if body.model is not None:
         template.model = body.model
         # If provider not explicitly set, re-infer from new model
@@ -118,6 +140,14 @@ async def update_template(
         template.provider = body.provider
     if body.thinking_enabled is not None:
         template.thinking_enabled = body.thinking_enabled
+    if body.sandbox_template is not None:
+        template.sandbox_template = body.sandbox_template
+    if body.knowledge_sources is not None:
+        template.knowledge_sources = body.knowledge_sources
+    if body.trigger_config is not None:
+        template.trigger_config = body.trigger_config
+    if body.cost_limits is not None:
+        template.cost_limits = body.cost_limits
 
     await db.commit()
     await db.refresh(template)

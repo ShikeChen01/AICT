@@ -43,8 +43,6 @@ class AgentService:
 
     async def count_by_role(self, project_id: UUID, role: str) -> int:
         """Count agents with the given role in a project."""
-        if role not in VALID_ROLES:
-            return 0
         result = await self.session.execute(
             select(func.count(Agent.id)).where(
                 Agent.project_id == project_id,
@@ -55,8 +53,6 @@ class AgentService:
 
     async def list_by_role(self, project_id: UUID, role: str) -> list[Agent]:
         """List all agents with the given role in a project."""
-        if role not in VALID_ROLES:
-            return []
         result = await self.session.execute(
             select(Agent).where(
                 Agent.project_id == project_id,
@@ -108,7 +104,8 @@ class AgentService:
         await block_repo.copy_template_blocks_to_agent(template.id, agent.id)
 
         # Seed tool configs for this agent from tool_descriptions.json
-        base_role = _ROLE_TO_BASE_ROLE.get(role, "worker")
+        # Use template's base_role if available, otherwise fall back to role mapping
+        base_role = getattr(template, "base_role", None) or _ROLE_TO_BASE_ROLE.get(role, "worker")
         tool_repo = ToolConfigRepository(self.session)
         await tool_repo.seed_for_agent(agent.id, base_role)
 
@@ -235,8 +232,45 @@ class AgentService:
 
         return manager, cto
 
+    async def spawn_from_template(
+        self,
+        project_id: UUID,
+        template_id: UUID,
+        *,
+        display_name: str | None = None,
+        sandbox_persist: bool = False,
+    ) -> Agent:
+        """Create a new agent from any agent template (design).
+
+        Unlike spawn_engineer, this method works with any role/base_role
+        and does not enforce engineer-specific limits. The template defines
+        the agent's role, model, provider, thinking config, and prompt blocks.
+        """
+        result = await self.session.execute(
+            select(AgentTemplate).where(AgentTemplate.id == template_id)
+        )
+        template = result.scalar_one_or_none()
+        if not template:
+            raise ValueError(f"Agent template {template_id} not found.")
+        if template.project_id != project_id:
+            raise ValueError("Template does not belong to this project.")
+
+        # Determine the agent role from the template's base_role
+        base_role = template.base_role or "worker"
+        role_map = {"manager": "manager", "cto": "cto", "worker": "engineer"}
+        role = role_map.get(base_role, base_role)  # custom base_roles use themselves as role
+
+        if display_name is None:
+            display_name = template.name or f"Agent-{base_role}"
+
+        agent = await self._create_agent_from_template(
+            project_id, role, display_name, template,
+            sandbox_persist=sandbox_persist,
+        )
+        return agent
+
     async def remove_agent(self, agent_id: UUID, caller_project_id: UUID) -> Agent:
-        """Permanently remove an engineer agent from the project."""
+        """Permanently remove an agent from the project (manager and CTO are protected)."""
         result = await self.session.execute(select(Agent).where(Agent.id == agent_id))
         agent = result.scalar_one_or_none()
 
@@ -245,7 +279,7 @@ class AgentService:
         if agent.project_id != caller_project_id:
             raise ValueError("Cannot remove an agent from a different project.")
         if agent.role in ("manager", "cto"):
-            raise ValueError(f"Cannot remove a {agent.role} — only engineers can be removed.")
+            raise ValueError(f"Cannot remove a {agent.role} — only non-core agents can be removed.")
 
         # Reset tasks assigned to this agent that are still actionable
         await self.session.execute(

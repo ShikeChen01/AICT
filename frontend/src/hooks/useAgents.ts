@@ -13,6 +13,8 @@ interface UseAgentsReturn {
   isLoading: boolean;
   error: Error | null;
   refreshAgents: () => Promise<void>;
+  /** Optimistically update a single agent field without a full refresh. */
+  patchAgent: (agentId: string, patch: Partial<AgentStatusWithQueue>) => void;
 }
 
 export function useAgents(projectId: string | null): UseAgentsReturn {
@@ -67,6 +69,12 @@ export function useAgents(projectId: string | null): UseAgentsReturn {
     refreshAgents();
   }, [refreshAgents]);
 
+  const patchAgent = useCallback((agentId: string, patch: Partial<AgentStatusWithQueue>) => {
+    setAgents((prev) =>
+      prev.map((a) => (a.id === agentId ? { ...a, ...patch } : a)),
+    );
+  }, []);
+
   useEffect(() => {
     if (!projectId) return;
     const interval = setInterval(() => {
@@ -99,6 +107,7 @@ export function useAgents(projectId: string | null): UseAgentsReturn {
     isLoading,
     error,
     refreshAgents,
+    patchAgent,
   };
 }
 

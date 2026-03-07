@@ -41,7 +41,7 @@ function WorkspaceContent({
   } = useAgentStreamContext();
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [streamTab, setStreamTab] = useState<'text' | 'screen'>('text');
-  const { agents, refreshAgents } = useAgents(projectId);
+  const { agents, refreshAgents, patchAgent } = useAgents(projectId);
   const selectedAgent = agents.find((a) => a.id === selectedAgentId);
   const selectedSandboxId = streamTab === 'screen' ? (selectedAgent?.sandbox_id ?? null) : null;
   const [startSandboxLoading, setStartSandboxLoading] = useState(false);
@@ -156,8 +156,14 @@ function WorkspaceContent({
                   try {
                     const res = await startSandbox(selectedAgentId);
                     setStartSandboxMessage(res.message ?? `Sandbox ${res.sandbox_id} started`);
+                    // Optimistically update the agent's sandbox_id so VncView
+                    // connects immediately without waiting for a full refresh.
+                    if (res.sandbox_id) {
+                      patchAgent(selectedAgentId, { sandbox_id: res.sandbox_id });
+                    }
                     setStreamTab('screen');
-                    await refreshAgents();
+                    // Background refresh to sync full state (non-blocking)
+                    void refreshAgents();
                     setTimeout(() => setStartSandboxMessage(null), 5000);
                   } catch (err) {
                     setStartSandboxMessage(err instanceof Error ? err.message : 'Failed to start sandbox');

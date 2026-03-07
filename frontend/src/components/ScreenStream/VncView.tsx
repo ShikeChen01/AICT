@@ -104,8 +104,11 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
     container.innerHTML = '';
 
     try {
-      // Create WebSocket ourselves so we can capture close reason from backend
-      const ws = new WebSocket(wsUrl);
+      // Create WebSocket ourselves so we can capture close reason from backend.
+      // The backend VNC endpoint accepts with subprotocol="binary", so we MUST
+      // request it — otherwise the handshake is invalid and the connection dies
+      // with code 1006 before the upgrade completes.
+      const ws = new WebSocket(wsUrl, ['binary']);
       ws.binaryType = 'arraybuffer';
       ws.onclose = (ev) => {
         if (ev.reason) {

@@ -214,19 +214,22 @@ class ProjectSecret(Base):
 # ── Agents (MODIFIED: memory added, priority removed) ─────────────────
 
 
-VALID_ROLES = ("manager", "cto", "engineer")
+# System roles (backwards-compat) plus "worker" for user-defined agents.
+# Any string is accepted in the DB; this tuple is only for display/sort ordering.
+VALID_ROLES = ("manager", "cto", "engineer", "worker")
 VALID_STATUSES = ("sleeping", "active", "busy")
 
 # ── Agent Templates ──────────────────────────────────────────────────
 
-VALID_BASE_ROLES = ("manager", "cto", "worker")
+VALID_BASE_ROLES = ("manager", "cto", "worker", "custom")
 
 
 class AgentTemplate(Base):
-    """Reusable agent configuration. DB is source of truth for model/provider/blocks.
+    """Reusable agent design/configuration. DB is source of truth.
 
     System defaults (Manager, CTO, Engineer) are created automatically per project.
-    Users can create additional worker templates (e.g. "QA Tester", "DevOps Engineer").
+    Users can create custom agent designs with any role, prompt, tools, and sandbox
+    configuration.  This serves as the "Agent Designer" concept in the product.
     Template changes only affect newly created agents; existing agents keep their values.
     """
 
@@ -237,11 +240,16 @@ class AgentTemplate(Base):
         Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
     )
     name = Column(String(100), nullable=False)
-    base_role = Column(String(50), nullable=False)  # 'manager', 'cto', 'worker'
+    description = Column(Text, nullable=True)  # Human-readable description
+    base_role = Column(String(50), nullable=False)  # 'manager', 'cto', 'worker', or any custom string
     model = Column(String(100), nullable=False)
     provider = Column(String(50), nullable=True)  # NULL = infer from model name
     thinking_enabled = Column(Boolean, default=False, nullable=False)
     tool_access = Column(JSON, nullable=True)  # Future: custom tool whitelist
+    sandbox_template = Column(String(100), nullable=True)  # e.g. "dev-python", "browser-automation"
+    knowledge_sources = Column(JSON, nullable=True)  # RAG config: {sources: [...], shared_access: "read"|"write"|"both"}
+    trigger_config = Column(JSON, nullable=True)  # Trigger config: {type: "message"|"schedule"|"event", ...}
+    cost_limits = Column(JSON, nullable=True)  # {max_tokens_per_session, max_cost_per_session_usd, ...}
     is_system_default = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
