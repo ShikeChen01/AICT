@@ -1,5 +1,6 @@
 /**
- * Sidebar — project selector and navigation (workspace, kanban, prompt assembly, project architecture, settings).
+ * Sidebar — project selector and navigation.
+ * NOTE: This component will be replaced by TopNav in the v2 refactor.
  */
 
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
@@ -16,16 +17,15 @@ export function Sidebar({ activeProjectId, onProjectChange }: SidebarProps) {
   const { projectId } = useParams<{ projectId: string }>();
   const { projects, loading } = useProjectContext();
 
-  const workspacePath = projectId ? `/repository/${projectId}/workspace` : '/';
-  const kanbanPath = projectId ? `/repository/${projectId}/kanban` : '/';
-  const promptAssemblyPath = projectId ? `/repository/${projectId}/prompt_assembly` : '/';
-  const projectArchitecturePath = projectId ? `/repository/${projectId}/artifacts` : '/';
-  const settingsPath = projectId ? `/repository/${projectId}/settings` : '/';
-  const backendLogsPath = projectId ? `/repository/${projectId}/backend-logs` : '/';
+  const workspacePath = projectId ? `/project/${projectId}/workspace` : '/';
+  const kanbanPath = projectId ? `/project/${projectId}/kanban` : '/';
+  const agentBuildPath = projectId ? `/project/${projectId}/agent-build` : '/';
+  const settingsPath = projectId ? `/project/${projectId}/settings` : '/';
+  const logsPath = projectId ? `/project/${projectId}/logs` : '/';
 
   const handleProjectChange = (nextId: string) => {
     onProjectChange?.(nextId);
-    navigate(`/repository/${nextId}/workspace`);
+    navigate(`/project/${nextId}/workspace`);
   };
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
@@ -39,17 +39,17 @@ export function Sidebar({ activeProjectId, onProjectChange }: SidebarProps) {
   return (
     <aside className="w-72 border-r border-slate-800/80 bg-slate-950 text-white flex flex-col">
       <div className="border-b border-slate-800/80 px-5 py-5">
-        <NavLink to="/repositories" className="group block">
+        <NavLink to="/projects" className="group block">
           <h1 className="text-2xl font-bold tracking-tight group-hover:text-blue-300 transition-colors">AICT</h1>
           <p className="mt-1 text-xs text-slate-400 group-hover:text-slate-300 transition-colors">
-            Agent Monitoring Console
+            The Figma for AI Agents
           </p>
         </NavLink>
       </div>
 
       <div className="border-b border-slate-800/80 p-4">
         <label htmlFor="project-selector" className="mb-2 block text-[11px] uppercase tracking-wide text-slate-400">
-          Active repository
+          Active project
         </label>
         <Select
           id="project-selector"
@@ -79,6 +79,16 @@ export function Sidebar({ activeProjectId, onProjectChange }: SidebarProps) {
             </NavLink>
           </li>
           <li>
+            <NavLink to={agentBuildPath} className={linkClass}>
+              <span className="w-5 h-5 flex items-center justify-center">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </span>
+              Agent Build
+            </NavLink>
+          </li>
+          <li>
             <NavLink to={kanbanPath} className={linkClass}>
               <span className="w-5 h-5 flex items-center justify-center">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -89,23 +99,13 @@ export function Sidebar({ activeProjectId, onProjectChange }: SidebarProps) {
             </NavLink>
           </li>
           <li>
-            <NavLink to={promptAssemblyPath} className={linkClass}>
+            <NavLink to={logsPath} className={linkClass}>
               <span className="w-5 h-5 flex items-center justify-center">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
               </span>
-              Prompt Assembly
-            </NavLink>
-          </li>
-          <li>
-            <NavLink to={projectArchitecturePath} className={linkClass}>
-              <span className="w-5 h-5 flex items-center justify-center">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </span>
-              Project Architecture
+              Logs
             </NavLink>
           </li>
           <li>
@@ -118,22 +118,6 @@ export function Sidebar({ activeProjectId, onProjectChange }: SidebarProps) {
               </span>
               Project Settings
             </NavLink>
-          </li>
-          <li>
-            <a
-              href={backendLogsPath}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:bg-white/7 hover:text-white"
-            >
-              <span className="w-5 h-5 flex items-center justify-center">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-              </span>
-              AI Usage
-            </a>
           </li>
         </ul>
       </nav>

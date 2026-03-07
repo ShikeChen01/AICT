@@ -139,7 +139,7 @@ export function AllocationEditor({ agentId, meta, model, onSaved }: AllocationEd
     <div className="space-y-1">
       {/* Header row */}
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+        <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">
           Dynamic Pool ({fmt(meta.dynamic_pool_tokens)})
         </p>
         <div className="flex items-center gap-1">
@@ -147,7 +147,7 @@ export function AllocationEditor({ agentId, meta, model, onSaved }: AllocationEd
             <button
               type="button"
               title="Reset allocations to system defaults"
-              className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+              className="p-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
               onClick={handleReset}
               disabled={saving}
             >
@@ -158,7 +158,7 @@ export function AllocationEditor({ agentId, meta, model, onSaved }: AllocationEd
             <button
               type="button"
               title="Edit allocations"
-              className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-violet-600 transition-colors"
+              className="p-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] hover:text-[var(--color-accent)] transition-colors"
               onClick={() => setEditing(true)}
             >
               <Pencil className="w-3 h-3" />
@@ -169,7 +169,7 @@ export function AllocationEditor({ agentId, meta, model, onSaved }: AllocationEd
               <button
                 type="button"
                 title="Save"
-                className="p-1 rounded hover:bg-green-50 text-green-600 transition-colors disabled:opacity-40"
+                className="p-1 rounded hover:bg-[var(--color-success)]/10 text-[var(--color-success)] transition-colors disabled:opacity-40"
                 onClick={handleSave}
                 disabled={saving || pctError}
               >
@@ -178,7 +178,7 @@ export function AllocationEditor({ agentId, meta, model, onSaved }: AllocationEd
               <button
                 type="button"
                 title="Cancel"
-                className="p-1 rounded hover:bg-gray-100 text-gray-400 transition-colors"
+                className="p-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] transition-colors"
                 onClick={handleCancel}
                 disabled={saving}
               >
@@ -190,7 +190,7 @@ export function AllocationEditor({ agentId, meta, model, onSaved }: AllocationEd
       </div>
 
       {error && (
-        <p className="text-[10px] text-red-600 bg-red-50 rounded px-2 py-1">{error}</p>
+        <p className="text-[10px] text-[var(--color-danger)] bg-[var(--color-danger-light)] rounded px-2 py-1">{error}</p>
       )}
 
       {/* Incoming messages (token count) */}
@@ -273,7 +273,7 @@ export function AllocationEditor({ agentId, meta, model, onSaved }: AllocationEd
 
       {/* Dynamic % sum validation */}
       {editing && (
-        <div className={`text-[10px] text-right tabular-nums ${pctError ? 'text-red-500' : 'text-gray-400'}`}>
+        <div className={`text-[10px] text-right tabular-nums ${pctError ? 'text-[var(--color-danger)]' : 'text-[var(--text-muted)]'}`}>
           Dynamic %: {totalDynPct.toFixed(1)}% {pctError ? '— must sum to 100%' : '✓'}
         </div>
       )}
@@ -323,13 +323,13 @@ function AllocationRow({
 
   return (
     <div className="flex items-center justify-between text-xs gap-2">
-      <span className={`text-gray-600 ${isModified && !editing ? 'font-medium text-violet-700' : ''}`}>
+      <span className={`text-[var(--text-secondary)] ${isModified && !editing ? 'font-medium text-[var(--color-accent)]' : ''}`}>
         {label}
         {unit === '%' && !editing && (
-          <span className="text-gray-400 ml-1">({value.toFixed(0)}%)</span>
+          <span className="text-[var(--text-muted)] ml-1">({value.toFixed(0)}%)</span>
         )}
         {unit === 'images' && !editing && (
-          <span className="text-gray-400 ml-1">({value} img)</span>
+          <span className="text-[var(--text-muted)] ml-1">({value} img)</span>
         )}
       </span>
 
@@ -342,13 +342,13 @@ function AllocationRow({
             step={step}
             value={value}
             onChange={(e) => onChange(Number(e.target.value))}
-            className="w-16 text-right font-mono text-xs border border-gray-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-violet-400"
+            className="w-16 text-right font-mono text-xs border border-[var(--border-color)] rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
           />
-          <span className="text-gray-400 text-[10px]">{unit}</span>
-          {hint && <span className="text-gray-300 text-[10px]">{hint}</span>}
+          <span className="text-[var(--text-muted)] text-[10px]">{unit}</span>
+          {hint && <span className="text-[var(--text-secondary)] text-[10px]">{hint}</span>}
         </div>
       ) : (
-        <span className="font-mono text-gray-700 tabular-nums flex-shrink-0">
+        <span className="font-mono text-[var(--text-primary)] tabular-nums flex-shrink-0">
           {unit === 'images' ? `${fmt(computed)} rsv` : `${fmt(computed)} / ${fmt(total)}`}
         </span>
       )}

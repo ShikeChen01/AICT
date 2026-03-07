@@ -97,7 +97,7 @@ export function AuthCallbackPage() {
         logStep('refresh_profile:success', { source });
         clearTimeout(timeoutId);
         setStatus('success');
-        navigate('/repositories', { replace: true });
+        navigate('/projects', { replace: true });
         return true;
       } catch (firstErr) {
         logStep('refresh_profile:error', {
@@ -110,7 +110,7 @@ export function AuthCallbackPage() {
           await refreshProfile();
           clearTimeout(timeoutId);
           setStatus('success');
-          navigate('/repositories', { replace: true });
+          navigate('/projects', { replace: true });
           return true;
         } catch (retryErr) {
           clearTimeout(timeoutId);
@@ -161,7 +161,7 @@ export function AuthCallbackPage() {
           try {
             await refreshProfile();
             setStatus('success');
-            navigate('/repositories', { replace: true });
+            navigate('/projects', { replace: true });
             return;
           } catch {
             // fall through

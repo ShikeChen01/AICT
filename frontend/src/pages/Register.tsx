@@ -20,7 +20,7 @@ export function RegisterPage() {
 
   useEffect(() => {
     if (!loading && (firebaseUser || user)) {
-      navigate('/repositories', { replace: true });
+      navigate('/projects', { replace: true });
     }
   }, [firebaseUser, loading, user, navigate]);
 
@@ -30,7 +30,7 @@ export function RegisterPage() {
     try {
       await loginWithGoogle();
       // Popup resolves directly; navigate on success.
-      navigate('/repositories', { replace: true });
+      navigate('/projects', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to sign in with Google');
     } finally {

@@ -1,15 +1,15 @@
 /**
- * PromptBuilderPage — Context Budget Dashboard.
+ * PromptBuilderPage — Agent Builder: prompt blocks, tools, context budget.
  *
- * Two-column layout:
- *   Left:  Context window donut chart + budget breakdown (model-aware)
- *   Right: System prompt block list + Tool Assembly section + Runtime Injections
+ * Two-column layout with draggable divider:
+ *   Left:  Context window donut chart + budget breakdown (model-aware) + agent config
+ *   Right: System prompt block list + custom blocks + Tool Assembly + Runtime Injections
  *
  * Meta is re-fetched when: agent changes, agent model changes, or tools are updated.
  */
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Database } from 'lucide-react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { Database, Plus, X } from 'lucide-react';
 
 import { AgentConfigPanel } from './AgentConfigPanel';
 import { AllocationEditor } from './AllocationEditor';
@@ -41,6 +41,16 @@ function isMainBlock(block: PromptBlockConfig): boolean {
   return !CONDITIONAL_BLOCK_KEYS.has(block.block_key) && !THINKING_BLOCK_KEYS.has(block.block_key);
 }
 
+function isCustomBlock(block: PromptBlockConfig): boolean {
+  return block.block_key.startsWith('custom_');
+}
+
+// ── Draggable divider — uses % of container, clamped to usable range ──────────
+
+const MIN_LEFT_PCT = 18;   // minimum ~18% of container
+const MAX_LEFT_PCT = 38;   // maximum ~38% of container
+const DEFAULT_LEFT_PCT = 25; // default ~25%
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface PromptBuilderPageProps {
@@ -58,6 +68,16 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savingBlocks, setSavingBlocks] = useState(false);
 
+  // Draggable left column (percentage-based)
+  const [leftPct, setLeftPct] = useState(DEFAULT_LEFT_PCT);
+  const [isDragging, setIsDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Add custom block form
+  const [showAddBlock, setShowAddBlock] = useState(false);
+  const [newBlockName, setNewBlockName] = useState('');
+  const [newBlockContent, setNewBlockContent] = useState('');
+
   const selectedAgent = useMemo(
     () => agents.find((a) => a.id === selectedAgentId) ?? null,
     [agents, selectedAgentId]
@@ -67,6 +87,29 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
     () => blocks.find((b) => b.id === editingBlockId) ?? null,
     [blocks, editingBlockId]
   );
+
+  // ── Draggable resize logic ─────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!isDragging) return;
+    const onMove = (e: MouseEvent) => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0) return;
+      const pct = ((e.clientX - rect.left) / rect.width) * 100;
+      setLeftPct(Math.min(MAX_LEFT_PCT, Math.max(MIN_LEFT_PCT, pct)));
+    };
+    const onUp = () => setIsDragging(false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [isDragging]);
 
   // ── Load agents on mount ──────────────────────────────────────────────────
 
@@ -82,7 +125,6 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
   }, [projectId]);
 
   // ── Refresh meta whenever selected agent changes ──────────────────────────
-  // Passes agent_id so backend can measure exact tool + block tokens
 
   const refreshMeta = useCallback((agentId: string | null, agentModel?: string) => {
     if (!agentId) return;
@@ -111,7 +153,6 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
   }, [selectedAgentId]);
 
   // ── Persist helper ────────────────────────────────────────────────────────
-  // Returns a promise; sets savingBlocks so reorder/toggle are disabled during save.
 
   const persistBlocks = useCallback(
     (updated: PromptBlockConfig[]) => {
@@ -198,23 +239,61 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
     refreshMeta(selectedAgentId, selectedAgent?.model);
   }, [selectedAgentId, selectedAgent?.model, refreshMeta]);
 
+  // ── Add custom block ───────────────────────────────────────────────────────
+
+  const handleAddCustomBlock = useCallback(() => {
+    if (!newBlockName.trim() || !selectedAgentId) return;
+    const blockKey = `custom_${newBlockName.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')}`;
+    const maxPos = blocks.reduce((max, b) => Math.max(max, b.position), 0);
+    const newBlock: PromptBlockConfig = {
+      id: `temp_${Date.now()}`,
+      template_id: null,
+      agent_id: selectedAgentId,
+      block_key: blockKey,
+      content: newBlockContent.trim() || `# ${newBlockName.trim()}\n\nYour custom instructions here.`,
+      position: maxPos + 1,
+      enabled: true,
+    };
+    const updated = [...blocks, newBlock];
+    setBlocks(updated);
+    persistBlocks(updated);
+    setNewBlockName('');
+    setNewBlockContent('');
+    setShowAddBlock(false);
+  }, [newBlockName, newBlockContent, blocks, selectedAgentId, persistBlocks]);
+
+  // ── Delete custom block ────────────────────────────────────────────────────
+
+  const handleDeleteBlock = useCallback((blockId: string) => {
+    setBlocks((prev) => {
+      const updated = prev.filter((b) => b.id !== blockId);
+      persistBlocks(updated);
+      return updated;
+    });
+  }, [persistBlocks]);
+
   // ── Derived block lists ───────────────────────────────────────────────────
 
   const mainBlocks = useMemo(
-    () => blocks.filter(isMainBlock).sort((a, b) => a.position - b.position),
+    () => blocks.filter((b) => isMainBlock(b) && !isCustomBlock(b)).sort((a, b) => a.position - b.position),
+    [blocks]
+  );
+
+  const customBlocks = useMemo(
+    () => blocks.filter(isCustomBlock).sort((a, b) => a.position - b.position),
     [blocks]
   );
 
   const totalSystemTokens = useMemo(
-    () => mainBlocks.filter((b) => b.enabled).reduce((sum, b) => sum + estimateTokens(b.content), 0),
-    [mainBlocks]
+    () => [...mainBlocks, ...customBlocks].filter((b) => b.enabled).reduce((sum, b) => sum + estimateTokens(b.content), 0),
+    [mainBlocks, customBlocks]
   );
 
   // ── Loading / empty states ────────────────────────────────────────────────
 
   if (loadingAgents) {
     return (
-      <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+      <div className="flex items-center justify-center h-full text-[var(--text-muted)] text-sm">
         Loading agents…
       </div>
     );
@@ -222,17 +301,17 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
 
   if (agents.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+      <div className="flex items-center justify-center h-full text-[var(--text-muted)] text-sm">
         No agents found for this project.
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-[#f8f9fa]">
-      {/* ── Top bar: agent tabs ── */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-200 bg-white flex-shrink-0 overflow-x-auto">
-        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide mr-1 flex-shrink-0">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden bg-[var(--app-bg)]">
+      {/* ── Top bar: agent tabs — compact, pinned ── */}
+      <div className="flex items-center gap-1.5 px-3 py-1 border-b border-[var(--border-color)] bg-[var(--surface-card)] flex-shrink-0 overflow-x-auto">
+        <span className="text-[10px] font-semibold text-[var(--text-faint)] uppercase tracking-wider mr-0.5 flex-shrink-0">
           Agent
         </span>
         {agents.map((a) => (
@@ -244,43 +323,47 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
               setSelectedAgentId(a.id);
             }}
             className={`
-              px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex-shrink-0
+              px-2.5 py-1 rounded-md text-xs font-medium transition-colors flex-shrink-0
               ${a.id === selectedAgentId
-                ? 'bg-violet-600 text-white shadow-sm'
-                : 'text-gray-600 hover:bg-gray-100'
+                ? 'bg-[var(--color-accent)] text-white shadow-sm'
+                : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
               }
             `}
           >
             {a.display_name}
-            <span className="ml-1.5 text-xs opacity-60 font-normal">{a.role}</span>
+            <span className="ml-1 text-[10px] opacity-60 font-normal">{a.role}</span>
           </button>
         ))}
 
-        <div className="flex items-center gap-1 ml-auto flex-shrink-0 text-xs text-green-700 bg-green-50 border border-green-200 rounded-full px-2.5 py-1">
-          <Database className="w-3 h-3" />
-          <span>DB is source of truth</span>
+        <div className="flex items-center gap-1 ml-auto flex-shrink-0 text-[10px] text-[var(--color-success)] bg-[var(--color-success-light)] border border-[var(--color-success)]/20 rounded-full px-2 py-0.5">
+          <Database className="w-2.5 h-2.5" />
+          <span>DB synced</span>
         </div>
       </div>
 
-      {/* ── Main content: two-column layout ── */}
-      <div className="flex flex-1 min-h-0 gap-0">
+      {/* ── Scrollable content area — whole page scrolls as one unit ── */}
+      <div ref={containerRef} className="flex-1 min-h-0 overflow-y-auto">
+        <div className="flex min-h-full">
 
-        {/* Left column: context budget */}
-        <div className="w-72 flex-shrink-0 border-r border-gray-200 bg-white overflow-y-auto">
-          <div className="p-4 space-y-4">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          {/* Left column: context budget — sticky sidebar */}
+          <div
+            className="flex-shrink-0 border-r border-[var(--border-color)] bg-[var(--surface-card)] self-start sticky top-0"
+            style={{ width: `${leftPct}%` }}
+          >
+            <div className="p-3 space-y-3 pb-12 max-h-[calc(100vh-6rem)] overflow-y-auto">
+            <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">
               Context Budget
             </h3>
 
             {meta ? (
               <ContextBudgetChart meta={meta} />
             ) : (
-              <div className="text-xs text-gray-400">Loading budget…</div>
+              <div className="text-xs text-[var(--text-muted)]">Loading budget…</div>
             )}
 
             {/* Dynamic pool — editable allocation panel */}
             {meta && selectedAgentId && (
-              <div className="pt-3 border-t border-gray-100">
+              <div className="pt-3 border-t border-[var(--border-color-subtle)]">
                 <AllocationEditor
                   agentId={selectedAgentId}
                   meta={meta}
@@ -292,7 +375,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
 
             {/* Agent config */}
             {selectedAgent && (
-              <div className="pt-3 border-t border-gray-100">
+              <div className="pt-3 border-t border-[var(--border-color-subtle)]">
                 <AgentConfigPanel
                   agent={selectedAgent}
                   onAgentUpdated={handleAgentUpdated}
@@ -302,23 +385,36 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
           </div>
         </div>
 
-        {/* Right column: block list + tool assembly */}
-        <div className="flex-1 min-w-0 overflow-y-auto">
-          <div className="p-4 space-y-6 max-w-2xl">
+          {/* Draggable divider — sticky so it stays visible while scrolling */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize left panel"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setIsDragging(true);
+            }}
+            className="w-1.5 flex-shrink-0 cursor-col-resize bg-transparent hover:bg-[var(--border-color)] active:bg-[var(--color-primary)]/40 transition-colors sticky top-0 self-start"
+            style={{ height: 'calc(100vh - 6rem)' }}
+          />
+
+          {/* Right column: block list + tool assembly — flows naturally, page scrolls */}
+          <div className="flex-1 min-w-0">
+            <div className="p-4 space-y-6 max-w-2xl pb-16">
             {/* System Prompt Blocks section */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">
                   System Prompt Blocks
                 </h3>
-                <span className="text-xs text-gray-400 font-mono" title="Assembled tokens / measured allocation">
+                <span className="text-xs text-[var(--text-muted)] font-mono" title="Assembled tokens / measured allocation">
                   ~{(totalSystemTokens / 1000).toFixed(1)}k
                   {meta ? ` / ${(meta.system_prompt_tokens / 1000).toFixed(1)}k` : ''} tokens
                 </span>
               </div>
 
               {saveError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg px-3 py-2 flex items-center justify-between">
+                <div className="bg-[var(--color-danger-light)] border border-[var(--color-danger)]/20 text-[var(--color-danger)] text-xs rounded-lg px-3 py-2 flex items-center justify-between">
                   {saveError}
                   <button
                     type="button"
@@ -331,11 +427,11 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
               )}
 
               {loadingBlocks ? (
-                <div className="text-sm text-gray-400 py-6 text-center">
+                <div className="text-sm text-[var(--text-muted)] py-6 text-center">
                   Loading prompt blocks…
                 </div>
               ) : mainBlocks.length === 0 ? (
-                <div className="text-sm text-gray-400 py-6 text-center">
+                <div className="text-sm text-[var(--text-muted)] py-6 text-center">
                   No blocks found. Try refreshing.
                 </div>
               ) : (
@@ -355,6 +451,112 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
                       onMoveDown={() => handleMoveDown(block.id)}
                     />
                   ))}
+                </div>
+              )}
+
+              {/* Custom Blocks section */}
+              {customBlocks.length > 0 && (
+                <div className="space-y-1.5 pt-2">
+                  <h4 className="text-xs font-semibold text-[var(--color-accent)] uppercase tracking-wide flex items-center gap-1">
+                    Custom Blocks
+                    <span className="text-[var(--text-muted)] font-normal">({customBlocks.length})</span>
+                  </h4>
+                  {customBlocks.map((block, idx) => (
+                    <div key={block.id} className="relative group/custom">
+                      <PromptBlockRow
+                        block={block}
+                        meta={undefined}
+                        totalSystemTokens={totalSystemTokens}
+                        isFirst={idx === 0}
+                        isLast={idx === customBlocks.length - 1}
+                        mutationsDisabled={savingBlocks}
+                        onEdit={() => handleEdit(block.id)}
+                        onToggle={() => handleToggle(block.id)}
+                        onMoveUp={() => handleMoveUp(block.id)}
+                        onMoveDown={() => handleMoveDown(block.id)}
+                      />
+                      {/* Delete button for custom blocks */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Delete custom block "${block.block_key.replace('custom_', '')}"?`)) {
+                            handleDeleteBlock(block.id);
+                          }
+                        }}
+                        className="absolute -right-1 -top-1 hidden group-hover/custom:flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-danger)] text-white shadow-sm text-xs"
+                        title="Delete custom block"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add Custom Block */}
+              {!showAddBlock ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAddBlock(true)}
+                  disabled={savingBlocks}
+                  className="flex items-center gap-1.5 text-xs text-[var(--color-primary)] hover:text-[var(--color-primary-hover)] font-medium transition-colors disabled:opacity-50"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add Custom Block
+                </button>
+              ) : (
+                <div className="border border-[var(--color-primary)]/20 rounded-lg bg-[var(--surface-card)] p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-semibold text-[var(--text-primary)]">New Custom Block</h4>
+                    <button
+                      type="button"
+                      onClick={() => { setShowAddBlock(false); setNewBlockName(''); setNewBlockContent(''); }}
+                      className="p-0.5 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)]"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[var(--text-muted)] mb-0.5">Block name</label>
+                    <input
+                      type="text"
+                      value={newBlockName}
+                      onChange={(e) => setNewBlockName(e.target.value)}
+                      placeholder="e.g. coding_style, safety_rules"
+                      className="w-full text-sm border border-[var(--border-color)] bg-[var(--surface-muted)] rounded-lg px-2.5 py-1.5 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] placeholder:text-[var(--text-faint)]"
+                    />
+                    <p className="text-[10px] text-[var(--text-faint)] mt-0.5">
+                      Will be saved as: custom_{newBlockName.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || '...'}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[var(--text-muted)] mb-0.5">Initial content (optional)</label>
+                    <textarea
+                      value={newBlockContent}
+                      onChange={(e) => setNewBlockContent(e.target.value)}
+                      rows={3}
+                      placeholder="Markdown content for this block…"
+                      className="w-full text-xs font-mono border border-[var(--border-color)] bg-[var(--surface-muted)] rounded-lg p-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] placeholder:text-[var(--text-faint)] resize-none"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { setShowAddBlock(false); setNewBlockName(''); setNewBlockContent(''); }}
+                      className="text-xs px-2.5 py-1 rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAddCustomBlock}
+                      disabled={!newBlockName.trim() || savingBlocks}
+                      className="text-xs px-3 py-1 rounded bg-[var(--color-primary)] text-white hover:opacity-90 disabled:opacity-40 font-medium"
+                    >
+                      Add Block
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -382,7 +584,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
             {/* Tool Assembly section */}
             {selectedAgent && selectedAgentId && (
               <div className="space-y-3">
-                <div className="border-t border-gray-200 pt-4">
+                <div className="border-t border-[var(--border-color)] pt-4">
                   <ToolAssemblyPanel
                     agentId={selectedAgentId}
                     agent={selectedAgent}
@@ -392,6 +594,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
                 </div>
               </div>
             )}
+            </div>
           </div>
         </div>
       </div>

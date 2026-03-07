@@ -84,28 +84,28 @@ export function AgentConfigPanel({ agent, onAgentUpdated }: AgentConfigPanelProp
   };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-lg p-4 w-72 space-y-4">
+    <div className="bg-[var(--surface-card)] border border-[var(--border-color)] rounded-xl shadow-lg p-4 w-72 space-y-4">
       {/* Header */}
       <div className="flex items-center gap-2">
         <Brain className="w-4 h-4 text-violet-600" />
         <div className="min-w-0">
-          <p className="text-xs text-gray-400 uppercase font-semibold tracking-wide">Agent Config</p>
-          <p className="text-sm font-semibold text-gray-800 truncate">{agent.display_name}</p>
+          <p className="text-xs text-[var(--text-muted)] uppercase font-semibold tracking-wide">Agent Config</p>
+          <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{agent.display_name}</p>
         </div>
         {saving && (
-          <span className="ml-auto text-xs text-gray-400 animate-pulse">saving…</span>
+          <span className="ml-auto text-xs text-[var(--text-muted)] animate-pulse">saving…</span>
         )}
       </div>
 
       {error && (
-        <p className="text-xs text-red-500 bg-red-50 rounded px-2 py-1">{error}</p>
+        <p className="text-xs text-[var(--color-danger)] bg-[var(--color-danger-light)] rounded px-2 py-1">{error}</p>
       )}
 
       {/* Model */}
       <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">Model</label>
+        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">Model</label>
         <select
-          className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
+          className="w-full text-sm border border-[var(--border-color)] rounded-lg px-2 py-1.5 bg-[var(--surface-card)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
           value={model}
           onChange={handleModelChange}
         >
@@ -118,9 +118,9 @@ export function AgentConfigPanel({ agent, onAgentUpdated }: AgentConfigPanelProp
 
       {/* Provider */}
       <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">Provider</label>
+        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">Provider</label>
         <select
-          className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
+          className="w-full text-sm border border-[var(--border-color)] rounded-lg px-2 py-1.5 bg-[var(--surface-card)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
           value={provider}
           onChange={handleProviderChange}
         >
@@ -140,13 +140,13 @@ export function AgentConfigPanel({ agent, onAgentUpdated }: AgentConfigPanelProp
             onChange={handleThinkingChange}
           />
           <div
-            className={`w-9 h-5 rounded-full transition-colors ${thinking ? 'bg-violet-500' : 'bg-gray-300'}`}
+            className={`w-9 h-5 rounded-full transition-colors ${thinking ? 'bg-[var(--color-accent)]' : 'bg-[var(--surface-muted)]'}`}
           />
           <div
             className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${thinking ? 'translate-x-4' : ''}`}
           />
         </div>
-        <span className="text-sm text-gray-700">Thinking enabled</span>
+        <span className="text-sm text-[var(--text-secondary)]">Thinking enabled</span>
       </label>
     </div>
   );

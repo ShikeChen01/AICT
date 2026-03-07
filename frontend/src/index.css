@@ -1,30 +1,116 @@
 @import "tailwindcss";
 
-/* Design tokens */
+/* ═══════════════════════════════════════════════════════════════════════
+   Design tokens — AICT v2 "The Figma for AI Agents"
+   Default: dark theme (matching v2 prototype)
+   ═══════════════════════════════════════════════════════════════════════ */
+
 :root {
-  --color-primary: #3b82f6;
-  --color-primary-hover: #2563eb;
-  --color-danger: #dc2626;
-  --color-manager: #8b5cf6;
-  --color-cto: #06b6d4;
-  --color-engineer: #22c55e;
-  --app-bg: #f3f5fa;
-  --surface-card: #ffffff;
-  --surface-muted: #f8fafc;
-  --surface-hover: #eef2f7;
-  --border-color: #dce3ef;
-  --text-primary: #0f172a;
-  --text-secondary: #334155;
-  --text-muted: #64748b;
-  --shadow-sm: 0 1px 2px rgba(2, 6, 23, 0.08);
+  /* Primary palette */
+  --color-primary: #5e8eed;
+  --color-primary-hover: #4a7de0;
+  --color-primary-light: rgba(94, 142, 237, 0.12);
+  --color-accent: #a78bfa;
+  --color-accent-light: rgba(167, 139, 250, 0.12);
+  --color-danger: #e5484d;
+  --color-danger-light: rgba(229, 72, 77, 0.12);
+  --color-success: #30a46c;
+  --color-success-light: rgba(48, 164, 108, 0.12);
+  --color-warning: #f5a623;
+  --color-warning-light: rgba(245, 166, 35, 0.12);
+  --color-info: #38bdf8;
+
+  /* Agent role colors */
+  --color-manager: #a78bfa;
+  --color-cto: #22d3ee;
+  --color-engineer: #34d399;
+
+  /* Surfaces — dark */
+  --app-bg: #080910;
+  --surface-card: #101520;
+  --surface-muted: #0d1118;
+  --surface-hover: #181e2c;
+  --surface-raised: #151b28;
+
+  /* Borders — dark */
+  --border-color: #1f2536;
+  --border-color-subtle: #171c28;
+  --border-color-hover: #2a3148;
+
+  /* Text — dark */
+  --text-primary: #e0e2e8;
+  --text-secondary: #a8adb8;
+  --text-muted: #6b7280;
+  --text-faint: #4b5060;
+
+  /* Shadows — dark */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.3);
+
+  /* Transitions */
+  --transition-fast: 120ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 300ms ease;
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
 }
 
+/* ─── Light theme override ────────────────────────────────────────── */
+[data-theme="light"] {
+  --color-primary: #4f6ef7;
+  --color-primary-hover: #3b5de5;
+  --color-primary-light: #eef1fe;
+  --color-accent: #8b5cf6;
+  --color-accent-light: #f0ebfe;
+  --color-danger: #e5484d;
+  --color-danger-light: #fef1f1;
+  --color-success: #30a46c;
+  --color-success-light: #e9f9ef;
+  --color-warning: #f5a623;
+  --color-warning-light: #fef8ec;
+  --color-info: #0ea5e9;
+
+  --color-manager: #8b5cf6;
+  --color-cto: #06b6d4;
+  --color-engineer: #30a46c;
+
+  --app-bg: #f7f8fb;
+  --surface-card: #ffffff;
+  --surface-muted: #f4f5f9;
+  --surface-hover: #ebedf4;
+  --surface-raised: #ffffff;
+
+  --border-color: #e2e5ee;
+  --border-color-subtle: #eceef4;
+  --border-color-hover: #d0d4e0;
+
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
+  --text-faint: #9ca3af;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+
+/* ─── Base styles ─────────────────────────────────────────────────── */
 body {
   margin: 0;
   min-height: 100vh;
   font-family: Inter, system-ui, -apple-system, sans-serif;
   background: var(--app-bg);
   color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color var(--transition-normal), color var(--transition-normal);
 }
 
 #root {
@@ -35,23 +121,37 @@ body {
   box-sizing: border-box;
 }
 
-/* Scrollbar styling */
+/* Focus ring */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Scrollbar */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #e8edf5;
-  border-radius: 10px;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #bcc8da;
-  border-radius: 10px;
-  border: 2px solid #e8edf5;
+  background: var(--border-color);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: var(--text-muted);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.overflow-y-auto,
+.overflow-x-auto,
+.overflow-auto {
+  scrollbar-gutter: stable;
 }

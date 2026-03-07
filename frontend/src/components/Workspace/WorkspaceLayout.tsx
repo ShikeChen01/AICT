@@ -1,14 +1,12 @@
 /**
- * WorkspaceLayout — three-column layout: Sidebar | Main | Agents panel.
+ * WorkspaceLayout — Main + optional Monitoring panel (horizontal split).
+ * The sidebar has been replaced by TopNav in AppLayout.
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Sidebar } from './Sidebar';
 import { ConnectionStatus } from './ConnectionStatus';
 
 interface WorkspaceLayoutProps {
-  activeProjectId: string;
-  onProjectChange?: (projectId: string) => void;
   main: React.ReactNode;
   monitoringPanel?: React.ReactNode;
   isWsConnected?: boolean;
@@ -16,8 +14,6 @@ interface WorkspaceLayoutProps {
 }
 
 export function WorkspaceLayout({
-  activeProjectId,
-  onProjectChange,
   main,
   monitoringPanel,
   isWsConnected = false,
@@ -25,7 +21,7 @@ export function WorkspaceLayout({
 }: WorkspaceLayoutProps) {
   const [monitoringWidth, setMonitoringWidth] = useState(384);
   const [isResizingMonitoring, setIsResizingMonitoring] = useState(false);
-  const mainRef = useRef<HTMLElement | null>(null);
+  const mainRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!isResizingMonitoring || monitoringPanel == null) return;
@@ -54,31 +50,28 @@ export function WorkspaceLayout({
   }, [isResizingMonitoring, monitoringPanel]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--app-bg)]">
-      <Sidebar activeProjectId={activeProjectId} onProjectChange={onProjectChange} />
-      <main ref={mainRef} className="flex min-w-0 flex-1 gap-3 overflow-hidden p-4">
-        <section className="min-w-0 flex-1 overflow-hidden">{main}</section>
-        {monitoringPanel != null && (
-          <>
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize monitoring panel"
-              onMouseDown={(event) => {
-                event.preventDefault();
-                setIsResizingMonitoring(true);
-              }}
-              className="w-1.5 cursor-col-resize rounded bg-transparent hover:bg-[var(--border-color)] active:bg-[var(--color-primary)]/40"
-            />
-            <aside
-              className="min-w-0 h-full overflow-hidden"
-              style={{ width: `${monitoringWidth}px` }}
-            >
-              {monitoringPanel}
-            </aside>
-          </>
-        )}
-      </main>
+    <div ref={mainRef} className="flex min-h-0 flex-1 gap-3 overflow-hidden p-4">
+      <section className="min-w-0 flex-1 overflow-hidden">{main}</section>
+      {monitoringPanel != null && (
+        <>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize monitoring panel"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              setIsResizingMonitoring(true);
+            }}
+            className="w-1.5 cursor-col-resize rounded bg-transparent hover:bg-[var(--border-color)] active:bg-[var(--color-primary)]/40"
+          />
+          <aside
+            className="min-w-0 h-full overflow-hidden"
+            style={{ width: `${monitoringWidth}px` }}
+          >
+            {monitoringPanel}
+          </aside>
+        </>
+      )}
       <div className="pointer-events-none">
         <ConnectionStatus isConnected={isWsConnected} workersReady={workersReady} />
       </div>

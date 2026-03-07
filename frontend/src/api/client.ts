@@ -532,6 +532,19 @@ export async function deleteTemplate(templateId: string): Promise<void> {
   return request<void>('DELETE', `/templates/templates/${templateId}`);
 }
 
+/** Spawn a new agent from a template (agent design). */
+export async function spawnFromTemplate(
+  templateId: string,
+  data?: { display_name?: string; sandbox_persist?: boolean },
+): Promise<Agent> {
+  return request<Agent>('POST', `/templates/templates/${templateId}/spawn`, data ?? {});
+}
+
+/** Delete a non-core agent. Manager and CTO are protected. */
+export async function deleteAgent(agentId: string): Promise<{ ok: boolean; message: string }> {
+  return request<{ ok: boolean; message: string }>('DELETE', `/agents/${agentId}`);
+}
+
 // ─── Prompt Blocks ────────────────────────────────────────────────────
 
 export async function listAgentBlocks(agentId: string): Promise<PromptBlockConfig[]> {

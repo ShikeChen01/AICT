@@ -6,8 +6,10 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import {
+  AgentBuildPage,
   AuthCallbackPage,
   BackendLogsPage,
+  DashboardPage,
   LoginPage,
   ProjectsPage,
   RegisterPage,
@@ -19,12 +21,13 @@ import {
 import { getAuthToken, healthCheck } from './api/client';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProjectProvider, useProjectContext } from './contexts/ProjectContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 
 function ProtectedRoute() {
   const { firebaseUser, user, loading } = useAuth();
   const hasToken = Boolean(getAuthToken());
   if (loading) {
-    return <div className="h-screen flex items-center justify-center text-gray-600">Loading...</div>;
+    return <div className="h-screen flex items-center justify-center text-[var(--text-muted)]">Loading...</div>;
   }
   if (!firebaseUser && !user && !hasToken) {
     return <Navigate to="/login" replace />;
@@ -62,12 +65,12 @@ function AppShell() {
   return (
     <BrowserRouter>
       {projectsError && (
-        <div className="fixed left-0 right-0 top-0 z-50 border-b border-red-200 bg-red-50 px-4 py-2 text-center text-sm text-red-700">
+        <div className="fixed left-0 right-0 top-0 z-50 border-b border-[var(--color-danger)]/30 bg-[var(--color-danger-light)] px-4 py-2 text-center text-sm text-[var(--color-danger)]">
           {projectsError}
         </div>
       )}
       {!isBackendConnected && (
-        <div className="fixed left-0 right-0 top-0 z-50 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm text-amber-800">
+        <div className="fixed left-0 right-0 top-0 z-50 border-b border-[var(--color-warning)]/30 bg-[var(--color-warning-light)] px-4 py-2 text-center text-sm text-[var(--color-warning)]">
           Backend health check failed. Reconnecting...
         </div>
       )}
@@ -79,29 +82,32 @@ function AppShell() {
         <Route path="/test-login" element={<TestLoginPage />} />
 
         <Route element={<ProtectedRoute />}>
-          <Route path="/repositories" element={<ProjectsPage onProjectsUpdated={refreshProjects} />} />
+          <Route path="/projects" element={<ProjectsPage onProjectsUpdated={refreshProjects} />} />
           <Route path="/settings" element={<UserSettingsPage />} />
-          <Route path="/repository/:projectId/settings" element={<SettingsPage />} />
+          <Route path="/project/:projectId/settings" element={<SettingsPage />} />
 
           <Route
             path="/"
             element={
               isProjectsLoading ? (
-                <div className="h-screen flex items-center justify-center text-gray-600">
+                <div className="h-screen flex items-center justify-center text-[var(--text-muted)]">
                   Loading...
                 </div>
               ) : projects.length === 0 ? (
-                <Navigate to="/repositories" replace />
+                <Navigate to="/projects" replace />
               ) : (
-                <Navigate to={`/repository/${projects[0].id}/workspace`} replace />
+                <Navigate to={`/project/${projects[0].id}/workspace`} replace />
               )
             }
           />
-          <Route path="/repository/:projectId/workspace" element={<WorkspacePage view="workspace" />} />
-          <Route path="/repository/:projectId/kanban" element={<WorkspacePage view="kanban" />} />
-          <Route path="/repository/:projectId/prompt_assembly" element={<WorkspacePage view="workflow" />} />
-          <Route path="/repository/:projectId/artifacts" element={<WorkspacePage view="artifacts" />} />
-          <Route path="/repository/:projectId/backend-logs" element={<BackendLogsPage />} />
+          <Route path="/project/:projectId/workspace" element={<WorkspacePage view="workspace" />} />
+          <Route path="/project/:projectId/dashboard" element={<DashboardPage />} />
+          <Route path="/project/:projectId/kanban" element={<WorkspacePage view="kanban" />} />
+          <Route path="/project/:projectId/agent-build" element={<AgentBuildPage />} />
+          <Route path="/project/:projectId/logs" element={<BackendLogsPage />} />
+
+          {/* Backward-compatible redirects */}
+          <Route path="/repositories" element={<Navigate to="/projects" replace />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -113,11 +119,13 @@ function AppShell() {
 
 function App() {
   return (
-    <AuthProvider>
-      <ProjectProvider>
-        <AppShell />
-      </ProjectProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <ProjectProvider>
+          <AppShell />
+        </ProjectProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 
