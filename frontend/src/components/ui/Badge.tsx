@@ -1,7 +1,7 @@
 import type { HTMLAttributes } from 'react';
 import { cn } from './cn';
 
-type BadgeVariant = 'neutral' | 'manager' | 'cto' | 'engineer' | 'success' | 'warning' | 'danger';
+type BadgeVariant = 'neutral' | 'default' | 'manager' | 'cto' | 'engineer' | 'success' | 'warning' | 'danger';
 
 interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   variant?: BadgeVariant;
@@ -9,6 +9,7 @@ interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
 
 const badgeVariantClass: Record<BadgeVariant, string> = {
   neutral: 'bg-slate-100 text-slate-700',
+  default: 'bg-slate-100 text-slate-700',
   manager: 'bg-violet-100 text-violet-700',
   cto: 'bg-cyan-100 text-cyan-700',
   engineer: 'bg-emerald-100 text-emerald-700',

@@ -13,11 +13,11 @@ interface AgentsPanelProps {
 }
 
 function statusDotClass(statusLabel: string): string {
-  if (statusLabel === 'sleeping') return 'bg-gray-400';
-  if (statusLabel === 'busy') return 'bg-amber-500 animate-pulse';
-  if (statusLabel === 'waiting') return 'bg-orange-500 animate-pulse';
-  if (statusLabel === 'idle') return 'bg-blue-500';
-  return 'bg-green-500';
+  if (statusLabel === 'sleeping') return 'bg-[var(--text-faint)]';
+  if (statusLabel === 'busy') return 'bg-[var(--color-warning)] animate-pulse';
+  if (statusLabel === 'waiting') return 'bg-[var(--color-warning)] animate-pulse';
+  if (statusLabel === 'idle') return 'bg-[var(--color-primary)]';
+  return 'bg-[var(--color-success)]';
 }
 
 export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: AgentsPanelProps) {
@@ -131,7 +131,7 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
             title="Stop all agents"
             disabled={stoppingIds.size > 0}
             onClick={handleStopAll}
-            className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-40 transition-colors"
+            className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-[var(--color-danger)] border border-[var(--color-danger)]/40 hover:bg-[var(--color-danger-light)] disabled:opacity-40 transition-colors"
           >
             <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
               <rect x="2" y="2" width="8" height="8" rx="1" />
@@ -141,18 +141,18 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
         </div>
       )}
       {stopToast && (
-        <div className="m-2 rounded-lg border border-gray-200 bg-gray-800 px-3 py-2 text-xs text-white shadow-lg">
+        <div className="m-2 rounded-lg border border-[var(--border-color)] bg-gray-800 px-3 py-2 text-xs text-white shadow-lg">
           {stopToast}
         </div>
       )}
       {error && (
-        <div className="m-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+        <div className="m-2 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger-light)] px-3 py-2 text-xs text-[var(--color-danger)]">
           {error.message}
         </div>
       )}
 
       {isLoading && rows.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
+        <div className="flex-1 flex items-center justify-center text-sm text-[var(--text-muted)]">
           Loading agents...
         </div>
       ) : (
@@ -162,7 +162,7 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
               key={agent.id}
               className={`rounded-lg border p-3 ${
                 agent.id === effectiveExpandedId
-                  ? 'border-[var(--color-primary)]/40 bg-blue-50/40'
+                  ? 'border-[var(--color-primary)]/40 bg-[var(--color-primary)]/5'
                   : 'border-[var(--border-color)] bg-[var(--surface-card)]'
               }`}
             >
@@ -179,7 +179,7 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
                     className={`inline-block w-2 h-2 rounded-full ${statusDotClass(agent.statusLabel)}`}
                     aria-hidden
                   />
-                  <p className="truncate text-sm font-medium text-gray-900">{agent.display_name}</p>
+                  <p className="truncate text-sm font-medium text-[var(--text-primary)]">{agent.display_name}</p>
                   <Badge
                     variant={agent.role === 'manager' ? 'manager' : agent.role === 'cto' ? 'cto' : 'engineer'}
                   >
@@ -187,7 +187,7 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
                   </Badge>
                 </button>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-gray-500 uppercase">{agent.statusLabel}</span>
+                  <span className="text-[11px] text-[var(--text-muted)] uppercase">{agent.statusLabel}</span>
                   <button
                     type="button"
                     title={`Stop ${agent.display_name}`}
@@ -196,10 +196,10 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
                       e.stopPropagation();
                       handleStop(agent.id, agent.display_name);
                     }}
-                    className="flex items-center justify-center w-5 h-5 rounded text-red-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 transition-colors"
+                    className="flex items-center justify-center w-5 h-5 rounded text-[var(--color-danger)] hover:bg-[var(--color-danger-light)] hover:text-[var(--color-danger)] disabled:opacity-40 transition-colors"
                   >
                     {stoppingIds.has(agent.id) ? (
-                      <span className="w-2.5 h-2.5 border border-red-400 border-t-transparent rounded-full animate-spin block" />
+                      <span className="w-2.5 h-2.5 border border-[var(--color-danger)]/40 border-t-transparent rounded-full animate-spin block" />
                     ) : (
                       <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
                         <rect x="2" y="2" width="8" height="8" rx="1" />
@@ -215,10 +215,10 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
                         e.stopPropagation();
                         handleDelete(agent.id, agent.display_name);
                       }}
-                      className="flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 transition-colors"
+                      className="flex items-center justify-center w-5 h-5 rounded text-[var(--text-faint)] hover:bg-[var(--color-danger-light)] hover:text-[var(--color-danger)] disabled:opacity-40 transition-colors"
                     >
                       {deletingIds.has(agent.id) ? (
-                        <span className="w-2.5 h-2.5 border border-gray-400 border-t-transparent rounded-full animate-spin block" />
+                        <span className="w-2.5 h-2.5 border border-[var(--text-faint)] border-t-transparent rounded-full animate-spin block" />
                       ) : (
                         <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
                           <line x1="3" y1="3" x2="9" y2="9" />
@@ -230,14 +230,14 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
                 </div>
               </div>
 
-              <div className="mt-2 flex items-center gap-3 text-xs text-gray-600">
+              <div className="mt-2 flex items-center gap-3 text-xs text-[var(--text-muted)]">
                 <span>Queue: {agent.queue_size}</span>
                 <span>Pending messages: {agent.pending_message_count ?? 0}</span>
               </div>
 
               <div className="mt-2">
-                <p className="text-[10px] uppercase tracking-wide text-gray-500">Latest activity</p>
-                <div className="mt-1 rounded border border-gray-100 bg-gray-50 px-2 py-1 text-[11px] text-gray-700 leading-4 max-h-32 overflow-y-auto">
+                <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Latest activity</p>
+                <div className="mt-1 rounded border border-[var(--border-color)] bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--text-secondary)] leading-4 max-h-32 overflow-y-auto">
                   {(getBuffer?.(agent.id).chunks.length ?? 0) > 0 ? (
                     <ul className="space-y-1">
                       {(getBuffer?.(agent.id).chunks ?? [])
@@ -263,7 +263,7 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
                         ))}
                     </ul>
                   ) : (
-                    <p className="text-gray-400">No recent activity.</p>
+                    <p className="text-[var(--text-faint)]">No recent activity.</p>
                   )}
                 </div>
               </div>
@@ -271,12 +271,12 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
               {effectiveExpandedId === agent.id && agent.task_queue.length > 0 ? (
                 <ul className="mt-3 space-y-2">
                   {agent.task_queue.map((task) => (
-                    <li key={task.id} className="rounded border border-gray-100 bg-gray-50 px-2 py-1.5">
+                    <li key={task.id} className="rounded border border-[var(--border-color)] bg-[var(--surface-muted)] px-2 py-1.5">
                       <div className="flex items-start justify-between gap-2">
-                        <p className="text-xs font-medium text-gray-800">{task.title}</p>
-                        <span className="text-[10px] uppercase text-gray-500">{task.status}</span>
+                        <p className="text-xs font-medium text-[var(--text-primary)]">{task.title}</p>
+                        <span className="text-[10px] uppercase text-[var(--text-muted)]">{task.status}</span>
                       </div>
-                      <p className="mt-1 text-[11px] text-gray-500">
+                      <p className="mt-1 text-[11px] text-[var(--text-muted)]">
                         C{task.critical} / U{task.urgent}
                         {task.module_path ? ` · ${task.module_path}` : ''}
                       </p>
@@ -284,7 +284,7 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
                   ))}
                 </ul>
               ) : effectiveExpandedId === agent.id ? (
-                <p className="mt-3 text-xs text-gray-400">No queued tasks.</p>
+                <p className="mt-3 text-xs text-[var(--text-faint)]">No queued tasks.</p>
               ) : (
                 <div className="mt-3">
                   <Button size="sm" variant="ghost" onClick={() => setExpandedId(agent.id)}>
@@ -296,7 +296,7 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
           ))}
 
           {rows.length === 0 && (
-            <div className="text-sm text-gray-500 text-center py-8">No agents in this project.</div>
+            <div className="text-sm text-[var(--text-muted)] text-center py-8">No agents in this project.</div>
           )}
         </div>
       )}

@@ -6,6 +6,7 @@ import { updateMe } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { Button, Card, Input } from '../components/ui';
 import { SandboxConfigEditor } from '../components/Sandbox/SandboxConfigEditor';
+import { AppLayout } from '../components/Layout';
 
 export function UserSettingsPage() {
   const { user, refreshProfile, logout } = useAuth();
@@ -41,6 +42,7 @@ export function UserSettingsPage() {
   };
 
   return (
+    <AppLayout>
     <div className="min-h-screen bg-[var(--app-bg)] p-6">
       <Card className="mx-auto max-w-2xl p-6">
         <h1 className="mb-2 text-xl font-semibold">User Settings</h1>
@@ -73,7 +75,7 @@ export function UserSettingsPage() {
             </Button>
             <Button
               type="button"
-              onClick={() => navigate('/repositories')}
+              onClick={() => navigate('/projects')}
               variant="secondary"
             >
               Back
@@ -107,5 +109,6 @@ export function UserSettingsPage() {
         <SandboxConfigEditor />
       </Card>
     </div>
+    </AppLayout>
   );
 }

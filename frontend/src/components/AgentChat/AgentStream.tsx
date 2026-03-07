@@ -11,6 +11,8 @@ import { Button } from '../ui';
 interface AgentStreamProps {
   buffer: AgentStreamBuffer;
   onClear?: () => void;
+  /** Compact mode: smaller text, less padding — for use in grid cells */
+  compact?: boolean;
 }
 
 function formatTime(ts: string): string {
@@ -23,34 +25,34 @@ function ChunkRow({ chunk }: { chunk: StreamChunk }) {
       return (
         <div className="py-1">
           <MarkdownContent>{chunk.content}</MarkdownContent>
-          <span className="text-xs text-gray-400 ml-1">{formatTime(chunk.timestamp)}</span>
+          <span className="text-xs text-[var(--text-faint)] ml-1">{formatTime(chunk.timestamp)}</span>
         </div>
       );
     case 'tool_call':
       return (
-        <div className="py-1 pl-2 border-l-2 border-amber-400 bg-amber-50 rounded-r text-sm">
-          <span className="font-medium text-amber-800">Tool: {chunk.toolName}</span>
-          <pre className="mt-1 text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap">
+        <div className="py-1 pl-2 border-l-2 border-[var(--color-warning)]/40 bg-[var(--color-warning-light)] rounded-r text-sm">
+          <span className="font-medium text-[var(--color-warning)]">Tool: {chunk.toolName}</span>
+          <pre className="mt-1 text-xs text-[var(--text-muted)] overflow-x-auto whitespace-pre-wrap">
             {JSON.stringify(chunk.toolInput, null, 2)}
           </pre>
-          <span className="text-xs text-gray-400">{formatTime(chunk.timestamp)}</span>
+          <span className="text-xs text-[var(--text-faint)]">{formatTime(chunk.timestamp)}</span>
         </div>
       );
     case 'tool_result':
       return (
-        <div className={`py-1 pl-2 border-l-2 rounded-r text-sm ${chunk.success ? 'border-green-400 bg-green-50' : 'border-red-400 bg-red-50'}`}>
+        <div className={`py-1 pl-2 border-l-2 rounded-r text-sm ${chunk.success ? 'border-[var(--color-success)]/40 bg-[var(--color-success-light)]' : 'border-[var(--color-danger)]/40 bg-[var(--color-danger-light)]'}`}>
           <span className="font-medium">{chunk.toolName}</span> — {chunk.success ? 'OK' : 'Error'}
-          <pre className="mt-1 text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap max-h-32">
+          <pre className="mt-1 text-xs text-[var(--text-muted)] overflow-x-auto whitespace-pre-wrap max-h-32">
             {chunk.output}
           </pre>
-          <span className="text-xs text-gray-400">{formatTime(chunk.timestamp)}</span>
+          <span className="text-xs text-[var(--text-faint)]">{formatTime(chunk.timestamp)}</span>
         </div>
       );
     case 'message':
       return (
-        <div className="py-1 pl-2 border-l-2 border-blue-400 bg-blue-50 rounded-r text-sm">
+        <div className="py-1 pl-2 border-l-2 border-[var(--color-primary)]/40 bg-[var(--color-primary)]/5 rounded-r text-sm">
           <MarkdownContent>{chunk.content}</MarkdownContent>
-          <span className="text-xs text-gray-400">{formatTime(chunk.timestamp)}</span>
+          <span className="text-xs text-[var(--text-faint)]">{formatTime(chunk.timestamp)}</span>
         </div>
       );
     default:
@@ -58,7 +60,7 @@ function ChunkRow({ chunk }: { chunk: StreamChunk }) {
   }
 }
 
-export function AgentStream({ buffer, onClear }: AgentStreamProps) {
+export function AgentStream({ buffer, onClear, compact }: AgentStreamProps) {
   const streamKey = useMemo(
     () => `${buffer.chunks.length}:${buffer.chunks[buffer.chunks.length - 1]?.timestamp ?? 'none'}`,
     [buffer.chunks]
@@ -69,13 +71,13 @@ export function AgentStream({ buffer, onClear }: AgentStreamProps) {
 
   if (buffer.chunks.length === 0) {
     return (
-      <div className="h-full overflow-y-auto p-4 text-sm text-gray-500">
+      <div className="h-full overflow-y-auto p-4 text-sm text-[var(--text-muted)]">
         Live stream will appear here when the agent responds.
         {onClear && (
           <button
             type="button"
             onClick={onClear}
-            className="ml-2 text-blue-600 hover:underline"
+            className="ml-2 text-[var(--color-primary)] hover:underline"
           >
             Clear
           </button>
@@ -93,13 +95,13 @@ export function AgentStream({ buffer, onClear }: AgentStreamProps) {
           </Button>
         </div>
       )}
-      <div ref={attachRef} onScroll={onScroll} className="h-full overflow-y-auto p-4 space-y-2 font-mono text-sm">
+      <div ref={attachRef} onScroll={onScroll} className={`h-full overflow-y-auto font-mono ${compact ? 'p-2 space-y-1 text-xs' : 'p-4 space-y-2 text-sm'}`}>
       {onClear && (
         <div className="flex justify-end mb-2">
           <button
             type="button"
             onClick={onClear}
-            className="text-xs text-gray-500 hover:text-gray-700"
+            className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
           >
             Clear stream
           </button>

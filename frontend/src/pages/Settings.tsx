@@ -1,28 +1,25 @@
 /**
- * Repository Settings Page — Phases 2, 3, 4 + 4b (rate limits + cost)
+ * Project Settings Page — project-level configuration.
  *
  * Sections:
  *  1. General (name, description)
  *  2. Git Integration (repo URL)
  *  3. Agent Limits (max engineers)
- *  4. Model Selection (per-role model overrides — Phase 3)
- *  5. Prompt Customization (per-role prompt overrides — Phase 3)
- *  6. Rate Limits (calls/hour + tokens/hour — Phase 4b)
- *  7. Token Budget & Cost (daily token budget, daily cost budget, rollup — Phase 4/4b)
- *  8. Secrets (per-project tokens agents can read; enable "secrets" block in Prompt Builder)
+ *  4. Rate Limits (calls/hour + tokens/hour)
+ *  5. Token Budget & Cost (daily token budget, daily cost budget, rollup)
+ *  6. Secrets (per-project tokens agents can read)
+ *  7. Sandboxes
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { AppLayout } from '../components/Layout';
 import {
-  ArrowLeft,
   GitBranch,
   Save,
   Loader2,
   AlertCircle,
   CheckCircle,
-  Cpu,
-  MessageSquare,
   Users,
   Gauge,
   DollarSign,
@@ -45,68 +42,10 @@ import type {
   Project,
   ProjectSecret,
   ProjectSettings,
-  ModelOverrides,
-  PromptOverrides,
   ProjectUsageResponse,
 } from '../types';
 import { Button, Card, Input, Textarea } from '../components/ui';
 import { SandboxManager } from '../components/Sandbox/SandboxManager';
-import { AgentTemplatesSection } from '../components/Agents/AgentTemplatesSection';
-
-// ── Constants ──────────────────────────────────────────────────────────
-
-type ModelGroup = { label: string; models: { value: string; label: string }[] };
-
-const MODEL_GROUPS: ModelGroup[] = [
-  {
-    label: 'Anthropic',
-    models: [
-      { value: 'claude-opus-4-6',    label: 'Claude Opus 4.6 (powerful)' },
-      { value: 'claude-sonnet-4-6',  label: 'Claude Sonnet 4.6 (balanced)' },
-      { value: 'claude-haiku-4-6',   label: 'Claude Haiku 4.6 (fast)' },
-    ],
-  },
-  {
-    label: 'OpenAI',
-    models: [
-      { value: 'gpt-5.2',      label: 'GPT-5.2' },
-      { value: 'gpt-4o',       label: 'GPT-4o' },
-      { value: 'gpt-4o-mini',  label: 'GPT-4o Mini (cheap)' },
-      { value: 'o4-mini',      label: 'o4-mini (reasoning)' },
-    ],
-  },
-  {
-    label: 'Google',
-    models: [
-      { value: 'gemini-2.5-pro',        label: 'Gemini 2.5 Pro' },
-      { value: 'gemini-2.0-flash',      label: 'Gemini 2.0 Flash (fast)' },
-      { value: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite (cheapest)' },
-    ],
-  },
-  {
-    label: 'Kimi / Moonshot',
-    models: [
-      { value: 'kimi-k2-0711-preview', label: 'Kimi K2 (Kimi 2.5, very cheap)' },
-      { value: 'moonshot-v1-8k',       label: 'Moonshot v1 8k' },
-      { value: 'moonshot-v1-32k',      label: 'Moonshot v1 32k' },
-      { value: 'moonshot-v1-128k',     label: 'Moonshot v1 128k' },
-    ],
-  },
-];
-
-const ROLE_KEYS: { key: keyof ModelOverrides; label: string }[] = [
-  { key: 'manager', label: 'Manager' },
-  { key: 'cto', label: 'CTO' },
-  { key: 'engineer_junior', label: 'Engineer (Junior)' },
-  { key: 'engineer_intermediate', label: 'Engineer (Intermediate)' },
-  { key: 'engineer_senior', label: 'Engineer (Senior)' },
-];
-
-const PROMPT_ROLE_KEYS: { key: keyof PromptOverrides; label: string }[] = [
-  { key: 'manager', label: 'Manager' },
-  { key: 'cto', label: 'CTO' },
-  { key: 'engineer', label: 'Engineers (all tiers)' },
-];
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -161,8 +100,6 @@ export function SettingsPage() {
   const [description, setDescription] = useState('');
   const [repoUrl, setRepoUrl] = useState('');
   const [maxEngineers, setMaxEngineers] = useState(5);
-  const [modelOverrides, setModelOverrides] = useState<ModelOverrides>({});
-  const [promptOverrides, setPromptOverrides] = useState<PromptOverrides>({});
   // Rate limits
   const [callsPerHour, setCallsPerHour] = useState(0);
   const [tokensPerHour, setTokensPerHour] = useState(0);
@@ -197,8 +134,6 @@ export function SettingsPage() {
       setDescription(proj.description || '');
       setRepoUrl(proj.code_repo_url || '');
       setMaxEngineers(settings.max_engineers);
-      setModelOverrides(settings.model_overrides || {});
-      setPromptOverrides(settings.prompt_overrides || {});
       setCallsPerHour(settings.calls_per_hour_limit || 0);
       setTokensPerHour(settings.tokens_per_hour_limit || 0);
       setDailyTokenBudget(settings.daily_token_budget || 0);
@@ -235,8 +170,6 @@ export function SettingsPage() {
 
       const updatedSettings = await updateProjectSettings(projectId, {
         max_engineers: maxEngineers,
-        model_overrides: Object.keys(modelOverrides).length > 0 ? modelOverrides : null,
-        prompt_overrides: Object.keys(promptOverrides).length > 0 ? promptOverrides : null,
         calls_per_hour_limit: callsPerHour,
         tokens_per_hour_limit: tokensPerHour,
         daily_token_budget: dailyTokenBudget,
@@ -257,7 +190,7 @@ export function SettingsPage() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-[var(--app-bg)] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+        <Loader2 className="w-8 h-8 animate-spin text-[var(--color-primary)]" />
       </div>
     );
   }
@@ -266,13 +199,13 @@ export function SettingsPage() {
     return (
       <div className="min-h-screen bg-[var(--app-bg)] flex items-center justify-center">
         <div className="text-center">
-          <AlertCircle className="w-12 h-12 mx-auto text-red-500 mb-4" />
-          <h2 className="text-lg font-semibold text-gray-900">Repository not found</h2>
+          <AlertCircle className="w-12 h-12 mx-auto text-[var(--color-danger)] mb-4" />
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Project not found</h2>
           <button
-            onClick={() => navigate('/repositories')}
-            className="mt-4 text-blue-600 hover:text-blue-800"
+            onClick={() => navigate('/projects')}
+            className="mt-4 text-[var(--color-primary)] hover:text-[var(--color-primary)]"
           >
-            Back to Repositories
+            Back to Projects
           </button>
         </div>
       </div>
@@ -289,32 +222,23 @@ export function SettingsPage() {
 
   // ── Render ──────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-[var(--app-bg)]">
-      <header className="bg-[var(--surface-card)] border-b border-[var(--border-color)]">
-        <div className="max-w-4xl mx-auto px-6 py-4 flex items-center gap-4">
-          <button
-            onClick={() => navigate(`/repository/${projectId}/workspace`)}
-            className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">Repository Settings</h1>
-            <p className="text-sm text-gray-500">{project.name}</p>
-          </div>
-        </div>
-      </header>
+    <AppLayout>
+    <div className="min-h-screen overflow-y-auto bg-[var(--app-bg)]">
+      <div className="max-w-4xl mx-auto px-6 pt-6 pb-2">
+        <h1 className="text-xl font-semibold text-[var(--text-primary)]">Project Settings</h1>
+        <p className="text-sm text-[var(--text-muted)]">{project.name}</p>
+      </div>
 
       <main className="max-w-4xl mx-auto px-6 py-8">
         {error && (
-          <Card className="mb-6 flex items-center gap-3 border-red-200 bg-red-50 px-4 py-3 text-red-700">
+          <Card className="mb-6 flex items-center gap-3 border-[var(--color-danger)]/30 bg-[var(--color-danger-light)] px-4 py-3 text-[var(--color-danger)]">
             <AlertCircle className="w-5 h-5 flex-shrink-0" />
             <span className="text-sm">{error}</span>
             <button onClick={() => setError(null)} className="ml-auto">&times;</button>
           </Card>
         )}
         {success && (
-          <Card className="mb-6 flex items-center gap-3 border-green-200 bg-green-50 px-4 py-3 text-green-700">
+          <Card className="mb-6 flex items-center gap-3 border-[var(--color-success)]/30 bg-[var(--color-success-light)] px-4 py-3 text-[var(--color-success)]">
             <CheckCircle className="w-5 h-5 flex-shrink-0" />
             <span className="text-sm">{success}</span>
             <button onClick={() => setSuccess(null)} className="ml-auto">&times;</button>
@@ -325,11 +249,11 @@ export function SettingsPage() {
 
           {/* ── 1. General ── */}
           <Card className="p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">General</h2>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-4">General</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Repository Name
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                  Project Name
                 </label>
                 <Input
                   type="text"
@@ -339,7 +263,7 @@ export function SettingsPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
                   Description
                 </label>
                 <Textarea
@@ -354,12 +278,12 @@ export function SettingsPage() {
           {/* ── 2. Git ── */}
           <Card className="p-6">
             <div className="flex items-center gap-2 mb-4">
-              <GitBranch className="w-5 h-5 text-gray-500" />
-              <h2 className="text-lg font-semibold text-gray-900">Git Integration</h2>
+              <GitBranch className="w-5 h-5 text-[var(--text-muted)]" />
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Git Integration</h2>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Repository URL
+              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                Code Repository URL
               </label>
               <Input
                 type="url"
@@ -367,7 +291,7 @@ export function SettingsPage() {
                 onChange={(e) => setRepoUrl(e.target.value)}
                 placeholder="https://github.com/user/repo"
               />
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-[var(--text-muted)] mt-1">
                 GitHub token is configured in User Settings.
               </p>
             </div>
@@ -376,12 +300,12 @@ export function SettingsPage() {
           {/* ── 3. Agent Limits ── */}
           <Card className="p-6">
             <div className="flex items-center gap-2 mb-4">
-              <Users className="w-5 h-5 text-gray-500" />
-              <h2 className="text-lg font-semibold text-gray-900">Agent Limits</h2>
+              <Users className="w-5 h-5 text-[var(--text-muted)]" />
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Agent Limits</h2>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Max Engineers <span className="text-gray-400 font-normal">(1–20)</span>
+              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                Max Engineers <span className="text-[var(--text-faint)] font-normal">(1–20)</span>
               </label>
               <Input
                 type="number"
@@ -390,93 +314,19 @@ export function SettingsPage() {
                 min={1}
                 max={20}
               />
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-[var(--text-muted)] mt-1">
                 Maximum Engineer agents the Manager can spawn for this project.
               </p>
             </div>
           </Card>
 
-          {/* ── 4. Model Selection ── */}
+          {/* ── 4. Rate Limits ── */}
           <Card className="p-6">
             <div className="flex items-center gap-2 mb-1">
-              <Cpu className="w-5 h-5 text-gray-500" />
-              <h2 className="text-lg font-semibold text-gray-900">Model Selection</h2>
+              <Gauge className="w-5 h-5 text-[var(--text-muted)]" />
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Rate Limits</h2>
             </div>
-            <p className="text-sm text-gray-500 mb-4">
-              Override the default model for each agent role. Select "— global default —" to inherit
-              from server config.
-            </p>
-            <div className="space-y-3">
-              {ROLE_KEYS.map(({ key, label }) => (
-                <div key={key}>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-                  <select
-                    value={modelOverrides[key] || ''}
-                    onChange={(e) =>
-                      setModelOverrides((prev) => ({
-                        ...prev,
-                        [key]: e.target.value || undefined,
-                      }))
-                    }
-                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">— global default —</option>
-                    {MODEL_GROUPS.map((group) => (
-                      <optgroup key={group.label} label={group.label}>
-                        {group.models.map((m) => (
-                          <option key={m.value} value={m.value}>
-                            {m.label}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          {/* ── 5. Prompt Customization ── */}
-          <Card className="p-6">
-            <div className="flex items-center gap-2 mb-1">
-              <MessageSquare className="w-5 h-5 text-gray-500" />
-              <h2 className="text-lg font-semibold text-gray-900">Prompt Customization</h2>
-            </div>
-            <p className="text-sm text-gray-500 mb-4">
-              Add project-specific instructions appended to each role's system prompt.
-              Maximum 2,000 characters per role.
-            </p>
-            <div className="space-y-4">
-              {PROMPT_ROLE_KEYS.map(({ key, label }) => (
-                <div key={key}>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-                  <Textarea
-                    value={promptOverrides[key] || ''}
-                    onChange={(e) =>
-                      setPromptOverrides((prev) => ({
-                        ...prev,
-                        [key]: e.target.value || undefined,
-                      }))
-                    }
-                    rows={3}
-                    placeholder={`Additional instructions for ${label.toLowerCase()}…`}
-                    maxLength={2000}
-                  />
-                  <p className="text-xs text-gray-400 text-right mt-0.5">
-                    {(promptOverrides[key] || '').length}/2000
-                  </p>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          {/* ── 6. Rate Limits ── */}
-          <Card className="p-6">
-            <div className="flex items-center gap-2 mb-1">
-              <Gauge className="w-5 h-5 text-gray-500" />
-              <h2 className="text-lg font-semibold text-gray-900">Rate Limits</h2>
-            </div>
-            <p className="text-sm text-gray-500 mb-5">
+            <p className="text-sm text-[var(--text-muted)] mb-5">
               Control the speed of agent LLM operations. When a limit is hit, the agent
               soft-pauses and polls every 5 seconds. Raising the limit here takes effect
               within one poll cycle — the agent resumes automatically without losing its
@@ -485,8 +335,8 @@ export function SettingsPage() {
 
             <div className="grid grid-cols-2 gap-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Calls / hour <span className="text-gray-400 font-normal">(0 = unlimited)</span>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                  Calls / hour <span className="text-[var(--text-faint)] font-normal">(0 = unlimited)</span>
                 </label>
                 <Input
                   type="number"
@@ -497,13 +347,13 @@ export function SettingsPage() {
                 />
                 {usage && callsPerHour > 0 && (
                   <div className="mt-2">
-                    <div className="flex justify-between text-xs text-gray-500 mb-1">
+                    <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
                       <span>Last 60 min: {hourlyCallsUsed.toLocaleString()} calls</span>
                       <span>{callsPerHour.toLocaleString()} limit</span>
                     </div>
-                    <div className="w-full bg-gray-100 rounded-full h-1.5">
+                    <div className="w-full bg-[var(--surface-muted)] rounded-full h-1.5">
                       <div
-                        className={`h-1.5 rounded-full transition-all ${callsPct >= 90 ? 'bg-red-500' : callsPct >= 70 ? 'bg-amber-400' : 'bg-blue-500'}`}
+                        className={`h-1.5 rounded-full transition-all ${callsPct >= 90 ? 'bg-[var(--color-danger)]' : callsPct >= 70 ? 'bg-[var(--color-warning)]' : 'bg-[var(--color-primary)]'}`}
                         style={{ width: `${callsPct}%` }}
                       />
                     </div>
@@ -512,8 +362,8 @@ export function SettingsPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Tokens / hour <span className="text-gray-400 font-normal">(0 = unlimited)</span>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                  Tokens / hour <span className="text-[var(--text-faint)] font-normal">(0 = unlimited)</span>
                 </label>
                 <Input
                   type="number"
@@ -524,13 +374,13 @@ export function SettingsPage() {
                 />
                 {usage && tokensPerHour > 0 && (
                   <div className="mt-2">
-                    <div className="flex justify-between text-xs text-gray-500 mb-1">
+                    <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
                       <span>Last 60 min: {fmtTokens(hourlyTokensUsed)}</span>
                       <span>{fmtTokens(tokensPerHour)} limit</span>
                     </div>
-                    <div className="w-full bg-gray-100 rounded-full h-1.5">
+                    <div className="w-full bg-[var(--surface-muted)] rounded-full h-1.5">
                       <div
-                        className={`h-1.5 rounded-full transition-all ${tokensPct >= 90 ? 'bg-red-500' : tokensPct >= 70 ? 'bg-amber-400' : 'bg-blue-500'}`}
+                        className={`h-1.5 rounded-full transition-all ${tokensPct >= 90 ? 'bg-[var(--color-danger)]' : tokensPct >= 70 ? 'bg-[var(--color-warning)]' : 'bg-[var(--color-primary)]'}`}
                         style={{ width: `${tokensPct}%` }}
                       />
                     </div>
@@ -540,7 +390,7 @@ export function SettingsPage() {
             </div>
 
             {usage && (callsPerHour > 0 || tokensPerHour > 0) && (
-              <p className="text-xs text-gray-400 mt-4">
+              <p className="text-xs text-[var(--text-faint)] mt-4">
                 After 10 minutes of waiting (max pause), the agent ends its session. Send a new
                 message once limits reset or are raised.
               </p>
@@ -550,18 +400,18 @@ export function SettingsPage() {
           {/* ── 7. Token Budget & Cost ── */}
           <Card className="p-6">
             <div className="flex items-center gap-2 mb-1">
-              <DollarSign className="w-5 h-5 text-gray-500" />
-              <h2 className="text-lg font-semibold text-gray-900">Budget &amp; Cost</h2>
+              <DollarSign className="w-5 h-5 text-[var(--text-muted)]" />
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Budget &amp; Cost</h2>
             </div>
-            <p className="text-sm text-gray-500 mb-5">
+            <p className="text-sm text-[var(--text-muted)] mb-5">
               Set hard daily limits. When exhausted the agent session ends immediately.
-              Costs are estimated using the pricing table in <code className="text-xs bg-gray-100 px-1 rounded">backend/config.py</code>.
+              Costs are estimated using the pricing table in <code className="text-xs bg-[var(--surface-muted)] px-1 rounded">backend/config.py</code>.
             </p>
 
             <div className="grid grid-cols-2 gap-6 mb-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Daily token budget <span className="text-gray-400 font-normal">(0 = unlimited)</span>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                  Daily token budget <span className="text-[var(--text-faint)] font-normal">(0 = unlimited)</span>
                 </label>
                 <Input
                   type="number"
@@ -572,8 +422,8 @@ export function SettingsPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Daily cost budget (USD) <span className="text-gray-400 font-normal">(0 = unlimited)</span>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                  Daily cost budget (USD) <span className="text-[var(--text-faint)] font-normal">(0 = unlimited)</span>
                 </label>
                 <Input
                   type="number"
@@ -584,13 +434,13 @@ export function SettingsPage() {
                 />
                 {usage && dailyCostBudget > 0 && (
                   <div className="mt-2">
-                    <div className="flex justify-between text-xs text-gray-500 mb-1">
+                    <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
                       <span>Today: {fmtCost(todayCost)}</span>
                       <span>{fmtCost(dailyCostBudget)} limit</span>
                     </div>
-                    <div className="w-full bg-gray-100 rounded-full h-1.5">
+                    <div className="w-full bg-[var(--surface-muted)] rounded-full h-1.5">
                       <div
-                        className={`h-1.5 rounded-full transition-all ${costPct >= 90 ? 'bg-red-500' : costPct >= 70 ? 'bg-amber-400' : 'bg-green-500'}`}
+                        className={`h-1.5 rounded-full transition-all ${costPct >= 90 ? 'bg-[var(--color-danger)]' : costPct >= 70 ? 'bg-[var(--color-warning)]' : 'bg-[var(--color-success)]'}`}
                         style={{ width: `${costPct}%` }}
                       />
                     </div>
@@ -603,7 +453,7 @@ export function SettingsPage() {
             {usage && (
               <>
                 {/* Today's rollup */}
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Today's Usage</h3>
+                <h3 className="text-sm font-semibold text-[var(--text-secondary)] mb-3">Today's Usage</h3>
                 <div className="grid grid-cols-4 gap-3 mb-5">
                   {[
                     { label: 'Input tokens',  value: fmtTokens(usage.today.total_input_tokens) },
@@ -611,23 +461,23 @@ export function SettingsPage() {
                     { label: 'Total tokens',  value: fmtTokens(usage.today.total_tokens) },
                     { label: 'Est. cost',     value: fmtCost(usage.today.estimated_cost_usd) },
                   ].map(({ label, value }) => (
-                    <div key={label} className="bg-gray-50 rounded-lg p-3 text-center">
-                      <div className="text-base font-semibold text-gray-900">{value}</div>
-                      <div className="text-xs text-gray-500">{label}</div>
+                    <div key={label} className="bg-[var(--surface-muted)] rounded-lg p-3 text-center">
+                      <div className="text-base font-semibold text-[var(--text-primary)]">{value}</div>
+                      <div className="text-xs text-[var(--text-muted)]">{label}</div>
                     </div>
                   ))}
                 </div>
 
                 {/* Last-hour stats */}
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Last 60 Minutes</h3>
+                <h3 className="text-sm font-semibold text-[var(--text-secondary)] mb-3">Last 60 Minutes</h3>
                 <div className="grid grid-cols-2 gap-3 mb-5">
                   {[
                     { label: 'Calls',  value: usage.last_hour.total_calls.toLocaleString() },
                     { label: 'Tokens', value: fmtTokens(usage.last_hour.total_tokens) },
                   ].map(({ label, value }) => (
-                    <div key={label} className="bg-gray-50 rounded-lg p-3 text-center">
-                      <div className="text-base font-semibold text-gray-900">{value}</div>
-                      <div className="text-xs text-gray-500">{label}</div>
+                    <div key={label} className="bg-[var(--surface-muted)] rounded-lg p-3 text-center">
+                      <div className="text-base font-semibold text-[var(--text-primary)]">{value}</div>
+                      <div className="text-xs text-[var(--text-muted)]">{label}</div>
                     </div>
                   ))}
                 </div>
@@ -635,13 +485,13 @@ export function SettingsPage() {
                 {/* Per-model breakdown */}
                 {usage.today.by_model.length > 0 && (
                   <div className="mb-5">
-                    <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                    <h4 className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide mb-2">
                       By model — today
                     </h4>
                     <div className="overflow-auto">
-                      <table className="w-full text-xs text-gray-600">
+                      <table className="w-full text-xs text-[var(--text-muted)]">
                         <thead>
-                          <tr className="border-b border-gray-200 text-gray-500">
+                          <tr className="border-b border-[var(--border-color)] text-[var(--text-muted)]">
                             <th className="text-left py-1 pr-3">Model</th>
                             <th className="text-right pr-3">Calls</th>
                             <th className="text-right pr-3">Input</th>
@@ -651,24 +501,24 @@ export function SettingsPage() {
                         </thead>
                         <tbody>
                           {usage.today.by_model.map((row) => (
-                            <tr key={`${row.provider}-${row.model}`} className="border-b border-gray-100">
+                            <tr key={`${row.provider}-${row.model}`} className="border-b border-[var(--border-color)]">
                               <td className="font-mono py-1 pr-3">{row.model}</td>
                               <td className="text-right pr-3">{row.calls}</td>
                               <td className="text-right pr-3">{fmtTokens(row.input_tokens)}</td>
                               <td className="text-right pr-3">{fmtTokens(row.output_tokens)}</td>
-                              <td className="text-right text-green-700 font-medium">
+                              <td className="text-right text-[var(--color-success)] font-medium">
                                 {fmtCost(row.estimated_cost_usd)}
                               </td>
                             </tr>
                           ))}
                         </tbody>
                         <tfoot>
-                          <tr className="text-gray-700 font-semibold border-t border-gray-300">
+                          <tr className="text-[var(--text-secondary)] font-semibold border-t border-[var(--border-color)]">
                             <td className="py-1 pr-3">Total</td>
                             <td />
                             <td className="text-right pr-3">{fmtTokens(usage.today.total_input_tokens)}</td>
                             <td className="text-right pr-3">{fmtTokens(usage.today.total_output_tokens)}</td>
-                            <td className="text-right text-green-700">{fmtCost(usage.today.estimated_cost_usd)}</td>
+                            <td className="text-right text-[var(--color-success)]">{fmtCost(usage.today.estimated_cost_usd)}</td>
                           </tr>
                         </tfoot>
                       </table>
@@ -679,13 +529,13 @@ export function SettingsPage() {
                 {/* Recent calls */}
                 {usage.recent_calls.length > 0 && (
                   <div>
-                    <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                    <h4 className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide mb-2">
                       Recent calls
                     </h4>
                     <div className="overflow-auto max-h-48">
-                      <table className="w-full text-xs text-gray-600">
+                      <table className="w-full text-xs text-[var(--text-muted)]">
                         <thead>
-                          <tr className="border-b border-gray-200 text-gray-500">
+                          <tr className="border-b border-[var(--border-color)] text-[var(--text-muted)]">
                             <th className="text-left py-1 pr-3">Model</th>
                             <th className="text-right pr-3">In</th>
                             <th className="text-right pr-3">Out</th>
@@ -695,14 +545,14 @@ export function SettingsPage() {
                         </thead>
                         <tbody>
                           {usage.recent_calls.map((c) => (
-                            <tr key={c.id} className="border-b border-gray-100">
+                            <tr key={c.id} className="border-b border-[var(--border-color)]">
                               <td className="font-mono py-1 pr-3">{c.model}</td>
                               <td className="text-right pr-3">{fmtTokens(c.input_tokens)}</td>
                               <td className="text-right pr-3">{fmtTokens(c.output_tokens)}</td>
-                              <td className="text-right pr-3 text-green-700">
+                              <td className="text-right pr-3 text-[var(--color-success)]">
                                 {fmtCost(c.estimated_cost_usd)}
                               </td>
-                              <td className="text-right text-gray-400">
+                              <td className="text-right text-[var(--text-faint)]">
                                 {new Date(c.created_at).toLocaleTimeString()}
                               </td>
                             </tr>
@@ -719,10 +569,10 @@ export function SettingsPage() {
           {/* ── 8. Project secrets ── */}
           <Card className="p-6">
             <div className="flex items-center gap-2 mb-1">
-              <Key className="w-5 h-5 text-gray-500" />
-              <h2 className="text-lg font-semibold text-gray-900">Project secrets</h2>
+              <Key className="w-5 h-5 text-[var(--text-muted)]" />
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Project secrets</h2>
             </div>
-            <p className="text-sm text-gray-500 mb-4">
+            <p className="text-sm text-[var(--text-muted)] mb-4">
               Key-value secrets (e.g. API keys) that agents can read at runtime. Values are never shown after save.
               Enable the &quot;secrets&quot; block in Prompt Builder for each agent that should receive them.
             </p>
@@ -773,7 +623,7 @@ export function SettingsPage() {
                 </Button>
                 {envPreview && (
                   <>
-                    <span className="text-sm text-gray-600">
+                    <span className="text-sm text-[var(--text-muted)]">
                       Found {envPreview.count} variable{envPreview.count !== 1 ? 's' : ''}: {envPreview.names.slice(0, 5).join(', ')}
                       {envPreview.names.length > 5 ? ` …` : ''}
                     </span>
@@ -815,13 +665,13 @@ export function SettingsPage() {
                 )}
               </div>
               {envPreview && (
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-[var(--text-muted)]">
                   Existing secrets with the same name will be updated.
                 </p>
               )}
               <div className="flex flex-wrap gap-2 items-end">
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Name</label>
+                  <label className="block text-xs font-medium text-[var(--text-muted)] mb-1">Name</label>
                   <Input
                     value={secretName}
                     onChange={(e) => setSecretName(e.target.value)}
@@ -830,7 +680,7 @@ export function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Value</label>
+                  <label className="block text-xs font-medium text-[var(--text-muted)] mb-1">Value</label>
                   <Input
                     type="password"
                     value={secretValue}
@@ -872,20 +722,20 @@ export function SettingsPage() {
               </div>
 
               {secrets.length > 0 && (
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="border border-[var(--border-color)] rounded-lg overflow-hidden">
                   <table className="w-full text-sm">
-                    <thead className="bg-gray-50">
+                    <thead className="bg-[var(--surface-muted)]">
                       <tr>
-                        <th className="text-left py-2 px-3 font-medium text-gray-700">Name</th>
-                        <th className="text-left py-2 px-3 font-medium text-gray-700">Hint</th>
+                        <th className="text-left py-2 px-3 font-medium text-[var(--text-secondary)]">Name</th>
+                        <th className="text-left py-2 px-3 font-medium text-[var(--text-secondary)]">Hint</th>
                         <th className="w-10 py-2 px-2" />
                       </tr>
                     </thead>
                     <tbody>
                       {secrets.map((s) => (
-                        <tr key={s.id} className="border-t border-gray-100 hover:bg-gray-50/50">
-                          <td className="py-2 px-3 font-mono text-gray-900">{s.name}</td>
-                          <td className="py-2 px-3 text-gray-500">
+                        <tr key={s.id} className="border-t border-[var(--border-color)] hover:bg-[var(--surface-muted)]/50">
+                          <td className="py-2 px-3 font-mono text-[var(--text-primary)]">{s.name}</td>
+                          <td className="py-2 px-3 text-[var(--text-muted)]">
                             {s.hint ? `••••${s.hint}` : '—'}
                           </td>
                           <td className="py-2 px-2">
@@ -900,7 +750,7 @@ export function SettingsPage() {
                                   setError(err instanceof Error ? err.message : 'Failed to delete secret');
                                 }
                               }}
-                              className="p-1.5 text-gray-400 hover:text-red-600 rounded"
+                              className="p-1.5 text-[var(--text-faint)] hover:text-[var(--color-danger)] rounded"
                               title="Delete"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -930,23 +780,19 @@ export function SettingsPage() {
         {/* ── 9. Sandbox Management (outside form — has its own actions) ── */}
         <Card className="mt-8 p-6">
           <div className="flex items-center gap-2 mb-1">
-            <Monitor className="w-5 h-5 text-gray-500" />
-            <h2 className="text-lg font-semibold text-gray-900">Sandboxes</h2>
+            <Monitor className="w-5 h-5 text-[var(--text-muted)]" />
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Sandboxes</h2>
           </div>
-          <p className="text-sm text-gray-500 mb-4">
+          <p className="text-sm text-[var(--text-muted)] mb-4">
             Manage sandbox containers for this project's agents. Persistent sandboxes
             survive session restarts — agents can install and use GUI applications long-term.
           </p>
           <SandboxManager projectId={projectId!} />
         </Card>
 
-        {/* ── 10. Agent Designs (templates — spawn custom agents) ── */}
-        <div className="mt-8">
-          <AgentTemplatesSection projectId={projectId!} />
-        </div>
-
       </main>
     </div>
+    </AppLayout>
   );
 }
 

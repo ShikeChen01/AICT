@@ -214,7 +214,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
 
   if (loadingAgents) {
     return (
-      <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+      <div className="flex items-center justify-center h-full text-[var(--text-muted)] text-sm">
         Loading agents…
       </div>
     );
@@ -222,17 +222,17 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
 
   if (agents.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+      <div className="flex items-center justify-center h-full text-[var(--text-muted)] text-sm">
         No agents found for this project.
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-[#f8f9fa]">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden bg-[var(--app-bg)]">
       {/* ── Top bar: agent tabs ── */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-200 bg-white flex-shrink-0 overflow-x-auto">
-        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide mr-1 flex-shrink-0">
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--border-color)] bg-[var(--surface-card)] flex-shrink-0 overflow-x-auto">
+        <span className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide mr-1 flex-shrink-0">
           Agent
         </span>
         {agents.map((a) => (
@@ -246,8 +246,8 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
             className={`
               px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex-shrink-0
               ${a.id === selectedAgentId
-                ? 'bg-violet-600 text-white shadow-sm'
-                : 'text-gray-600 hover:bg-gray-100'
+                ? 'bg-[var(--color-accent)] text-white shadow-sm'
+                : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
               }
             `}
           >
@@ -256,7 +256,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
           </button>
         ))}
 
-        <div className="flex items-center gap-1 ml-auto flex-shrink-0 text-xs text-green-700 bg-green-50 border border-green-200 rounded-full px-2.5 py-1">
+        <div className="flex items-center gap-1 ml-auto flex-shrink-0 text-xs text-[var(--color-success)] bg-[var(--color-success-light)] border border-[var(--color-success)]/20 rounded-full px-2.5 py-1">
           <Database className="w-3 h-3" />
           <span>DB is source of truth</span>
         </div>
@@ -266,21 +266,21 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
       <div className="flex flex-1 min-h-0 gap-0">
 
         {/* Left column: context budget */}
-        <div className="w-72 flex-shrink-0 border-r border-gray-200 bg-white overflow-y-auto">
+        <div className="w-72 flex-shrink-0 border-r border-[var(--border-color)] bg-[var(--surface-card)] overflow-y-auto">
           <div className="p-4 space-y-4">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">
               Context Budget
             </h3>
 
             {meta ? (
               <ContextBudgetChart meta={meta} />
             ) : (
-              <div className="text-xs text-gray-400">Loading budget…</div>
+              <div className="text-xs text-[var(--text-muted)]">Loading budget…</div>
             )}
 
             {/* Dynamic pool — editable allocation panel */}
             {meta && selectedAgentId && (
-              <div className="pt-3 border-t border-gray-100">
+              <div className="pt-3 border-t border-[var(--border-color-subtle)]">
                 <AllocationEditor
                   agentId={selectedAgentId}
                   meta={meta}
@@ -292,7 +292,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
 
             {/* Agent config */}
             {selectedAgent && (
-              <div className="pt-3 border-t border-gray-100">
+              <div className="pt-3 border-t border-[var(--border-color-subtle)]">
                 <AgentConfigPanel
                   agent={selectedAgent}
                   onAgentUpdated={handleAgentUpdated}
@@ -308,17 +308,17 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
             {/* System Prompt Blocks section */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">
                   System Prompt Blocks
                 </h3>
-                <span className="text-xs text-gray-400 font-mono" title="Assembled tokens / measured allocation">
+                <span className="text-xs text-[var(--text-muted)] font-mono" title="Assembled tokens / measured allocation">
                   ~{(totalSystemTokens / 1000).toFixed(1)}k
                   {meta ? ` / ${(meta.system_prompt_tokens / 1000).toFixed(1)}k` : ''} tokens
                 </span>
               </div>
 
               {saveError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg px-3 py-2 flex items-center justify-between">
+                <div className="bg-[var(--color-danger-light)] border border-[var(--color-danger)]/20 text-[var(--color-danger)] text-xs rounded-lg px-3 py-2 flex items-center justify-between">
                   {saveError}
                   <button
                     type="button"
@@ -331,11 +331,11 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
               )}
 
               {loadingBlocks ? (
-                <div className="text-sm text-gray-400 py-6 text-center">
+                <div className="text-sm text-[var(--text-muted)] py-6 text-center">
                   Loading prompt blocks…
                 </div>
               ) : mainBlocks.length === 0 ? (
-                <div className="text-sm text-gray-400 py-6 text-center">
+                <div className="text-sm text-[var(--text-muted)] py-6 text-center">
                   No blocks found. Try refreshing.
                 </div>
               ) : (
@@ -382,7 +382,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
             {/* Tool Assembly section */}
             {selectedAgent && selectedAgentId && (
               <div className="space-y-3">
-                <div className="border-t border-gray-200 pt-4">
+                <div className="border-t border-[var(--border-color)] pt-4">
                   <ToolAssemblyPanel
                     agentId={selectedAgentId}
                     agent={selectedAgent}

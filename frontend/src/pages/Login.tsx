@@ -20,7 +20,7 @@ export function LoginPage() {
 
   useEffect(() => {
     if (!loading && (firebaseUser || user)) {
-      navigate('/repositories', { replace: true });
+      navigate('/projects', { replace: true });
     }
   }, [firebaseUser, loading, user, navigate]);
 
@@ -30,7 +30,7 @@ export function LoginPage() {
     try {
       await loginWithGoogle();
       // Popup resolves directly; onAuthStateChanged will update state and
-      // the effect above will navigate to /repositories.
+      // the effect above will navigate to /projects.
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Sign-in failed';
       setError(message);
