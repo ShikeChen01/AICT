@@ -6,6 +6,7 @@
 import { NavLink, useParams } from 'react-router-dom';
 import {
   MessageSquare,
+  LayoutDashboard,
   Cpu,
   LayoutGrid,
   BarChart3,
@@ -32,22 +33,27 @@ export function TopNav() {
         {
           label: 'Workspace',
           path: `/project/${projectId}/workspace`,
-          icon: <MessageSquare className="h-4 w-4" />,
+          icon: <MessageSquare className="h-4 w-4" aria-hidden="true" />,
+        },
+        {
+          label: 'Dashboard',
+          path: `/project/${projectId}/dashboard`,
+          icon: <LayoutDashboard className="h-4 w-4" aria-hidden="true" />,
         },
         {
           label: 'Agent Build',
           path: `/project/${projectId}/agent-build`,
-          icon: <Cpu className="h-4 w-4" />,
+          icon: <Cpu className="h-4 w-4" aria-hidden="true" />,
         },
         {
           label: 'Kanban',
           path: `/project/${projectId}/kanban`,
-          icon: <LayoutGrid className="h-4 w-4" />,
+          icon: <LayoutGrid className="h-4 w-4" aria-hidden="true" />,
         },
         {
           label: 'Logs',
           path: `/project/${projectId}/logs`,
-          icon: <BarChart3 className="h-4 w-4" />,
+          icon: <BarChart3 className="h-4 w-4" aria-hidden="true" />,
         },
       ]
     : [];

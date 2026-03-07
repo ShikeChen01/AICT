@@ -36,16 +36,16 @@ function blockLabel(key: string): string {
 
 const KIND_STYLES: Record<string, { badge: string; bar: string }> = {
   system: {
-    badge: 'bg-blue-100 text-blue-700',
-    bar: 'bg-blue-400',
+    badge: 'bg-[var(--color-primary)]/15 text-[var(--color-primary)]',
+    bar: 'bg-[var(--color-primary)]',
   },
   conditional: {
-    badge: 'bg-amber-100 text-amber-700',
-    bar: 'bg-amber-400',
+    badge: 'bg-[var(--color-warning)]/15 text-[var(--color-warning)]',
+    bar: 'bg-[var(--color-warning)]',
   },
   conversation: {
-    badge: 'bg-gray-100 text-gray-600',
-    bar: 'bg-gray-400',
+    badge: 'bg-[var(--surface-muted)] text-[var(--text-muted)]',
+    bar: 'bg-[var(--text-muted)]',
   },
 };
 
@@ -93,8 +93,8 @@ export function PromptBlockRow({
       className={`
         group flex items-center gap-2 px-3 py-2 rounded-lg border transition-all cursor-pointer
         ${block.enabled
-          ? 'bg-white border-gray-200 hover:border-gray-300 hover:shadow-sm'
-          : 'bg-gray-50 border-gray-100 opacity-50'
+          ? 'bg-[var(--surface-card)] border-[var(--border-color)] hover:border-[var(--border-color-hover)] hover:shadow-sm'
+          : 'bg-[var(--surface-muted)] border-[var(--border-color-subtle)] opacity-50'
         }
       `}
       onClick={onEdit}
@@ -113,15 +113,15 @@ export function PromptBlockRow({
       {/* Label + token bar */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
-          <span className={`text-sm font-medium truncate ${block.enabled ? 'text-gray-800' : 'text-gray-400 line-through'}`}>
+          <span className={`text-sm font-medium truncate ${block.enabled ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)] line-through'}`}>
             {blockLabel(block.block_key)}
           </span>
-          <span className="text-xs font-mono text-gray-400 tabular-nums flex-shrink-0">
+          <span className="text-xs font-mono text-[var(--text-muted)] tabular-nums flex-shrink-0">
             ~{fmtTokens(tokens)} tok
           </span>
         </div>
         {/* Proportional token bar */}
-        <div className="mt-1 h-1 bg-gray-100 rounded-full overflow-hidden">
+        <div className="mt-1 h-1 bg-[var(--surface-muted)] rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-300 ${styles.bar}`}
             style={{ width: `${barPct}%` }}
@@ -137,7 +137,7 @@ export function PromptBlockRow({
         {/* Reorder */}
         <button
           type="button"
-          className="p-1 rounded hover:bg-gray-100 disabled:opacity-20 text-gray-500 transition-colors"
+          className="p-1 rounded hover:bg-[var(--surface-hover)] disabled:opacity-20 text-[var(--text-muted)] transition-colors"
           title="Move up"
           disabled={isFirst || mutationsDisabled}
           onClick={onMoveUp}
@@ -146,7 +146,7 @@ export function PromptBlockRow({
         </button>
         <button
           type="button"
-          className="p-1 rounded hover:bg-gray-100 disabled:opacity-20 text-gray-500 transition-colors"
+          className="p-1 rounded hover:bg-[var(--surface-hover)] disabled:opacity-20 text-[var(--text-muted)] transition-colors"
           title="Move down"
           disabled={isLast || mutationsDisabled}
           onClick={onMoveDown}
@@ -157,7 +157,7 @@ export function PromptBlockRow({
         {/* Toggle enable/disable */}
         <button
           type="button"
-          className="p-1 rounded hover:bg-gray-100 text-gray-500 transition-colors disabled:opacity-50"
+          className="p-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] transition-colors disabled:opacity-50"
           title={block.enabled ? 'Disable block' : 'Enable block'}
           disabled={mutationsDisabled}
           onClick={onToggle}
@@ -171,7 +171,7 @@ export function PromptBlockRow({
         {/* Edit */}
         <button
           type="button"
-          className="p-1 rounded hover:bg-violet-50 text-violet-500 transition-colors"
+          className="p-1 rounded hover:bg-[var(--color-accent)]/10 text-[var(--color-accent)] transition-colors"
           title="Edit block content"
           onClick={onEdit}
         >

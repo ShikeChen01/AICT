@@ -49,25 +49,25 @@ export function ThinkingStagesGroup({
   const fmtTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
 
   return (
-    <div className="border border-violet-200 rounded-lg overflow-hidden bg-violet-50/30">
+    <div className="border border-[var(--color-accent)]/20 rounded-lg overflow-hidden bg-[var(--color-accent)]/5">
       {/* Header */}
       <button
         type="button"
-        className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-violet-50 transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-[var(--color-accent)]/10 transition-colors"
         onClick={() => setOpen((o) => !o)}
       >
         {open ? (
-          <ChevronDown className="w-4 h-4 text-violet-600 flex-shrink-0" />
+          <ChevronDown className="w-4 h-4 text-[var(--color-accent)] flex-shrink-0" />
         ) : (
-          <ChevronRight className="w-4 h-4 text-violet-600 flex-shrink-0" />
+          <ChevronRight className="w-4 h-4 text-[var(--color-accent)] flex-shrink-0" />
         )}
-        <Brain className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />
-        <span className="text-sm font-semibold text-violet-800">Thinking Stages</span>
-        <span className="text-xs text-violet-600 ml-1">({stageBlocks.length})</span>
+        <Brain className="w-3.5 h-3.5 text-[var(--color-accent)] flex-shrink-0" />
+        <span className="text-sm font-semibold text-[var(--color-accent)]">Thinking Stages</span>
+        <span className="text-xs text-[var(--color-accent)] ml-1">({stageBlocks.length})</span>
         <span className={`ml-auto text-xs px-1.5 py-0.5 rounded-full font-medium ${
           thinkingEnabled
-            ? 'bg-violet-100 text-violet-700'
-            : 'bg-gray-100 text-gray-500'
+            ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+            : 'bg-[var(--surface-muted)] text-[var(--text-muted)]'
         }`}>
           {thinkingEnabled ? 'Active' : 'Disabled'}
         </span>
@@ -75,9 +75,9 @@ export function ThinkingStagesGroup({
 
       {/* Stage blocks */}
       {open && (
-        <div className="border-t border-violet-200 divide-y divide-violet-100">
+        <div className="border-t border-[var(--color-accent)]/20 divide-y divide-[var(--color-accent)]/10">
           {!thinkingEnabled && (
-            <p className="px-3 py-2 text-xs text-violet-500 bg-violet-50/50">
+            <p className="px-3 py-2 text-xs text-[var(--color-accent)] bg-[var(--color-accent)]/5">
               Enable thinking in Agent Config to activate these stages.
             </p>
           )}
@@ -87,7 +87,7 @@ export function ThinkingStagesGroup({
             return (
               <div
                 key={block.id}
-                className={`flex items-start gap-3 px-3 py-2.5 group cursor-pointer hover:bg-violet-50 transition-colors ${
+                className={`flex items-start gap-3 px-3 py-2.5 group cursor-pointer hover:bg-[var(--color-accent)]/10 transition-colors ${
                   isActiveStage ? '' : 'opacity-50'
                 }`}
                 onClick={() => onEdit(block.id)}
@@ -97,14 +97,14 @@ export function ThinkingStagesGroup({
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className={`text-sm font-medium ${isActiveStage ? 'text-gray-800' : 'text-gray-400'}`}>
+                    <span className={`text-sm font-medium ${isActiveStage ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}`}>
                       {STAGE_LABELS[block.block_key] ?? block.block_key}
                     </span>
-                    <span className="text-xs font-mono text-violet-600 tabular-nums">
+                    <span className="text-xs font-mono text-[var(--color-accent)] tabular-nums">
                       ~{fmtTokens(tokens)} tok
                     </span>
                   </div>
-                  <p className="text-xs text-violet-500 mt-0.5">
+                  <p className="text-xs text-[var(--color-accent)] mt-0.5">
                     {STAGE_DESC[block.block_key]}
                   </p>
                 </div>
@@ -115,7 +115,7 @@ export function ThinkingStagesGroup({
                 >
                   <button
                     type="button"
-                    className="p-1 rounded hover:bg-violet-100 text-violet-600 transition-colors disabled:opacity-50"
+                    className="p-1 rounded hover:bg-[var(--color-accent)]/15 text-[var(--color-accent)] transition-colors disabled:opacity-50"
                     title={block.enabled ? 'Disable' : 'Enable'}
                     disabled={mutationsDisabled}
                     onClick={() => onToggle(block.id)}
@@ -124,7 +124,7 @@ export function ThinkingStagesGroup({
                   </button>
                   <button
                     type="button"
-                    className="p-1 rounded hover:bg-violet-100 text-violet-600 transition-colors"
+                    className="p-1 rounded hover:bg-[var(--color-accent)]/15 text-[var(--color-accent)] transition-colors"
                     title="Edit"
                     onClick={() => onEdit(block.id)}
                   >

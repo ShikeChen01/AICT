@@ -59,27 +59,27 @@ export function RuntimeInjectionsGroup({
   const fmtTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
 
   return (
-    <div className="border border-amber-200 rounded-lg overflow-hidden bg-amber-50/40">
+    <div className="border border-[var(--color-warning)]/20 rounded-lg overflow-hidden bg-[var(--color-warning)]/5">
       {/* Header */}
       <button
         type="button"
-        className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-amber-50 transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-[var(--color-warning)]/10 transition-colors"
         onClick={() => setOpen((o) => !o)}
       >
         {open ? (
-          <ChevronDown className="w-4 h-4 text-amber-600 flex-shrink-0" />
+          <ChevronDown className="w-4 h-4 text-[var(--color-warning)] flex-shrink-0" />
         ) : (
-          <ChevronRight className="w-4 h-4 text-amber-600 flex-shrink-0" />
+          <ChevronRight className="w-4 h-4 text-[var(--color-warning)] flex-shrink-0" />
         )}
-        <Zap className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
-        <span className="text-sm font-semibold text-amber-800">Runtime Injections</span>
-        <span className="text-xs text-amber-600 ml-1">({conditionalBlocks.length})</span>
-        <span className="ml-auto text-xs text-amber-500">Dynamically inserted into messages</span>
+        <Zap className="w-3.5 h-3.5 text-[var(--color-warning)] flex-shrink-0" />
+        <span className="text-sm font-semibold text-[var(--color-warning)]">Runtime Injections</span>
+        <span className="text-xs text-[var(--color-warning)] ml-1">({conditionalBlocks.length})</span>
+        <span className="ml-auto text-xs text-[var(--color-warning)]">Dynamically inserted into messages</span>
       </button>
 
       {/* Rows */}
       {open && (
-        <div className="border-t border-amber-200 divide-y divide-amber-100">
+        <div className="border-t border-[var(--color-warning)]/20 divide-y divide-[var(--color-warning)]/10">
           {conditionalBlocks.map((block) => {
             const tokens = estimateTokens(block.content);
             const meta = blockRegistry[block.block_key];
@@ -87,7 +87,7 @@ export function RuntimeInjectionsGroup({
             return (
               <div
                 key={block.id}
-                className={`flex items-start gap-3 px-3 py-2.5 group cursor-pointer hover:bg-amber-50 transition-colors ${
+                className={`flex items-start gap-3 px-3 py-2.5 group cursor-pointer hover:bg-[var(--color-warning)]/10 transition-colors ${
                   block.enabled ? '' : 'opacity-50'
                 }`}
                 onClick={() => onEdit(block.id)}
@@ -98,19 +98,19 @@ export function RuntimeInjectionsGroup({
                 {/* Label + trigger */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className={`text-sm font-medium ${block.enabled ? 'text-gray-800' : 'text-gray-400 line-through'}`}>
+                    <span className={`text-sm font-medium ${block.enabled ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)] line-through'}`}>
                       {BLOCK_LABELS[block.block_key] ?? block.block_key}
                     </span>
-                    <span className="text-xs font-mono text-amber-600 tabular-nums">
+                    <span className="text-xs font-mono text-[var(--color-warning)] tabular-nums">
                       ~{fmtTokens(tokens)} tok
                     </span>
                     {maxChars && (
-                      <span className="text-xs text-gray-400">
+                      <span className="text-xs text-[var(--text-muted)]">
                         / max {fmtTokens(Math.floor(maxChars / 4))} tok
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-amber-600 mt-0.5">
+                  <p className="text-xs text-[var(--color-warning)] mt-0.5">
                     {TRIGGER_LABELS[block.block_key] ?? 'Runtime injected'}
                   </p>
                 </div>
@@ -122,7 +122,7 @@ export function RuntimeInjectionsGroup({
                 >
                   <button
                     type="button"
-                    className="p-1 rounded hover:bg-amber-100 text-amber-600 transition-colors disabled:opacity-50"
+                    className="p-1 rounded hover:bg-[var(--color-warning)]/15 text-[var(--color-warning)] transition-colors disabled:opacity-50"
                     title={block.enabled ? 'Disable' : 'Enable'}
                     disabled={mutationsDisabled}
                     onClick={() => onToggle(block.id)}
@@ -131,7 +131,7 @@ export function RuntimeInjectionsGroup({
                   </button>
                   <button
                     type="button"
-                    className="p-1 rounded hover:bg-amber-100 text-amber-600 transition-colors"
+                    className="p-1 rounded hover:bg-[var(--color-warning)]/15 text-[var(--color-warning)] transition-colors"
                     title="Edit"
                     onClick={() => onEdit(block.id)}
                   >

@@ -105,28 +105,28 @@ export function BlockEditorPanel({
       />
 
       {/* Panel */}
-      <div className="fixed right-0 top-0 h-full w-[480px] bg-white shadow-2xl z-50 flex flex-col">
+      <div className="fixed right-0 top-0 h-full w-[480px] bg-[var(--surface-card)] shadow-2xl z-50 flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-color)]">
           <div>
-            <p className="text-xs text-gray-400 uppercase font-semibold tracking-wide">
+            <p className="text-xs text-[var(--text-muted)] uppercase font-semibold tracking-wide">
               Block Editor
             </p>
-            <h2 className="text-base font-bold text-gray-800">{labelText}</h2>
-            <p className="text-xs text-gray-500 font-mono">{block.block_key}</p>
+            <h2 className="text-base font-bold text-[var(--text-primary)]">{labelText}</h2>
+            <p className="text-xs text-[var(--text-secondary)] font-mono">{block.block_key}</p>
           </div>
           <button
             type="button"
-            className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+            className="p-2 rounded-lg hover:bg-[var(--surface-hover)] transition-colors"
             onClick={onClose}
             title="Close"
           >
-            <X className="w-5 h-5 text-gray-500" />
+            <X className="w-5 h-5 text-[var(--text-muted)]" />
           </button>
         </div>
 
         {error && (
-          <div className="mx-5 mt-3 flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">
+          <div className="mx-5 mt-3 flex items-center gap-2 bg-[var(--color-danger-light)] border border-[var(--color-danger)]/20 text-[var(--color-danger)] text-sm rounded-lg px-3 py-2">
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
             {error}
           </div>
@@ -135,7 +135,7 @@ export function BlockEditorPanel({
         {/* Textarea */}
         <div className="flex-1 p-5 overflow-hidden">
           <textarea
-            className="w-full h-full resize-none font-mono text-sm text-gray-800 border border-gray-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-violet-400 leading-relaxed"
+            className="w-full h-full resize-none font-mono text-sm text-[var(--text-primary)] border border-[var(--border-color)] bg-[var(--surface-muted)] rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] leading-relaxed"
             value={content}
             onChange={(e) => {
               setContent(e.target.value);
@@ -147,10 +147,10 @@ export function BlockEditorPanel({
         </div>
 
         {/* Footer actions */}
-        <div className="px-5 py-4 border-t border-gray-200 flex items-center gap-3">
+        <div className="px-5 py-4 border-t border-[var(--border-color)] flex items-center gap-3">
           <button
             type="button"
-            className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            className="flex items-center gap-2 px-3 py-2 text-sm text-[var(--text-secondary)] border border-[var(--border-color)] rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-50 transition-colors"
             onClick={handleReset}
             disabled={resetting || saving}
             title="Reset to default content from codebase"
@@ -164,8 +164,8 @@ export function BlockEditorPanel({
             className={`
               ml-auto flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-colors
               ${dirty && !saving
-                ? 'bg-violet-600 text-white hover:bg-violet-700'
-                : 'bg-gray-100 text-gray-400 cursor-default'
+                ? 'bg-[var(--color-accent)] text-white hover:opacity-90'
+                : 'bg-[var(--surface-muted)] text-[var(--text-muted)] cursor-default'
               }
             `}
             onClick={handleSave}

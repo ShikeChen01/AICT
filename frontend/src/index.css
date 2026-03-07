@@ -18,6 +18,7 @@
   --color-success-light: rgba(48, 164, 108, 0.12);
   --color-warning: #f5a623;
   --color-warning-light: rgba(245, 166, 35, 0.12);
+  --color-info: #38bdf8;
 
   /* Agent role colors */
   --color-manager: #a78bfa;
@@ -34,6 +35,7 @@
   /* Borders — dark */
   --border-color: #1f2536;
   --border-color-subtle: #171c28;
+  --border-color-hover: #2a3148;
 
   /* Text — dark */
   --text-primary: #e0e2e8;
@@ -72,6 +74,7 @@
   --color-success-light: #e9f9ef;
   --color-warning: #f5a623;
   --color-warning-light: #fef8ec;
+  --color-info: #0ea5e9;
 
   --color-manager: #8b5cf6;
   --color-cto: #06b6d4;
@@ -85,6 +88,7 @@
 
   --border-color: #e2e5ee;
   --border-color-subtle: #eceef4;
+  --border-color-hover: #d0d4e0;
 
   --text-primary: #111827;
   --text-secondary: #4b5563;

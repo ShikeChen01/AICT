@@ -107,14 +107,14 @@ export function ContextBudgetChart({ meta }: ContextBudgetChartProps) {
             )
           )}
           {/* Inner circle */}
-          <circle cx={cx} cy={cy} r={r - thickness} fill="white" />
+          <circle cx={cx} cy={cy} r={r - thickness} fill="var(--surface-card)" />
           {/* Center text */}
           <text
             x={cx}
             y={cy - 8}
             textAnchor="middle"
             dominantBaseline="middle"
-            style={{ fontSize: 13, fontWeight: 700, fill: '#1f2937' }}
+            style={{ fontSize: 13, fontWeight: 700, fill: 'var(--text-primary)' }}
           >
             {fmt(total)}
           </text>
@@ -123,7 +123,7 @@ export function ContextBudgetChart({ meta }: ContextBudgetChartProps) {
             y={cy + 10}
             textAnchor="middle"
             dominantBaseline="middle"
-            style={{ fontSize: 9, fill: '#6b7280' }}
+            style={{ fontSize: 9, fill: 'var(--text-muted)' }}
           >
             tokens
           </text>
@@ -131,24 +131,24 @@ export function ContextBudgetChart({ meta }: ContextBudgetChartProps) {
 
         {/* Legend */}
         <div className="flex flex-col gap-1.5 text-xs min-w-0">
-          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Static</div>
+          <div className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-0.5">Static</div>
           {segments.filter(s => s.group === 'static').map((seg) => (
             <div key={seg.label} className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: seg.color }} />
-              <span className="text-gray-600 truncate flex-1">{seg.label}</span>
-              <span className="font-mono text-gray-800 font-medium tabular-nums">{fmt(seg.tokens)}</span>
-              <span className="text-gray-400 tabular-nums w-9 text-right">
+              <span className="text-[var(--text-secondary)] truncate flex-1">{seg.label}</span>
+              <span className="font-mono text-[var(--text-primary)] font-medium tabular-nums">{fmt(seg.tokens)}</span>
+              <span className="text-[var(--text-muted)] tabular-nums w-9 text-right">
                 {total > 0 ? `${Math.round((seg.tokens / total) * 100)}%` : '0%'}
               </span>
             </div>
           ))}
-          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5 mt-1">Dynamic</div>
+          <div className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-0.5 mt-1">Dynamic</div>
           {segments.filter(s => s.group === 'dynamic').map((seg) => (
             <div key={seg.label} className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: seg.color }} />
-              <span className="text-gray-600 truncate flex-1">{seg.label}</span>
-              <span className="font-mono text-gray-800 font-medium tabular-nums">{fmt(seg.tokens)}</span>
-              <span className="text-gray-400 tabular-nums w-9 text-right">
+              <span className="text-[var(--text-secondary)] truncate flex-1">{seg.label}</span>
+              <span className="font-mono text-[var(--text-primary)] font-medium tabular-nums">{fmt(seg.tokens)}</span>
+              <span className="text-[var(--text-muted)] tabular-nums w-9 text-right">
                 {total > 0 ? `${Math.round((seg.tokens / total) * 100)}%` : '0%'}
               </span>
             </div>
@@ -160,11 +160,11 @@ export function ContextBudgetChart({ meta }: ContextBudgetChartProps) {
       <div className="space-y-1.5">
         {segments.map((seg) => (
           <div key={seg.label}>
-            <div className="flex justify-between text-xs text-gray-500 mb-0.5">
+            <div className="flex justify-between text-xs text-[var(--text-muted)] mb-0.5">
               <span>{seg.label}</span>
               <span className="font-mono">{fmt(seg.tokens)} / {fmt(total)}</span>
             </div>
-            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div className="h-1.5 bg-[var(--surface-muted)] rounded-full overflow-hidden">
               <div
                 className="h-full rounded-full transition-all duration-300"
                 style={{
@@ -179,13 +179,13 @@ export function ContextBudgetChart({ meta }: ContextBudgetChartProps) {
 
       {/* Image reserve note — shown when model supports vision */}
       {meta.model_supports_vision && (
-        <div className="rounded-lg border border-sky-200 bg-sky-50/60 px-3 py-2.5 space-y-1">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-700">
+        <div className="rounded-lg border border-[var(--color-info)]/20 bg-[var(--color-info)]/5 px-3 py-2.5 space-y-1">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--color-info)]">
             <Lock className="w-3 h-3 flex-shrink-0" />
             <span>Image Reserve</span>
             <span className="ml-auto font-mono font-medium">{fmt(imageReserve)}</span>
           </div>
-          <p className="text-[10px] text-sky-600 leading-relaxed">
+          <p className="text-[10px] text-[var(--color-info)] leading-relaxed">
             {meta.image_effective_max_images} image{meta.image_effective_max_images !== 1 ? 's' : ''} ×{' '}
             {fmt(meta.image_tokens_per_image)} tokens/image — reserved outside the {fmt(meta.context_window_tokens)} context window.
           </p>
