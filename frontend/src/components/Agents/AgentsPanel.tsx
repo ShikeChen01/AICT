@@ -4,7 +4,7 @@ import { useOptionalAgentStreamContext } from '../../contexts/AgentStreamContext
 import { useWebSocket } from '../../hooks/useWebSocket';
 import type { AgentLogData } from '../../types';
 import { Badge, Button } from '../ui';
-import { stopAgent } from '../../api/client';
+import { stopAgent, deleteAgent } from '../../api/client';
 
 interface AgentsPanelProps {
   projectId: string;
@@ -28,6 +28,7 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
   const [agentBuffers, setAgentBuffers] = useState<Record<string, string[]>>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [stoppingIds, setStoppingIds] = useState<Set<string>>(new Set());
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [stopToast, setStopToast] = useState<string | null>(null);
 
   const rows = useMemo(() => {
@@ -70,6 +71,26 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
     setStoppingIds(new Set());
     void refreshAgents();
   }, [rows, refreshAgents]);
+
+  const handleDelete = useCallback(async (agentId: string, displayName: string) => {
+    if (!window.confirm(`Remove agent "${displayName}"? This cannot be undone.`)) return;
+    setDeletingIds((prev) => new Set(prev).add(agentId));
+    try {
+      await deleteAgent(agentId);
+      setStopToast(`Agent "${displayName}" removed.`);
+      setTimeout(() => setStopToast(null), 3000);
+      void refreshAgents();
+    } catch {
+      setStopToast(`Failed to remove "${displayName}".`);
+      setTimeout(() => setStopToast(null), 3000);
+    } finally {
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(agentId);
+        return next;
+      });
+    }
+  }, [refreshAgents]);
 
   // Refresh agent list when the server broadcasts agent_stopped
   useEffect(() => {
@@ -185,6 +206,27 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
                       </svg>
                     )}
                   </button>
+                  {agent.role !== 'manager' && agent.role !== 'cto' && (
+                    <button
+                      type="button"
+                      title={`Remove ${agent.display_name}`}
+                      disabled={deletingIds.has(agent.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(agent.id, agent.display_name);
+                      }}
+                      className="flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 transition-colors"
+                    >
+                      {deletingIds.has(agent.id) ? (
+                        <span className="w-2.5 h-2.5 border border-gray-400 border-t-transparent rounded-full animate-spin block" />
+                      ) : (
+                        <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <line x1="3" y1="3" x2="9" y2="9" />
+                          <line x1="9" y1="3" x2="3" y2="9" />
+                        </svg>
+                      )}
+                    </button>
+                  )}
                 </div>
               </div>
 

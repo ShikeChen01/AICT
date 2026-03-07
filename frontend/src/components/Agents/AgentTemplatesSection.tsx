@@ -17,12 +17,14 @@ import {
   ChevronDown,
   ChevronUp,
   X,
+  Play,
 } from 'lucide-react';
 import {
   listTemplates,
   createTemplate,
   updateTemplate,
   deleteTemplate,
+  spawnFromTemplate,
 } from '../../api/client';
 import type { AgentTemplate, CreateAgentTemplate } from '../../types';
 import { Button, Input } from '../ui';
@@ -54,9 +56,10 @@ interface TemplateCardProps {
   template: AgentTemplate;
   onSave: (id: string, updates: { name?: string; model?: string; provider?: string | null; thinking_enabled?: boolean }) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onSpawn: (id: string, displayName?: string) => Promise<void>;
 }
 
-function TemplateCard({ template, onSave, onDelete }: TemplateCardProps) {
+function TemplateCard({ template, onSave, onDelete, onSpawn }: TemplateCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [name, setName] = useState(template.name);
   const [model, setModel] = useState(template.model);
@@ -64,6 +67,7 @@ function TemplateCard({ template, onSave, onDelete }: TemplateCardProps) {
   const [thinkingEnabled, setThinkingEnabled] = useState(template.thinking_enabled);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [spawning, setSpawning] = useState(false);
 
   const isDirty =
     name !== template.name ||
@@ -92,6 +96,15 @@ function TemplateCard({ template, onSave, onDelete }: TemplateCardProps) {
       await onDelete(template.id);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleSpawn = async () => {
+    setSpawning(true);
+    try {
+      await onSpawn(template.id);
+    } finally {
+      setSpawning(false);
     }
   };
 
@@ -193,15 +206,28 @@ function TemplateCard({ template, onSave, onDelete }: TemplateCardProps) {
             ) : (
               <span />
             )}
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleSave}
-              disabled={saving || !isDirty}
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              Save
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={handleSpawn}
+                disabled={spawning}
+                title="Spawn a new agent from this template"
+              >
+                {spawning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                Spawn Agent
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleSave}
+                disabled={saving || !isDirty}
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -219,6 +245,8 @@ interface CreateTemplateFormProps {
 
 function CreateTemplateForm({ onCreated, onCancel, projectId }: CreateTemplateFormProps) {
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [baseRole, setBaseRole] = useState('worker');
   const [model, setModel] = useState('gpt-5.2');
   const [provider, setProvider] = useState('');
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
@@ -232,10 +260,11 @@ function CreateTemplateForm({ onCreated, onCancel, projectId }: CreateTemplateFo
     try {
       const template = await createTemplate(projectId, {
         name: name.trim(),
-        base_role: 'worker',
+        base_role: baseRole as 'worker' | 'manager' | 'cto',
         model,
         provider: provider.trim() || null,
         thinking_enabled: thinkingEnabled,
+        description: description.trim() || undefined,
       } as CreateAgentTemplate);
       onCreated(template);
     } catch (e: unknown) {
@@ -248,7 +277,7 @@ function CreateTemplateForm({ onCreated, onCancel, projectId }: CreateTemplateFo
   return (
     <div className="border border-blue-200 rounded-lg p-4 bg-blue-50 space-y-4">
       <div className="flex justify-between items-center">
-        <h4 className="text-sm font-semibold text-gray-800">New Worker Template</h4>
+        <h4 className="text-sm font-semibold text-gray-800">New Agent Design</h4>
         <button type="button" onClick={onCancel} className="text-gray-400 hover:text-gray-600">
           <X className="w-4 h-4" />
         </button>
@@ -258,6 +287,28 @@ function CreateTemplateForm({ onCreated, onCancel, projectId }: CreateTemplateFo
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Template Name</label>
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. QA Tester" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Base Role</label>
+          <select
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={baseRole}
+            onChange={(e) => setBaseRole(e.target.value)}
+          >
+            <option value="worker">Worker / Engineer</option>
+            <option value="manager">Manager</option>
+            <option value="cto">CTO</option>
+          </select>
+        </div>
+        <div className="sm:col-span-2">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Description <span className="text-gray-400 font-normal">(optional)</span>
+          </label>
+          <Input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Brief description of what this agent design does"
+          />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
@@ -273,7 +324,7 @@ function CreateTemplateForm({ onCreated, onCancel, projectId }: CreateTemplateFo
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Provider <span className="text-gray-400 font-normal">(optional)</span>
+            Provider <span className="text-gray-400 font-normal">(optional, inferred if blank)</span>
           </label>
           <Input
             value={provider}
@@ -299,7 +350,7 @@ function CreateTemplateForm({ onCreated, onCancel, projectId }: CreateTemplateFo
       <div className="flex justify-end">
         <Button type="button" size="sm" onClick={handleCreate} disabled={saving}>
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-          Create Template
+          Create Design
         </Button>
       </div>
     </div>
@@ -347,6 +398,20 @@ export function AgentTemplatesSection({ projectId }: AgentTemplatesSectionProps)
     setShowCreateForm(false);
   };
 
+  const [spawnMessage, setSpawnMessage] = useState<string | null>(null);
+
+  const handleSpawn = async (id: string, displayName?: string) => {
+    try {
+      setSpawnMessage(null);
+      const agent = await spawnFromTemplate(id, displayName ? { display_name: displayName } : undefined);
+      setSpawnMessage(`Agent "${agent.display_name}" spawned successfully!`);
+      setTimeout(() => setSpawnMessage(null), 4000);
+    } catch (e: unknown) {
+      setSpawnMessage(e instanceof Error ? `Spawn failed: ${e.message}` : 'Spawn failed');
+      setTimeout(() => setSpawnMessage(null), 5000);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-gray-500 py-4">
@@ -369,12 +434,18 @@ export function AgentTemplatesSection({ projectId }: AgentTemplatesSectionProps)
 
   return (
     <div className="space-y-3">
+      {spawnMessage && (
+        <div className={`text-sm px-3 py-2 rounded-lg ${spawnMessage.startsWith('Spawn failed') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+          {spawnMessage}
+        </div>
+      )}
       {sorted.map((template) => (
         <TemplateCard
           key={template.id}
           template={template}
           onSave={handleSave}
           onDelete={handleDelete}
+          onSpawn={handleSpawn}
         />
       ))}
 
@@ -393,13 +464,13 @@ export function AgentTemplatesSection({ projectId }: AgentTemplatesSectionProps)
           className="w-full"
         >
           <Plus className="w-4 h-4" />
-          New Worker Template
+          New Agent Design
         </Button>
       )}
 
       <p className="text-xs text-gray-500">
         System templates (Manager, CTO, Engineer) are created automatically. You can edit their model and settings.
-        Create additional worker templates for specialized roles (e.g. "QA Tester", "DevOps Engineer").
+        Create additional agent designs for specialized roles (e.g. "QA Tester", "DevOps Engineer") and spawn agents from them.
       </p>
     </div>
   );

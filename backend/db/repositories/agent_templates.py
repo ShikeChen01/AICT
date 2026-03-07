@@ -6,7 +6,9 @@ import uuid
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import delete, select
+import hashlib
+
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import Agent, AgentTemplate, PromptBlockConfig, ToolConfig
@@ -206,7 +208,15 @@ class AgentTemplateRepository(BaseRepository[AgentTemplate]):
         return template
 
     async def ensure_system_defaults(self, project_id: UUID) -> dict[str, AgentTemplate]:
-        """Ensure system default templates exist for a project. Returns {base_role: template}."""
+        """Ensure system default templates exist for a project. Returns {base_role: template}.
+
+        Uses a PostgreSQL advisory lock keyed on the project_id to prevent
+        concurrent callers from creating duplicate system-default templates.
+        """
+        # Derive a stable int64 lock key from the project UUID
+        lock_key = int(hashlib.md5(project_id.bytes).hexdigest()[:15], 16)
+        await self.session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+
         existing = await self.list_by_project(project_id)
         existing_defaults = {t.base_role: t for t in existing if t.is_system_default}
 
@@ -254,10 +264,19 @@ class PromptBlockConfigRepository(BaseRepository[PromptBlockConfig]):
         return list(result.scalars().all())
 
     async def copy_template_blocks_to_agent(self, template_id: UUID, agent_id: UUID) -> list[PromptBlockConfig]:
-        """Copy all template-level blocks to agent-level blocks."""
+        """Copy all template-level blocks to agent-level blocks (idempotent).
+
+        Skips any block_key that already exists for this agent to avoid
+        duplicates when called concurrently or repeatedly.
+        """
         template_blocks = await self.list_for_template(template_id)
-        agent_blocks = []
+        existing = await self.list_for_agent(agent_id)
+        existing_keys = {b.block_key for b in existing}
+
+        agent_blocks = list(existing)
         for tb in template_blocks:
+            if tb.block_key in existing_keys:
+                continue
             block = PromptBlockConfig(
                 id=uuid.uuid4(),
                 template_id=None,
@@ -269,6 +288,7 @@ class PromptBlockConfigRepository(BaseRepository[PromptBlockConfig]):
             )
             self.session.add(block)
             agent_blocks.append(block)
+            existing_keys.add(tb.block_key)
         await self.session.flush()
         return agent_blocks
 

@@ -51,6 +51,7 @@ import type {
 } from '../types';
 import { Button, Card, Input, Textarea } from '../components/ui';
 import { SandboxManager } from '../components/Sandbox/SandboxManager';
+import { AgentTemplatesSection } from '../components/Agents/AgentTemplatesSection';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -938,6 +939,11 @@ export function SettingsPage() {
           </p>
           <SandboxManager projectId={projectId!} />
         </Card>
+
+        {/* ── 10. Agent Designs (templates — spawn custom agents) ── */}
+        <div className="mt-8">
+          <AgentTemplatesSection projectId={projectId!} />
+        </div>
 
       </main>
     </div>

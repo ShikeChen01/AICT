@@ -434,3 +434,23 @@ async def get_agent_context(
         sandbox_id=agent.sandbox_id,
         sandbox_active=bool(agent.sandbox_id),
     )
+
+
+@router.delete("/{agent_id}", status_code=200)
+async def delete_agent(
+    agent_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a non-core agent from the project.
+
+    Manager and CTO agents are protected and cannot be deleted.
+    """
+    await _ensure_agent_access(db, agent_id, current_user.id)
+    service = get_agent_service(db)
+    try:
+        agent = await service.remove_agent(agent_id, (await _ensure_agent_access(db, agent_id, current_user.id)).project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    await db.commit()
+    return {"ok": True, "message": f"Agent '{agent.display_name}' removed."}

@@ -18,6 +18,8 @@ from backend.db.models import AgentTemplate, User
 from backend.db.repositories.agent_templates import AgentTemplateRepository
 from backend.db.session import get_db
 from backend.llm.model_resolver import infer_provider
+from backend.schemas.agent import AgentResponse
+from backend.services.agent_service import get_agent_service
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
@@ -172,3 +174,57 @@ async def delete_template(
 
     await db.delete(template)
     await db.commit()
+
+
+# ── Spawn from Template ──────────────────────────────────────────────────────
+
+
+class SpawnFromTemplateRequest(BaseModel):
+    display_name: str | None = Field(None, max_length=100)
+    sandbox_persist: bool = Field(default=False)
+
+
+@router.post("/templates/{template_id}/spawn", response_model=AgentResponse)
+async def spawn_from_template(
+    template_id: UUID,
+    body: SpawnFromTemplateRequest | None = None,
+    current_user: User | None = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new agent from a template (agent design).
+
+    The template defines the agent's role, model, provider, thinking config,
+    and prompt blocks. Optionally override the display name.
+    """
+    # Look up the template to get its project_id for access control
+    result = await db.execute(
+        select(AgentTemplate).where(AgentTemplate.id == template_id)
+    )
+    template = result.scalar_one_or_none()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if isinstance(current_user, User):
+        await require_project_access(db, template.project_id, current_user.id)
+
+    service = get_agent_service(db)
+    try:
+        agent = await service.spawn_from_template(
+            project_id=template.project_id,
+            template_id=template_id,
+            display_name=body.display_name if body else None,
+            sandbox_persist=body.sandbox_persist if body else False,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    await db.commit()
+    await db.refresh(agent)
+
+    # Broadcast the new agent via WebSocket so all clients update
+    try:
+        from backend.websocket.manager import ws_manager
+        await ws_manager.broadcast_agent_status(agent)
+    except Exception:
+        pass  # Best-effort
+
+    return agent

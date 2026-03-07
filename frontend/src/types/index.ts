@@ -100,19 +100,29 @@ export interface AgentTemplate {
   id: UUID;
   project_id: UUID;
   name: string;
+  description: string | null;
   base_role: BaseRole;
   model: string;
   provider: string | null;
   thinking_enabled: boolean;
+  sandbox_template: string | null;
+  knowledge_sources: Record<string, unknown> | unknown[] | null;
+  trigger_config: Record<string, unknown> | null;
+  cost_limits: Record<string, unknown> | null;
   is_system_default: boolean;
 }
 
 export interface CreateAgentTemplate {
   name: string;
+  description?: string;
   base_role?: BaseRole;
   model: string;
   provider?: string | null;
   thinking_enabled?: boolean;
+  sandbox_template?: string | null;
+  knowledge_sources?: Record<string, unknown> | unknown[] | null;
+  trigger_config?: Record<string, unknown> | null;
+  cost_limits?: Record<string, unknown> | null;
 }
 
 export interface UpdateAgentTemplate {
