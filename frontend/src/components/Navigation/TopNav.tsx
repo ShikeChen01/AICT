@@ -67,10 +67,10 @@ export function TopNav() {
     );
 
   return (
-    <header className="flex h-14 shrink-0 items-center border-b border-[var(--border-color)] bg-[var(--surface-card)] px-4 shadow-[var(--shadow-xs)]">
+    <header className="flex h-14 shrink-0 items-center border-b border-[var(--border-color)] bg-[var(--surface-card)] px-4 shadow-[var(--shadow-xs)]" role="banner">
       {/* Left: Logo */}
-      <NavLink to="/projects" className="mr-6 flex items-center gap-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--color-primary)] text-white text-xs font-bold">
+      <NavLink to="/projects" className="mr-6 flex items-center gap-2" aria-label="AICT — go to projects">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--color-primary)] text-white text-xs font-bold" aria-hidden="true">
           AI
         </div>
         <div className="hidden sm:block">
@@ -83,9 +83,9 @@ export function TopNav() {
 
       {/* Center: Nav items */}
       {navItems.length > 0 && (
-        <nav className="ml-6 flex items-center gap-1">
+        <nav className="ml-6 flex items-center gap-1" aria-label="Main navigation">
           {navItems.map((item) => (
-            <NavLink key={item.path} to={item.path} className={linkClass} end>
+            <NavLink key={item.path} to={item.path} className={linkClass} end aria-label={item.label}>
               {item.icon}
               <span className="hidden md:inline">{item.label}</span>
             </NavLink>
@@ -98,9 +98,9 @@ export function TopNav() {
         <button
           onClick={toggleTheme}
           className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] transition-colors"
-          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
         >
-          {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          {theme === 'dark' ? <Sun className="h-4 w-4" aria-hidden="true" /> : <Moon className="h-4 w-4" aria-hidden="true" />}
         </button>
         <UserMenu />
       </div>

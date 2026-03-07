@@ -10,6 +10,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   Loader2,
   AlertCircle,
+  Blocks,
   Bot,
   BrainCircuit,
   Cpu,
@@ -418,8 +419,5 @@ function TemplateRow({ template }: { template: AgentTemplate }) {
     </div>
   );
 }
-
-// Need Blocks import for agent cards
-import { Blocks } from 'lucide-react';
 
 export default DashboardPage;

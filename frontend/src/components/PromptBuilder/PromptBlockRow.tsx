@@ -129,42 +129,43 @@ export function PromptBlockRow({
         </div>
       </div>
 
-      {/* Action buttons — stop propagation so they don't trigger row click/edit */}
+      {/* Action buttons — stop propagation so they don't trigger row click/edit.
+           Always visible for keyboard/screen-reader users via focus-within. */}
       <div
-        className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+        className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Reorder */}
         <button
           type="button"
           className="p-1 rounded hover:bg-[var(--surface-hover)] disabled:opacity-20 text-[var(--text-muted)] transition-colors"
-          title="Move up"
+          aria-label={`Move ${blockLabel(block.block_key)} up`}
           disabled={isFirst || mutationsDisabled}
           onClick={onMoveUp}
         >
-          <ChevronUp className="w-3.5 h-3.5" />
+          <ChevronUp className="w-3.5 h-3.5" aria-hidden="true" />
         </button>
         <button
           type="button"
           className="p-1 rounded hover:bg-[var(--surface-hover)] disabled:opacity-20 text-[var(--text-muted)] transition-colors"
-          title="Move down"
+          aria-label={`Move ${blockLabel(block.block_key)} down`}
           disabled={isLast || mutationsDisabled}
           onClick={onMoveDown}
         >
-          <ChevronDown className="w-3.5 h-3.5" />
+          <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
         </button>
 
         {/* Toggle enable/disable */}
         <button
           type="button"
           className="p-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] transition-colors disabled:opacity-50"
-          title={block.enabled ? 'Disable block' : 'Enable block'}
+          aria-label={block.enabled ? `Disable ${blockLabel(block.block_key)}` : `Enable ${blockLabel(block.block_key)}`}
           disabled={mutationsDisabled}
           onClick={onToggle}
         >
           {block.enabled
-            ? <Eye className="w-3.5 h-3.5" />
-            : <EyeOff className="w-3.5 h-3.5" />
+            ? <Eye className="w-3.5 h-3.5" aria-hidden="true" />
+            : <EyeOff className="w-3.5 h-3.5" aria-hidden="true" />
           }
         </button>
 
@@ -172,10 +173,10 @@ export function PromptBlockRow({
         <button
           type="button"
           className="p-1 rounded hover:bg-[var(--color-accent)]/10 text-[var(--color-accent)] transition-colors"
-          title="Edit block content"
+          aria-label={`Edit ${blockLabel(block.block_key)}`}
           onClick={onEdit}
         >
-          <Pencil className="w-3.5 h-3.5" />
+          <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
         </button>
       </div>
     </div>

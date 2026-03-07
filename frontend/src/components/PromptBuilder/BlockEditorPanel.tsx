@@ -102,12 +102,18 @@ export function BlockEditorPanel({
       <div
         className="fixed inset-0 bg-black/20 z-40"
         onClick={onClose}
+        aria-hidden="true"
       />
 
-      {/* Panel */}
-      <div className="fixed right-0 top-0 h-full w-[480px] bg-[var(--surface-card)] shadow-2xl z-50 flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-color)]">
+      {/* Panel — uses flex column with min-h-0 to let the textarea stretch vertically */}
+      <div
+        className="fixed right-0 top-0 h-full w-[480px] max-w-[90vw] bg-[var(--surface-card)] shadow-2xl z-50 flex flex-col"
+        role="dialog"
+        aria-label={`Edit block: ${labelText}`}
+        aria-modal="true"
+      >
+        {/* Header — fixed height */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-color)] flex-shrink-0">
           <div>
             <p className="text-xs text-[var(--text-muted)] uppercase font-semibold tracking-wide">
               Block Editor
@@ -119,23 +125,28 @@ export function BlockEditorPanel({
             type="button"
             className="p-2 rounded-lg hover:bg-[var(--surface-hover)] transition-colors"
             onClick={onClose}
-            title="Close"
+            aria-label="Close editor"
           >
-            <X className="w-5 h-5 text-[var(--text-muted)]" />
+            <X className="w-5 h-5 text-[var(--text-muted)]" aria-hidden="true" />
           </button>
         </div>
 
         {error && (
-          <div className="mx-5 mt-3 flex items-center gap-2 bg-[var(--color-danger-light)] border border-[var(--color-danger)]/20 text-[var(--color-danger)] text-sm rounded-lg px-3 py-2">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <div className="mx-5 mt-3 flex items-center gap-2 bg-[var(--color-danger-light)] border border-[var(--color-danger)]/20 text-[var(--color-danger)] text-sm rounded-lg px-3 py-2 flex-shrink-0" role="alert">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
             {error}
           </div>
         )}
 
-        {/* Textarea */}
-        <div className="flex-1 p-5 overflow-hidden">
+        {/* Textarea area — flex-1 + min-h-0 ensures this fills remaining space
+            and the textarea inside stretches to fill its container properly. */}
+        <div className="flex-1 min-h-0 flex flex-col p-5">
+          <label htmlFor="block-editor-textarea" className="sr-only">
+            Block content for {labelText}
+          </label>
           <textarea
-            className="w-full h-full resize-none font-mono text-sm text-[var(--text-primary)] border border-[var(--border-color)] bg-[var(--surface-muted)] rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] leading-relaxed"
+            id="block-editor-textarea"
+            className="flex-1 min-h-0 w-full resize-none font-mono text-sm text-[var(--text-primary)] border border-[var(--border-color)] bg-[var(--surface-muted)] rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] leading-relaxed"
             value={content}
             onChange={(e) => {
               setContent(e.target.value);
@@ -146,16 +157,16 @@ export function BlockEditorPanel({
           />
         </div>
 
-        {/* Footer actions */}
-        <div className="px-5 py-4 border-t border-[var(--border-color)] flex items-center gap-3">
+        {/* Footer actions — fixed height */}
+        <div className="px-5 py-4 border-t border-[var(--border-color)] flex items-center gap-3 flex-shrink-0">
           <button
             type="button"
             className="flex items-center gap-2 px-3 py-2 text-sm text-[var(--text-secondary)] border border-[var(--border-color)] rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-50 transition-colors"
             onClick={handleReset}
             disabled={resetting || saving}
-            title="Reset to default content from codebase"
+            aria-label="Reset to default content"
           >
-            <RotateCcw className={`w-4 h-4 ${resetting ? 'animate-spin' : ''}`} />
+            <RotateCcw className={`w-4 h-4 ${resetting ? 'animate-spin' : ''}`} aria-hidden="true" />
             {resetting ? 'Resetting…' : 'Reset to default'}
           </button>
 
@@ -170,8 +181,9 @@ export function BlockEditorPanel({
             `}
             onClick={handleSave}
             disabled={!dirty || saving}
+            aria-label={saving ? 'Saving changes' : 'Save changes'}
           >
-            <Save className={`w-4 h-4 ${saving ? 'animate-pulse' : ''}`} />
+            <Save className={`w-4 h-4 ${saving ? 'animate-pulse' : ''}`} aria-hidden="true" />
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
