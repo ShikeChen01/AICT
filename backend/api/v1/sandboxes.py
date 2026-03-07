@@ -130,6 +130,30 @@ async def toggle_persistent(
     return result
 
 
+@router.post("/{agent_id}/start")
+async def start_sandbox(
+    agent_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Ensure the agent has a running sandbox (create one if missing).
+
+    Use this to explicitly start a sandbox for an agent so the frontend can
+    connect to the screen stream (VNC/MJPEG) and verify connectivity.
+    """
+    agent = await _get_agent(db, agent_id, current_user.id)
+    svc = _get_sandbox_service()
+    meta = await svc.ensure_running_sandbox(db, agent, persistent=bool(agent.sandbox_persist))
+    await db.commit()
+    return {
+        "ok": True,
+        "sandbox_id": meta.sandbox_id,
+        "status": meta.status,
+        "message": meta.message or f"Sandbox ready: {meta.sandbox_id}",
+    }
+
+
 @router.post("/{agent_id}/restart")
 async def restart_sandbox(
     agent_id: UUID,

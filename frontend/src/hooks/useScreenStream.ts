@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getAuthToken } from '../api/client';
+import { getAuthToken, getSandboxWsBase } from '../api/client';
 
 interface ScreenStreamState {
   frameUrl: string | null;
@@ -67,8 +67,8 @@ export function useScreenStream(sandboxId: string | null): ScreenStreamState {
     const token = getAuthToken();
     if (!token) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${window.location.host}/ws/screen?token=${encodeURIComponent(token)}&sandbox_id=${encodeURIComponent(sid)}`;
+    const wsBase = getSandboxWsBase();
+    const url = `${wsBase}/screen?token=${encodeURIComponent(token)}&sandbox_id=${encodeURIComponent(sid)}`;
 
     const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';

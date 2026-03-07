@@ -18,6 +18,7 @@ import { AgentStream } from '../components/AgentChat/AgentStream';
 import { VncView } from '../components/ScreenStream';
 import { useAgents } from '../hooks';
 import { Panel } from '../components/ui';
+import { startSandbox } from '../api/client';
 export type WorkspaceView = 'workspace' | 'kanban' | 'workflow' | 'artifacts';
 
 interface WorkspacePageProps {
@@ -40,9 +41,11 @@ function WorkspaceContent({
   } = useAgentStreamContext();
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [streamTab, setStreamTab] = useState<'text' | 'screen'>('text');
-  const { agents } = useAgents(projectId);
+  const { agents, refreshAgents } = useAgents(projectId);
   const selectedAgent = agents.find((a) => a.id === selectedAgentId);
   const selectedSandboxId = streamTab === 'screen' ? (selectedAgent?.sandbox_id ?? null) : null;
+  const [startSandboxLoading, setStartSandboxLoading] = useState(false);
+  const [startSandboxMessage, setStartSandboxMessage] = useState<string | null>(null);
   const [streamRatio, setStreamRatio] = useState(0.38);
   const [agentsRatio, setAgentsRatio] = useState(0.45);
   const [isResizingStream, setIsResizingStream] = useState(false);
@@ -143,29 +146,60 @@ function WorkspaceContent({
           bodyClassName="min-h-0"
           style={{ flex: `0 0 ${Math.round(streamRatio * 100)}%` }}
           headerActions={(
-            <div className="flex rounded-md border border-[var(--border-color)] bg-[var(--surface-card)] text-xs">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setStreamTab('text')}
-                className={`px-2.5 py-1 font-medium rounded-l-md ${
-                  streamTab === 'text'
-                    ? 'bg-[var(--color-primary)] text-white'
-                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
-                }`}
+                onClick={async () => {
+                  if (!selectedAgentId) return;
+                  setStartSandboxLoading(true);
+                  setStartSandboxMessage(null);
+                  try {
+                    const res = await startSandbox(selectedAgentId);
+                    setStartSandboxMessage(res.message ?? `Sandbox ${res.sandbox_id} started`);
+                    setStreamTab('screen');
+                    await refreshAgents();
+                    setTimeout(() => setStartSandboxMessage(null), 5000);
+                  } catch (err) {
+                    setStartSandboxMessage(err instanceof Error ? err.message : 'Failed to start sandbox');
+                  } finally {
+                    setStartSandboxLoading(false);
+                  }
+                }}
+                disabled={!selectedAgentId || startSandboxLoading}
+                title={selectedAgentId ? 'Start a sandbox for the selected agent and open Screen tab to verify connection' : 'Select an agent first'}
+                className="rounded-md border border-emerald-600 bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Text
+                {startSandboxLoading ? 'Starting…' : 'Start sandbox'}
               </button>
-              <button
-                type="button"
-                onClick={() => setStreamTab('screen')}
-                className={`px-2.5 py-1 font-medium rounded-r-md ${
-                  streamTab === 'screen'
-                    ? 'bg-[var(--color-primary)] text-white'
-                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
-                }`}
-              >
-                Screen
-              </button>
+              {startSandboxMessage && (
+                <span className="text-xs text-[var(--text-secondary)] max-w-[200px] truncate" title={startSandboxMessage}>
+                  {startSandboxMessage}
+                </span>
+              )}
+              <div className="flex rounded-md border border-[var(--border-color)] bg-[var(--surface-card)] text-xs">
+                <button
+                  type="button"
+                  onClick={() => setStreamTab('text')}
+                  className={`px-2.5 py-1 font-medium rounded-l-md ${
+                    streamTab === 'text'
+                      ? 'bg-[var(--color-primary)] text-white'
+                      : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
+                  }`}
+                >
+                  Text
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStreamTab('screen')}
+                  className={`px-2.5 py-1 font-medium rounded-r-md ${
+                    streamTab === 'screen'
+                      ? 'bg-[var(--color-primary)] text-white'
+                      : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
+                  }`}
+                >
+                  Screen
+                </button>
+              </div>
             </div>
           )}
         >

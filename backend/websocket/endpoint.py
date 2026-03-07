@@ -4,6 +4,7 @@ WebSocket endpoint for real-time updates.
 Docs contract: /ws?token=<TOKEN>&project_id=<UUID>&channels=agent_stream,messages,kanban,agents,activity,backend_logs,workflow,all
 """
 
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
@@ -119,11 +120,11 @@ async def screen_stream_endpoint(
     try:
         while True:
             data = await websocket.receive()
-            if data.get("type") == "websocket.disconnect":
+            msg_type = data.get("type")
+            if msg_type == "websocket.disconnect":
                 break
-            # Handle ping/pong
-            if "text" in data:
-                import json
+            # Handle ping/pong (Starlette sends type "websocket.receive" with "text" or "bytes")
+            if msg_type == "websocket.receive" and "text" in data:
                 try:
                     msg = json.loads(data["text"])
                     if msg.get("type") == "ping":

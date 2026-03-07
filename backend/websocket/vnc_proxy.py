@@ -36,6 +36,19 @@ logger = get_logger(__name__)
 _UPSTREAM_PING_INTERVAL_S = 30
 
 
+def _short_reason(msg: str) -> str:
+    """Keep WS close reason under 123 bytes so proxies don't strip it."""
+    return (msg[:120] + "…") if len(msg) > 123 else msg
+
+
+async def _safe_close_viewer(ws: WebSocket, code: int, reason: str) -> None:
+    try:
+        if ws.client_state == WebSocketState.CONNECTED:
+            await ws.close(code=code, reason=_short_reason(reason))
+    except Exception:
+        pass
+
+
 async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
     """
     Bidirectionally relay VNC/RFB protocol bytes between a frontend
@@ -50,20 +63,23 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
         try:
             pool = PoolManagerClient()
             data = await pool.get_sandbox_by_id(sandbox_id)
+            vm_host = settings.sandbox_vm_internal_host or settings.sandbox_vm_host
             client.register(
                 sandbox_id=sandbox_id,
-                vm_host=settings.sandbox_vm_host,
+                vm_host=vm_host,
                 host_port=data["host_port"],
                 auth_token=data["auth_token"],
             )
             conn = client._connections.get(sandbox_id)
         except Exception as exc:
             logger.warning("VNC proxy: sandbox %s not registered and re-registration failed: %s", sandbox_id, exc)
-            await viewer_ws.close(code=4004, reason="Sandbox not registered")
+            await _safe_close_viewer(viewer_ws, 4004, "Sandbox not registered")
             return
         if not conn:
-            await viewer_ws.close(code=4004, reason="Sandbox not registered")
+            await _safe_close_viewer(viewer_ws, 4004, "Sandbox not registered")
             return
+
+    from backend.config import settings
 
     upstream_url = (
         conn.rest_base_url.replace("http://", "ws://")
@@ -75,16 +91,61 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
         conn.rest_base_url,
     )
 
+    # Use short timeouts so we can send a proper close frame before proxies drop the connection.
+    _connect_timeout = 8
+    _open_timeout = 6
+
+    upstream = None
+    last_exc: Exception | None = None
     try:
-        async with websockets.connect(
-            upstream_url,
-            open_timeout=10,
-            max_size=2**22,  # 4 MB — VNC frames can be large
-            subprotocols=[websockets.Subprotocol("binary")],
-            # Keepalive pings on the upstream WS (backend → sandbox).
-            ping_interval=_UPSTREAM_PING_INTERVAL_S,
-            ping_timeout=10,
-        ) as upstream:
+        upstream = await asyncio.wait_for(
+            websockets.connect(
+                upstream_url,
+                open_timeout=_open_timeout,
+                max_size=2**22,
+                subprotocols=[websockets.Subprotocol("binary")],
+                ping_interval=_UPSTREAM_PING_INTERVAL_S,
+                ping_timeout=10,
+            ).__aenter__(),
+            timeout=_connect_timeout,
+        )
+    except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as exc:
+        last_exc = exc
+        upstream = None
+    except (websockets.exceptions.InvalidStatusCode, websockets.exceptions.WebSocketException) as exc:
+        last_exc = exc
+        upstream = None
+
+    # Fallback: if internal host failed and we have external host, try once
+    if upstream is None and last_exc is not None and settings.sandbox_vm_internal_host and settings.sandbox_vm_host:
+        if conn.rest_base_url.startswith(f"http://{settings.sandbox_vm_internal_host}:"):
+            try:
+                port = conn.rest_base_url.rstrip("/").split(":")[-1]
+                client.register(sandbox_id=sandbox_id, vm_host=settings.sandbox_vm_host, host_port=int(port), auth_token=conn.auth_token)
+                conn = client._connections.get(sandbox_id)
+                if conn:
+                    upstream_url = conn.rest_base_url.replace("http://", "ws://") + f"/ws/vnc?token={conn.auth_token}"
+                    logger.info("VNC proxy retry upstream via external host %s", conn.rest_base_url)
+                    upstream = await asyncio.wait_for(
+                        websockets.connect(upstream_url, open_timeout=_open_timeout, max_size=2**22, subprotocols=[websockets.Subprotocol("binary")], ping_interval=_UPSTREAM_PING_INTERVAL_S, ping_timeout=10,
+                        ).__aenter__(),
+                        timeout=_connect_timeout,
+                    )
+            except Exception as retry_exc:
+                logger.warning("VNC proxy retry via external host failed: %s", retry_exc)
+                last_exc = retry_exc
+                upstream = None
+
+    if upstream is None:
+        reason = "VNC upstream unreachable"
+        if last_exc is not None:
+            reason = _short_reason(f"Upstream: {type(last_exc).__name__}: {last_exc}")
+        logger.warning("VNC proxy cannot reach sandbox %s: %s", sandbox_id, last_exc)
+        await _safe_close_viewer(viewer_ws, 1011, reason)
+        return
+
+    try:
+        async with upstream:
             logger.info("VNC proxy connected to sandbox %s", sandbox_id)
 
             async def frontend_to_sandbox() -> None:
@@ -92,8 +153,11 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
                 try:
                     while True:
                         data = await viewer_ws.receive()
-                        if data.get("type") == "websocket.disconnect":
+                        msg_type = data.get("type")
+                        if msg_type == "websocket.disconnect":
                             break
+                        if msg_type != "websocket.receive":
+                            continue
                         payload = data.get("bytes") or data.get("text")
                         if payload:
                             if isinstance(payload, str):
@@ -132,27 +196,15 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
 
     except (ConnectionRefusedError, OSError) as exc:
         logger.warning("VNC proxy connection refused for sandbox %s: %s", sandbox_id, exc)
-        try:
-            await viewer_ws.close(code=1011, reason=f"VNC upstream refused: {exc}")
-        except Exception:
-            pass
+        await _safe_close_viewer(viewer_ws, 1011, f"Upstream refused: {exc}")
     except websockets.exceptions.InvalidStatusCode as exc:
         logger.warning("VNC proxy bad status for sandbox %s: %s", sandbox_id, exc)
-        try:
-            await viewer_ws.close(code=1011, reason=f"VNC upstream HTTP error: {exc}")
-        except Exception:
-            pass
+        await _safe_close_viewer(viewer_ws, 1011, f"Upstream HTTP error: {exc}")
     except websockets.exceptions.WebSocketException as exc:
         logger.warning("VNC proxy WS error for sandbox %s: %s", sandbox_id, exc)
-        try:
-            await viewer_ws.close(code=1011, reason=f"VNC upstream error: {exc}")
-        except Exception:
-            pass
+        await _safe_close_viewer(viewer_ws, 1011, f"Upstream error: {exc}")
     except Exception as exc:
         logger.exception("VNC proxy unexpected error for sandbox %s: %s", sandbox_id, exc)
-        try:
-            await viewer_ws.close(code=1011, reason="Internal proxy error")
-        except Exception:
-            pass
+        await _safe_close_viewer(viewer_ws, 1011, "Internal proxy error")
     finally:
         logger.info("VNC proxy session ended for sandbox %s", sandbox_id)

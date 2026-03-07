@@ -50,9 +50,25 @@ import type {
 
 // ─── Configuration ───────────────────────────────────────────────────
 
-const API_BASE = '/api/v1';
-const WS_BASE = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+/** When set at build time, API and WebSocket use this backend (e.g. Cloud Run URL). */
+const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.replace(/\/$/, '');
+const API_BASE = BACKEND_URL ? `${BACKEND_URL}/api/v1` : '/api/v1';
+/** WebSocket base URL for /ws/* — same host as API when BACKEND_URL is set. */
+function getWsBase(): string {
+  if (BACKEND_URL) {
+    const wsProtocol = BACKEND_URL.startsWith('https') ? 'wss:' : 'ws:';
+    const host = BACKEND_URL.replace(/^https?:\/\//, '');
+    return `${wsProtocol}//${host}/ws`;
+  }
+  return `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+}
+const WS_BASE = getWsBase();
 const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS ?? 10000);
+
+/** Build full WebSocket URL for screen stream or VNC (caller appends query string or path). */
+export function getSandboxWsBase(): string {
+  return getWsBase();
+}
 
 // Token stored in memory; persisted to localStorage so it survives full page reload.
 let authToken: string | null = null;
@@ -629,6 +645,15 @@ export async function toggleSandboxPersistence(
   persistent: boolean,
 ): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>('POST', `/sandboxes/${agentId}/persistent`, { persistent });
+}
+
+export async function startSandbox(agentId: string): Promise<{ ok: boolean; sandbox_id: string; status?: string; message?: string }> {
+  return request<{ ok: boolean; sandbox_id: string; status?: string; message?: string }>(
+    'POST',
+    `/sandboxes/${agentId}/start`,
+    undefined,
+    120_000,
+  );
 }
 
 export async function restartSandbox(agentId: string): Promise<{ ok: boolean }> {

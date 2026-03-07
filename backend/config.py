@@ -74,7 +74,8 @@ class Settings(BaseSettings):
     startup_step_timeout_seconds: int = Field(default=20, ge=1, le=300)
 
     # Sandbox VM — self-hosted Docker sandbox on a GCE instance
-    sandbox_vm_host: str = ""          # e.g. "34.9.162.152"
+    sandbox_vm_host: str = ""          # e.g. "34.9.162.152" (external); used when internal not set
+    sandbox_vm_internal_host: str = ""  # e.g. "10.128.0.3" — use for backend→sandbox when set (VPC)
     sandbox_vm_pool_port: int = 9090
     sandbox_vm_master_token: str = ""
 

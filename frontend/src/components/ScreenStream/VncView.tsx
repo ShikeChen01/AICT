@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import RFB from '@novnc/novnc/lib/rfb';
-import { getAuthToken } from '../../api/client';
+import { getAuthToken, getSandboxWsBase } from '../../api/client';
 
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
 
@@ -36,6 +36,7 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
   const rfbRef = useRef<RFB | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [interactive, setInteractive] = useState(!viewOnly);
+  const [disconnectReason, setDisconnectReason] = useState<string | null>(null);
 
   // Reconnect state — kept in refs so the effect closure always sees the latest.
   const reconnectAttemptRef = useRef(0);
@@ -55,14 +56,14 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
     }
   }, [interactive]);
 
-  /** Build the WebSocket URL for the VNC proxy endpoint. */
+  /** Build the WebSocket URL for the VNC proxy endpoint (backend /ws/vnc). */
   const buildWsUrl = useCallback(() => {
     const token = getAuthToken();
     if (!token || !sandboxId) return null;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsBase = getSandboxWsBase();
     return (
-      `${protocol}//${window.location.host}/ws/vnc` +
+      `${wsBase}/vnc` +
       `?token=${encodeURIComponent(token)}` +
       `&sandbox_id=${encodeURIComponent(sandboxId)}`
     );
@@ -96,13 +97,24 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
     if (!wsUrl) return;
 
     setStatus('connecting');
+    setDisconnectReason(null);
 
     // Clear the container before noVNC adds its canvas
     const container = containerRef.current;
     container.innerHTML = '';
 
     try {
-      const rfb = new RFB(container, wsUrl, { shared: true });
+      // Create WebSocket ourselves so we can capture close reason from backend
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+      ws.onclose = (ev) => {
+        if (ev.reason) {
+          setDisconnectReason(ev.reason);
+        } else if (ev.code === 1006) {
+          setDisconnectReason('Connection closed unexpectedly (upstream may be unreachable)');
+        }
+      };
+      const rfb = new RFB(container, ws, { shared: true });
       rfb.scaleViewport = true;
       rfb.resizeSession = false;
       rfb.viewOnly = !interactive;
@@ -112,6 +124,7 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
 
       rfb.addEventListener('connect', () => {
         setStatus('connected');
+        setDisconnectReason(null);
         reconnectAttemptRef.current = 0; // Reset backoff on success
         if (rfbRef.current) {
           rfbRef.current.scaleViewport = true;
@@ -230,12 +243,17 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
 
       {/* Overlay message when disconnected */}
       {status === 'disconnected' && (
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
           <span className="text-sm text-gray-400">
             {reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS
               ? 'Connection lost. Reload the page to retry.'
               : 'Connecting to sandbox display...'}
           </span>
+          {disconnectReason && (
+            <span className="max-w-md text-center text-xs text-amber-400" title={disconnectReason}>
+              {disconnectReason}
+            </span>
+          )}
         </div>
       )}
     </div>

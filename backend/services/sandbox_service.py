@@ -49,8 +49,9 @@ class PoolManagerClient:
     """Thin async REST client for the VM-side pool manager."""
 
     def __init__(self) -> None:
+        vm_host = settings.sandbox_vm_internal_host or settings.sandbox_vm_host
         self._base = (
-            f"http://{settings.sandbox_vm_host}:{settings.sandbox_vm_pool_port}/api"
+            f"http://{vm_host}:{settings.sandbox_vm_pool_port}/api"
         )
         self._headers = {
             "Authorization": f"Bearer {settings.sandbox_vm_master_token}",
@@ -225,10 +226,12 @@ class SandboxService:
         created: bool = data.get("created", False)
         ready: bool = data.get("ready", True)  # older pool managers don't send this
 
-        # Register (or re-register) this sandbox in the client multiplexer
+        # Register (or re-register) this sandbox in the client multiplexer.
+        # Prefer internal host when set (e.g. Cloud Run VPC connector → GCE private IP).
+        vm_host = settings.sandbox_vm_internal_host or settings.sandbox_vm_host
         self._client.register(
             sandbox_id=sandbox_id,
-            vm_host=settings.sandbox_vm_host,
+            vm_host=vm_host,
             host_port=host_port,
             auth_token=auth_token,
         )

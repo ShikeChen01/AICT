@@ -12,11 +12,11 @@
 import { render, screen, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Shared state for capturing mock RFB instances
+// Shared state for capturing mock RFB instances (second arg is now WebSocket or URL)
 const rfbState = {
   instances: [] as Array<{
     container: HTMLElement;
-    url: string;
+    urlOrWs: string | WebSocket;
     options?: Record<string, unknown>;
     scaleViewport: boolean;
     resizeSession: boolean;
@@ -28,6 +28,20 @@ const rfbState = {
     listeners: Record<string, Array<(...args: unknown[]) => void>>;
   }>,
 };
+
+// Capture WebSocket constructor URL for assertions (must be a constructor)
+const wsUrls: string[] = [];
+vi.stubGlobal(
+  'WebSocket',
+  class MockWebSocket {
+    constructor(url: string) {
+      wsUrls.push(url);
+    }
+    close = vi.fn();
+    addEventListener = vi.fn();
+    binaryType = 'arraybuffer';
+  },
+);
 
 vi.mock('@novnc/novnc/lib/rfb', () => {
   return {
@@ -43,7 +57,7 @@ vi.mock('@novnc/novnc/lib/rfb', () => {
 
       constructor(
         public container: HTMLElement,
-        public url: string,
+        public urlOrWs: string | WebSocket,
         public options?: Record<string, unknown>,
       ) {
         rfbState.instances.push(this as typeof rfbState.instances[0]);
@@ -59,9 +73,10 @@ vi.mock('@novnc/novnc/lib/rfb', () => {
   };
 });
 
-// Mock getAuthToken
+// Mock getAuthToken and getSandboxWsBase
 vi.mock('../../api/client', () => ({
   getAuthToken: vi.fn(() => 'mock-token'),
+  getSandboxWsBase: vi.fn(() => 'ws://localhost:3000/ws'),
 }));
 
 import { VncView } from './VncView';
@@ -70,6 +85,7 @@ describe('VncView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     rfbState.instances = [];
+    wsUrls.length = 0;
 
     Object.defineProperty(window, 'location', {
       value: { protocol: 'http:', host: 'localhost:3000' },
@@ -111,11 +127,11 @@ describe('VncView', () => {
     });
 
     expect(rfbState.instances).toHaveLength(1);
-    const instance = rfbState.instances[0];
-    expect(instance.url).toContain('ws://localhost:3000/ws/vnc');
-    expect(instance.url).toContain('token=mock-token');
-    expect(instance.url).toContain('sandbox_id=sandbox-abc');
-    expect(instance.options).toEqual({ shared: true });
+    expect(wsUrls).toHaveLength(1);
+    expect(wsUrls[0]).toContain('ws://localhost:3000/ws/vnc');
+    expect(wsUrls[0]).toContain('token=mock-token');
+    expect(wsUrls[0]).toContain('sandbox_id=sandbox-abc');
+    expect(rfbState.instances[0].options).toEqual({ shared: true });
   });
 
   it('configures RFB with scaleViewport and correct settings', async () => {
