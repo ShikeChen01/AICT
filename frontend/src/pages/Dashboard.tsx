@@ -133,7 +133,7 @@ interface DashboardViewProps {
   onSwitchToBuilder: () => void;
 }
 
-function DashboardView({ projectId, projectName, onSwitchToBuilder }: DashboardViewProps) {
+function DashboardView({ projectId, projectName: _projectName, onSwitchToBuilder }: DashboardViewProps) {
   const [agentOverviews, setAgentOverviews] = useState<AgentOverview[]>([]);
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);
   const [loading, setLoading] = useState(true);

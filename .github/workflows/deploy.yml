@@ -1,0 +1,386 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_backend:
+        description: 'Deploy backend to Cloud Run'
+        type: boolean
+        default: true
+      deploy_frontend:
+        description: 'Deploy frontend to Firebase Hosting'
+        type: boolean
+        default: true
+      run_migrations:
+        description: 'Run database migrations before deploy'
+        type: boolean
+        default: false
+
+env:
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION: '20'
+  GCLOUD_PROJECT_ID: ${{ secrets.GCLOUD_PROJECT_ID }}
+  GCLOUD_REGION: us-central1
+  GCLOUD_ARTIFACT_REGISTRY_URL: ${{ secrets.GCLOUD_ARTIFACT_REGISTRY_URL }}
+  CLOUD_RUN_SERVICE: aict-backend-dev
+
+# Only one deploy at a time
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ============================================================================
+  # Gate: run existing test suite first
+  # ============================================================================
+  tests:
+    name: Pre-deploy Tests
+    uses: ./.github/workflows/test.yml
+    secrets: inherit
+
+  # ============================================================================
+  # Detect which parts of the codebase changed
+  # ============================================================================
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      migrations: ${{ steps.filter.outputs.migrations }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'Dockerfile'
+              - 'requirements.txt'
+            frontend:
+              - 'frontend/**'
+              - 'firebase.json'
+            migrations:
+              - 'backend/migrations/**'
+
+  # ============================================================================
+  # Backend: Build Docker image → Push to Artifact Registry
+  # ============================================================================
+  build-backend:
+    name: Build Backend Image
+    runs-on: ubuntu-latest
+    needs: [tests, changes]
+    if: |
+      (needs.changes.outputs.backend == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy_backend)
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker \
+            $(echo "$GCLOUD_ARTIFACT_REGISTRY_URL" | cut -d'/' -f1) \
+            --quiet
+
+      - name: Build and push with Cloud Build
+        run: |
+          IMAGE_TAG="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:latest"
+          IMAGE_SHA="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:${{ github.sha }}"
+          gcloud builds submit \
+            --project "$GCLOUD_PROJECT_ID" \
+            --tag "$IMAGE_TAG" \
+            --timeout=1200 .
+          # Also tag with commit SHA for rollback capability
+          gcloud artifacts docker tags add "$IMAGE_TAG" "$IMAGE_SHA" \
+            --quiet 2>/dev/null || true
+
+    outputs:
+      image: ${{ env.GCLOUD_ARTIFACT_REGISTRY_URL }}/backend:latest
+
+  # ============================================================================
+  # Backend: Run database migrations (if needed)
+  # ============================================================================
+  migrate:
+    name: Run Migrations
+    runs-on: ubuntu-latest
+    needs: [build-backend, changes]
+    if: |
+      (needs.changes.outputs.migrations == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.run_migrations)
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: 'beta'
+
+      - name: Run Alembic migrations via Cloud Run Job
+        run: |
+          JOB_NAME="aict-migrate-dev"
+          IMAGE="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:latest"
+
+          # Check if job exists
+          if gcloud run jobs describe "$JOB_NAME" \
+              --project "$GCLOUD_PROJECT_ID" \
+              --region "$GCLOUD_REGION" \
+              --format="value(metadata.name)" 2>/dev/null; then
+            echo "Updating existing migration job..."
+            gcloud run jobs update "$JOB_NAME" \
+              --project "$GCLOUD_PROJECT_ID" \
+              --image "$IMAGE" \
+              --region "$GCLOUD_REGION" \
+              --command "/bin/sh" \
+              --args="-c,python -m alembic -c backend/alembic.ini upgrade head" \
+              --set-env-vars="ENV=development,PYTHONPATH=/app" \
+              --set-env-vars="DATABASE_URL=${{ secrets.DATABASE_URL }}" \
+              --set-env-vars="DB_SSL_MODE=${{ secrets.DB_SSL_MODE }}" \
+              --set-env-vars="API_TOKEN=${{ secrets.API_TOKEN }}" \
+              --vpc-connector "${{ secrets.VPC_CONNECTOR_NAME }}" \
+              --vpc-egress private-ranges-only \
+              --max-retries 0 \
+              --task-timeout 600s
+          else
+            echo "Creating new migration job..."
+            gcloud run jobs create "$JOB_NAME" \
+              --project "$GCLOUD_PROJECT_ID" \
+              --image "$IMAGE" \
+              --region "$GCLOUD_REGION" \
+              --command "/bin/sh" \
+              --args="-c,python -m alembic -c backend/alembic.ini upgrade head" \
+              --set-env-vars="ENV=development,PYTHONPATH=/app" \
+              --set-env-vars="DATABASE_URL=${{ secrets.DATABASE_URL }}" \
+              --set-env-vars="DB_SSL_MODE=${{ secrets.DB_SSL_MODE }}" \
+              --set-env-vars="API_TOKEN=${{ secrets.API_TOKEN }}" \
+              --vpc-connector "${{ secrets.VPC_CONNECTOR_NAME }}" \
+              --vpc-egress private-ranges-only \
+              --max-retries 0 \
+              --task-timeout 600s
+          fi
+
+          echo "Executing migration..."
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCLOUD_PROJECT_ID" \
+            --region "$GCLOUD_REGION" \
+            --wait
+
+  # ============================================================================
+  # Backend: Deploy to Cloud Run
+  # ============================================================================
+  deploy-backend:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+    needs: [build-backend, migrate, changes]
+    # Run even if migrate was skipped (but not if it failed)
+    if: |
+      always() &&
+      needs.build-backend.result == 'success' &&
+      (needs.migrate.result == 'success' || needs.migrate.result == 'skipped')
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Cloud Run
+        run: |
+          IMAGE="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:latest"
+          gcloud run deploy "$CLOUD_RUN_SERVICE" \
+            --project "$GCLOUD_PROJECT_ID" \
+            --image "$IMAGE" \
+            --region "$GCLOUD_REGION" \
+            --platform managed \
+            --allow-unauthenticated \
+            --vpc-connector "${{ secrets.VPC_CONNECTOR_NAME }}" \
+            --vpc-egress private-ranges-only \
+            --set-env-vars="ENV=development" \
+            --set-env-vars="DATABASE_URL=${{ secrets.DATABASE_URL }}" \
+            --set-env-vars="DB_SSL_MODE=${{ secrets.DB_SSL_MODE }}" \
+            --set-env-vars="API_TOKEN=${{ secrets.API_TOKEN }}" \
+            --set-env-vars="FIREBASE_CREDENTIALS_PATH=${{ secrets.FIREBASE_CREDENTIALS_PATH }}" \
+            --set-env-vars="FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" \
+            --set-env-vars="CLAUDE_API_KEY=${{ secrets.CLAUDE_API_KEY }}" \
+            --set-env-vars="GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" \
+            --set-env-vars="OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
+            --set-env-vars="MOONSHOT_API_KEY=${{ secrets.MOONSHOT_API_KEY }}" \
+            --set-env-vars="MANAGER_MODEL_DEFAULT=${{ secrets.MANAGER_MODEL_DEFAULT }}" \
+            --set-env-vars="CTO_MODEL_DEFAULT=${{ secrets.CTO_MODEL_DEFAULT }}" \
+            --set-env-vars="ENGINEER_MODEL_DEFAULT=${{ secrets.ENGINEER_MODEL_DEFAULT }}" \
+            --set-env-vars="GITHUB_TOKEN=${{ secrets.GH_REPO_TOKEN }}" \
+            --set-env-vars="SANDBOX_VM_HOST=${{ secrets.SANDBOX_VM_HOST }}" \
+            --set-env-vars="SANDBOX_VM_INTERNAL_HOST=${{ secrets.SANDBOX_VM_INTERNAL_HOST }}" \
+            --set-env-vars="SANDBOX_VM_POOL_PORT=${{ secrets.SANDBOX_VM_POOL_PORT }}" \
+            --set-env-vars="SANDBOX_VM_MASTER_TOKEN=${{ secrets.SANDBOX_VM_MASTER_TOKEN }}" \
+            --set-env-vars="SECRET_ENCRYPTION_KEY=${{ secrets.SECRET_ENCRYPTION_KEY }}" \
+            --set-env-vars="PROVISION_REPOS_ON_STARTUP=true" \
+            --set-env-vars="CLONE_CODE_REPO_ON_STARTUP=true" \
+            --set-env-vars="MAX_ENGINEERS=5" \
+            --min-instances 1 \
+            --cpu-boost \
+            --timeout 3600 \
+            --session-affinity
+
+      - name: Get service URL
+        id: url
+        run: |
+          URL=$(gcloud run services describe "$CLOUD_RUN_SERVICE" \
+            --project "$GCLOUD_PROJECT_ID" \
+            --region "$GCLOUD_REGION" \
+            --format="value(status.url)")
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Backend deployed to: $URL"
+
+    outputs:
+      url: ${{ steps.url.outputs.url }}
+
+  # ============================================================================
+  # Frontend: Build and deploy to Firebase Hosting
+  # ============================================================================
+  deploy-frontend:
+    name: Deploy Frontend
+    runs-on: ubuntu-latest
+    needs: [tests, changes]
+    if: |
+      (needs.changes.outputs.frontend == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy_frontend)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
+        env:
+          # Firebase config injected at build time via Vite env vars
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: aict-487016
+          channelId: live
+
+  # ============================================================================
+  # Post-deploy: Health check and smoke test
+  # ============================================================================
+  verify:
+    name: Post-deploy Verification
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, deploy-frontend]
+    # Run if either deploy succeeded (the other may have been skipped)
+    if: |
+      always() &&
+      (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped') &&
+      (needs.deploy-frontend.result == 'success' || needs.deploy-frontend.result == 'skipped') &&
+      (needs.deploy-backend.result == 'success' || needs.deploy-frontend.result == 'success')
+
+    steps:
+      - name: Resolve backend URL
+        id: resolve
+        run: |
+          # Use output from deploy-backend if available, otherwise fall back to secret
+          URL="${{ needs.deploy-backend.outputs.url }}"
+          if [ -z "$URL" ]; then
+            URL="${{ secrets.GCLOUD_BACKEND_URL }}"
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Backend URL: $URL"
+
+      - name: Wait for Cloud Run to stabilize
+        run: sleep 15
+
+      - name: Health check (public)
+        run: |
+          URL="${{ steps.resolve.outputs.url }}"
+          echo "Checking $URL/api/v1/health ..."
+          for i in $(seq 1 12); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL/api/v1/health" --max-time 10) || true
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i: status=$STATUS, retrying in 10s..."
+            sleep 10
+          done
+          echo "Health check failed after 12 attempts"
+          exit 1
+
+      - name: Health check (internal)
+        run: |
+          URL="${{ steps.resolve.outputs.url }}"
+          RESP=$(curl -sf "$URL/internal/agent/health" --max-time 10)
+          echo "Internal health: $RESP"
+          echo "$RESP" | grep -q '"ok"' || (echo "Internal health check failed" && exit 1)
+
+      - name: API smoke test
+        run: |
+          URL="${{ steps.resolve.outputs.url }}"
+          TOKEN="${{ secrets.API_TOKEN }}"
+
+          # List projects
+          PROJECTS=$(curl -sf "$URL/api/v1/projects" \
+            -H "Authorization: Bearer $TOKEN" \
+            --max-time 10)
+          COUNT=$(echo "$PROJECTS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+          echo "Projects found: $COUNT"
+
+          if [ "$COUNT" = "0" ]; then
+            echo "Warning: no projects returned (may be expected for fresh deployment)"
+          fi
+
+          echo "Smoke test passed"

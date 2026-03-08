@@ -22,16 +22,27 @@ logger = get_logger(__name__)
 # o-series reasoning models: o1, o1-mini, o1-preview, o3, o3-mini, o3-pro, o4-mini, etc.
 # These models have restrictions: no temperature support, use developer role, max_completion_tokens.
 _O_SERIES_RE = re.compile(r"^o\d", re.IGNORECASE)
+
+# GPT-5 series (gpt-5, gpt-5.1, gpt-5.2, gpt-5.4, gpt-5.4-pro, etc.)
+# These models also require max_completion_tokens, developer role, and no temperature.
 _GPT5_SERIES_RE = re.compile(r"^gpt-5(\.|-|$)", re.IGNORECASE)
 
 
-def _is_o_series(model: str) -> bool:
-    return bool(_O_SERIES_RE.match(model.strip()))
+def _is_reasoning_model(model: str) -> bool:
+    """Return True for models that use developer role, no temperature, and max_completion_tokens.
+
+    This includes o-series (o1, o3, o4-mini, etc.) and GPT-5 series (gpt-5, gpt-5.2, gpt-5.4, etc.).
+    """
+    normalized = model.strip()
+    return bool(_O_SERIES_RE.match(normalized) or _GPT5_SERIES_RE.match(normalized))
+
+
+# Keep backward-compat aliases
+_is_o_series = _is_reasoning_model
 
 
 def _requires_max_completion_tokens(model: str) -> bool:
-    normalized = model.strip()
-    return bool(_O_SERIES_RE.match(normalized) or _GPT5_SERIES_RE.match(normalized))
+    return _is_reasoning_model(model)
 
 
 class OpenAISDKProvider(BaseLLMProvider):
@@ -199,4 +210,60 @@ class OpenAISDKProvider(BaseLLMProvider):
                         })
                     api_messages.append({"role": "user", "content": parts})
 
+        # ── Safety net: repair any dangling tool_calls ──────────────────
+        # OpenAI strictly requires that every assistant message with tool_calls
+        # is immediately followed by tool-role messages for each tool_call_id.
+        # If the prompt assembly layer missed any, patch them here to avoid 400s.
+        api_messages = OpenAISDKProvider._repair_openai_tool_calls(api_messages)
+
         return api_messages
+
+    @staticmethod
+    def _repair_openai_tool_calls(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Ensure every assistant tool_call has a matching tool response.
+
+        Scans the formatted message list and injects synthetic tool results
+        for any tool_call_ids that are not resolved by a subsequent tool message.
+        """
+        # Collect all issued tool_call ids and all resolved ids
+        issued: dict[str, tuple[int, str]] = {}  # id -> (msg_index, tool_name)
+        resolved: set[str] = set()
+
+        for idx, m in enumerate(messages):
+            if m.get("role") == "assistant":
+                for tc in m.get("tool_calls", []):
+                    tc_id = tc.get("id", "")
+                    func = tc.get("function", {})
+                    tc_name = func.get("name", "?") if isinstance(func, dict) else "?"
+                    if tc_id:
+                        issued[tc_id] = (idx, tc_name)
+            elif m.get("role") == "tool":
+                uid = m.get("tool_call_id", "")
+                if uid:
+                    resolved.add(uid)
+
+        dangling = set(issued.keys()) - resolved
+        if not dangling:
+            return messages
+
+        logger.warning(
+            "OpenAI safety net: patching %d dangling tool_call(s): %s",
+            len(dangling),
+            {tc_id: issued[tc_id][1] for tc_id in dangling},
+        )
+
+        patched: list[dict[str, Any]] = []
+        for m in messages:
+            patched.append(m)
+            if m.get("role") == "assistant":
+                for tc in m.get("tool_calls", []):
+                    tc_id = tc.get("id", "")
+                    if tc_id in dangling:
+                        func = tc.get("function", {})
+                        tc_name = func.get("name", "?") if isinstance(func, dict) else "?"
+                        patched.append({
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": f"[Tool '{tc_name}' result unavailable — history truncated]",
+                        })
+        return patched

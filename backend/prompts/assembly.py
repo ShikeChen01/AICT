@@ -303,6 +303,10 @@ class PromptAssembly:
         Phase 3: Incoming new user message.
         """
         # Phase 1: Past sessions
+        # Tool messages are filtered out by the DB query for past sessions,
+        # so we must also strip tool_calls from assistant messages to avoid
+        # OpenAI's "assistant message with tool_calls must be followed by
+        # tool messages" validation error.
         past_candidate: list[dict] = []
         current_past_session_id = None
         for h in past_session_msgs:
@@ -315,7 +319,21 @@ class PromptAssembly:
             if h.role == "user":
                 past_candidate.append({"role": "user", "content": h.content or ""})
             elif h.role == "assistant":
-                past_candidate.append(self._build_history_assistant(h, known_tool_names))
+                msg = self._build_history_assistant(h, known_tool_names)
+                # Strip tool_calls since their tool results are not loaded
+                # for past sessions. Summarize which tools were called into
+                # the content so the agent retains awareness.
+                tool_calls = msg.pop("tool_calls", None)
+                if tool_calls:
+                    tool_names = [tc.get("name", "?") for tc in tool_calls]
+                    summary = ", ".join(tool_names)
+                    existing = msg.get("content", "")
+                    msg["content"] = (
+                        f"{existing}\n[Called tools: {summary} — results truncated from history]"
+                        if existing
+                        else f"[Called tools: {summary} — results truncated from history]"
+                    )
+                past_candidate.append(msg)
             # tool messages already filtered out by DB query
 
         if past_candidate:
@@ -557,6 +575,9 @@ class PromptAssembly:
         # Trim to most recent keep_recent messages
         if len(current_msgs) > keep_recent:
             current_msgs = current_msgs[-keep_recent:]
+
+        # Repair any dangling tool_calls created by the trim
+        current_msgs = self._repair_dangling_tool_use(current_msgs)
 
         self.messages = current_msgs
         self._current_session_start_index = 0

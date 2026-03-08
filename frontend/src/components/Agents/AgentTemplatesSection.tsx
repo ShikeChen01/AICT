@@ -31,15 +31,26 @@ import { Button, Input } from '../ui';
 // ── Model options ──────────────────────────────────────────────────────
 
 const MODEL_OPTIONS = [
+  // Anthropic
   { value: 'claude-opus-4-6', label: 'Claude Opus 4.6 (powerful)' },
   { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (balanced)' },
   { value: 'claude-haiku-4-6', label: 'Claude Haiku 4.6 (fast)' },
+  // OpenAI — GPT
+  { value: 'gpt-5.4', label: 'GPT-5.4 (frontier, 1M ctx)' },
+  { value: 'gpt-5.4-pro', label: 'GPT-5.4 Pro (max reasoning)' },
   { value: 'gpt-5.2', label: 'GPT-5.2' },
   { value: 'gpt-4o', label: 'GPT-4o' },
   { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-  { value: 'o4-mini', label: 'o4-mini (reasoning)' },
+  // OpenAI — reasoning (o-series)
+  { value: 'o3', label: 'o3 (reasoning)' },
+  { value: 'o3-mini', label: 'o3-mini (reasoning, fast)' },
+  { value: 'o4-mini', label: 'o4-mini (reasoning, fast)' },
+  { value: 'o1', label: 'o1 (reasoning)' },
+  { value: 'o1-mini', label: 'o1-mini (reasoning, fast)' },
+  // Google
   { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
   { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+  // Kimi / Moonshot
   { value: 'kimi-k2-0711-preview', label: 'Kimi K2 (very cheap)' },
 ];
 

@@ -62,7 +62,7 @@ export function AgentSelector({ agents, selectedIds, onToggle }: AgentSelectorPr
             <span className="truncate font-medium">{agent.display_name}</span>
             <span className="text-xs opacity-60 ml-auto flex-shrink-0">{agent.role}</span>
             {agent.sandbox_id && (
-              <Monitor className="w-3 h-3 flex-shrink-0 text-[var(--color-success)]" title="Has sandbox" />
+              <Monitor className="w-3 h-3 flex-shrink-0 text-[var(--color-success)]" aria-label="Has sandbox" />
             )}
           </button>
         );

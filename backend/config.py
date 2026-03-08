@@ -117,11 +117,22 @@ LLM_MODEL_PRICING: dict[str, dict[str, float]] = {
     "claude-opus-4-5":         {"input": 15.00, "output": 75.00},
     "claude-sonnet-4-5":       {"input":  3.00, "output": 15.00},
     "claude-haiku-4-5":        {"input":  0.80, "output":  4.00},
-    # OpenAI
-    "gpt-5.2":                 {"input": 10.00, "output": 30.00},
-    "gpt-4o-mini":             {"input":  0.15, "output":  0.60},
+    # OpenAI — GPT-5 series
+    "gpt-5.4-pro":             {"input": 30.00, "output": 180.00},
+    "gpt-5.4":                 {"input":  2.50, "output":  15.00},
+    "gpt-5.2":                 {"input": 10.00, "output":  30.00},
+    "gpt-5":                   {"input":  2.00, "output":  10.00},
     "gpt-4o":                  {"input":  2.50, "output": 10.00},
+    "gpt-4o-mini":             {"input":  0.15, "output":  0.60},
+    "gpt-4-turbo":             {"input": 10.00, "output": 30.00},
+    "gpt-4":                   {"input": 30.00, "output": 60.00},
+    # OpenAI — o-series reasoning models
+    "o1":                      {"input": 15.00, "output": 60.00},
+    "o1-mini":                 {"input":  3.00, "output": 12.00},
+    "o1-preview":              {"input": 15.00, "output": 60.00},
     "o3":                      {"input": 10.00, "output": 40.00},
+    "o3-mini":                 {"input":  1.10, "output":  4.40},
+    "o3-pro":                  {"input": 20.00, "output": 80.00},
     "o4-mini":                 {"input":  1.10, "output":  4.40},
     # Google
     "gemini-2.5-pro":          {"input":  1.25, "output":  5.00},

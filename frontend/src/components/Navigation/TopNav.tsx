@@ -10,6 +10,8 @@ import {
   Cpu,
   LayoutGrid,
   BarChart3,
+  Monitor,
+  Tv2,
   Sun,
   Moon,
 } from 'lucide-react';
@@ -30,6 +32,16 @@ export function TopNav() {
 
   const navItems: NavItem[] = projectId
     ? [
+        {
+          label: 'Monitor',
+          path: `/project/${projectId}/monitor`,
+          icon: <Monitor className="h-4 w-4" aria-hidden="true" />,
+        },
+        {
+          label: 'Co-Pilot',
+          path: `/project/${projectId}/copilot`,
+          icon: <Tv2 className="h-4 w-4" aria-hidden="true" />,
+        },
         {
           label: 'Workspace',
           path: `/project/${projectId}/workspace`,

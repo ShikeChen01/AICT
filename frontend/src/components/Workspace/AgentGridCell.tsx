@@ -43,9 +43,9 @@ export function AgentGridCell({ agent, buffer, onExpand, onClearBuffer }: AgentG
         </span>
         <div className="ml-auto flex items-center gap-1">
           {hasSandbox ? (
-            <Monitor className="w-3.5 h-3.5 text-[var(--color-success)]" title="Sandbox active" />
+            <Monitor className="w-3.5 h-3.5 text-[var(--color-success)]" aria-label="Sandbox active" />
           ) : (
-            <MonitorOff className="w-3.5 h-3.5 text-[var(--text-muted)]" title="No sandbox" />
+            <MonitorOff className="w-3.5 h-3.5 text-[var(--text-muted)]" aria-label="No sandbox" />
           )}
           <button
             type="button"

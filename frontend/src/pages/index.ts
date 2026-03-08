@@ -1,5 +1,7 @@
 export { AgentBuildPage } from './AgentBuild';
+export { CoPilotPage } from './CoPilot';
 export { DashboardPage } from './Dashboard';
+export { MonitorPage } from './Monitor';
 export { ProjectsPage } from './Projects';
 export { SettingsPage } from './Settings';
 export { LoginPage } from './Login';

@@ -361,7 +361,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
 
         {/* Agent config button — opens popover */}
         {selectedAgent && (
-          <div className="relative flex-shrink-0 ml-1">
+          <div className="flex-shrink-0 ml-1">
             <button
               ref={configBtnRef}
               type="button"
@@ -378,29 +378,6 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
               <Settings2 className="w-3.5 h-3.5" aria-hidden="true" />
               <span className="hidden sm:inline">Config</span>
             </button>
-
-            {/* Config popover */}
-            {showAgentConfig && (
-              <>
-                <div
-                  className="fixed inset-0 z-30"
-                  onClick={() => setShowAgentConfig(false)}
-                  aria-hidden="true"
-                />
-                <div
-                  className="absolute left-0 top-full mt-1 z-40"
-                  role="dialog"
-                  aria-label="Agent configuration"
-                >
-                  <AgentConfigPanel
-                    agent={selectedAgent}
-                    onAgentUpdated={(updated) => {
-                      handleAgentUpdated(updated);
-                    }}
-                  />
-                </div>
-              </>
-            )}
           </div>
         )}
 
@@ -671,6 +648,35 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
             refreshMeta(selectedAgentId, selectedAgent?.model);
           }}
         />
+      )}
+
+      {/* Agent config popover — rendered at root level to escape overflow clipping */}
+      {showAgentConfig && selectedAgent && (
+        <>
+          <div
+            className="fixed inset-0 z-30"
+            onClick={() => setShowAgentConfig(false)}
+            aria-hidden="true"
+          />
+          <div
+            className="fixed z-40"
+            style={{
+              top: configBtnRef.current
+                ? configBtnRef.current.getBoundingClientRect().bottom + 4
+                : 60,
+              left: configBtnRef.current
+                ? configBtnRef.current.getBoundingClientRect().left
+                : 16,
+            }}
+            role="dialog"
+            aria-label="Agent configuration"
+          >
+            <AgentConfigPanel
+              agent={selectedAgent}
+              onAgentUpdated={handleAgentUpdated}
+            />
+          </div>
+        </>
       )}
     </div>
   );
