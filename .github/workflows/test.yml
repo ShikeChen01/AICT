@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: [main, develop]
   workflow_call:
-    secrets: inherit
 
 env:
   PYTHON_VERSION: '3.12'
