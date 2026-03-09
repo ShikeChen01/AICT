@@ -82,6 +82,7 @@ async def run_search_knowledge(ctx: RunContext, tool_input: dict) -> str:
         results = await repo.semantic_search(
             ctx.project.id,
             query_vec,
+            query_text=query,
             limit=limit,
             similarity_threshold=threshold,
         )

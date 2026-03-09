@@ -23,7 +23,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from backend.db.models import Base, KnowledgeDocument, Repository, User, ProjectSettings
+from backend.db.models import Base, KnowledgeChunk, KnowledgeDocument, Repository, User, ProjectSettings
 
 
 # ── In-memory SQLite engine ──────────────────────────────────────────────────
@@ -281,6 +281,22 @@ class TestKnowledgeRepository:
         await db.flush()
         return doc
 
+    async def _insert_chunk(self, db, doc: KnowledgeDocument, text: str) -> KnowledgeChunk:
+        chunk = KnowledgeChunk(
+            id=uuid.uuid4(),
+            document_id=doc.id,
+            project_id=doc.project_id,
+            chunk_index=0,
+            text_content=text,
+            char_count=len(text),
+            token_count=max(1, len(text) // 4),
+            embedding=[0.1] * 1024,
+            metadata_={"page_num": 1},
+        )
+        db.add(chunk)
+        await db.flush()
+        return chunk
+
     @pytest.mark.asyncio
     async def test_list_by_project_empty(self, db):
         proj = make_project(db)
@@ -381,14 +397,26 @@ class TestKnowledgeRepository:
         assert msg == ""
 
     @pytest.mark.asyncio
-    async def test_semantic_search_returns_empty_without_pgvector(self, db):
-        """Falls back gracefully on SQLite (no pgvector)."""
+    async def test_semantic_search_falls_back_to_keyword_matching_without_pgvector(self, db):
+        """SQLite has no pgvector, so fallback search should still return matches."""
         proj = make_project(db)
         await db.flush()
         repo = self._repo(db)
-        results = await repo.semantic_search(proj.id, [0.1] * 1024, limit=5)
-        # SQLite doesn't have pgvector — should return [] not raise
-        assert results == []
+        doc = await self._insert_doc(db, proj.id)
+        await self._insert_chunk(
+            db,
+            doc,
+            "Conversation history gets expensive in longer sessions and tool calling should be enforced.",
+        )
+        results = await repo.semantic_search(
+            proj.id,
+            [0.1] * 1024,
+            query_text="conversation history tool calling",
+            limit=5,
+        )
+        assert len(results) == 1
+        assert results[0].filename == doc.filename
+        assert "tool calling" in results[0].text_content.lower()
 
 
 # ════════════════════════════════════════════════════════════════════════════

@@ -21,6 +21,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -210,13 +211,6 @@ class KnowledgeService:
 
     def _chunk(self, text: str, file_type: str) -> list[ChunkInfo]:
         """Split text into overlapping chunks, respecting paragraph boundaries."""
-        # Extract [Page N] markers from PDFs to preserve metadata
-        page_markers: dict[int, int] = {}  # char_offset → page_num
-        if file_type == "pdf":
-            import re
-            for m in re.finditer(r"\[Page (\d+)\]", text):
-                page_markers[m.start()] = int(m.group(1))
-
         paragraphs = self._split_paragraphs(text)
         chunks: list[ChunkInfo] = []
         current: list[str] = []
@@ -285,4 +279,8 @@ class KnowledgeService:
         text = text.strip()
         chars = len(text)
         tokens = max(1, chars // _CHARS_PER_TOKEN_ESTIMATE)
-        return ChunkInfo(text=text, char_count=chars, token_count=tokens)
+        metadata: dict[str, Any] = {}
+        match = re.search(r"\[Page (\d+)\]", text)
+        if match:
+            metadata["page_num"] = int(match.group(1))
+        return ChunkInfo(text=text, char_count=chars, token_count=tokens, metadata=metadata)
