@@ -80,9 +80,7 @@ jobs:
           pip install -r backend/requirements.txt
 
       - name: Run migrations
-        run: |
-          cd backend
-          python -m alembic upgrade head
+        run: python -m alembic -c backend/alembic.ini upgrade head
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
@@ -185,9 +183,7 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Run migrations
-        run: |
-          cd backend
-          python -m alembic upgrade head
+        run: python -m alembic -c backend/alembic.ini upgrade head
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
@@ -276,9 +272,7 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Run migrations
-        run: |
-          cd backend
-          python -m alembic upgrade head
+        run: python -m alembic -c backend/alembic.ini upgrade head
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
@@ -363,9 +357,7 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Run migrations
-        run: |
-          cd backend
-          python -m alembic upgrade head
+        run: python -m alembic -c backend/alembic.ini upgrade head
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
