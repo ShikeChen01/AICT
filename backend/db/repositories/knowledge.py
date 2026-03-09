@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+import re
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.models import KnowledgeChunk, KnowledgeDocument, ProjectSettings
@@ -166,6 +167,7 @@ class KnowledgeRepository(BaseRepository[KnowledgeDocument]):
         project_id: UUID,
         query_embedding: list[float],
         *,
+        query_text: str = "",
         limit: int = 10,
         similarity_threshold: float = 0.4,
     ) -> list[SearchResult]:
@@ -177,17 +179,28 @@ class KnowledgeRepository(BaseRepository[KnowledgeDocument]):
         Falls back gracefully if pgvector is not available (returns empty list).
         """
         try:
-            return await self._pgvector_search(
+            vector_results = await self._pgvector_search(
                 project_id, query_embedding, limit=limit,
                 similarity_threshold=similarity_threshold,
             )
+            if vector_results:
+                return vector_results
         except Exception as exc:
             # If pgvector is not available (e.g. test env without extension),
-            # log and return empty rather than 500-ing
+            # fall back to keyword search rather than 500-ing.
             if "vector" in str(exc).lower() or "pgvector" in str(exc).lower():
                 logger.warning("pgvector search unavailable: %s", exc)
-                return []
+                return await self._keyword_fallback_search(
+                    project_id,
+                    query_text=query_text,
+                    limit=limit,
+                )
             raise
+        return await self._keyword_fallback_search(
+            project_id,
+            query_text=query_text,
+            limit=limit,
+        )
 
     async def _pgvector_search(
         self,
@@ -247,3 +260,73 @@ class KnowledgeRepository(BaseRepository[KnowledgeDocument]):
             )
             for row in rows
         ]
+
+    async def _keyword_fallback_search(
+        self,
+        project_id: UUID,
+        *,
+        query_text: str,
+        limit: int,
+    ) -> list[SearchResult]:
+        """Fallback retrieval when pgvector is unavailable.
+
+        Uses simple term matching over filenames and chunk text so the RAG flow
+        still returns useful results on databases that only reached migration 024.
+        """
+        terms = self._tokenize_query(query_text)
+        if not terms:
+            return []
+
+        lowered_text = func.lower(KnowledgeChunk.text_content)
+        lowered_filename = func.lower(KnowledgeDocument.filename)
+        filters = [
+            lowered_text.contains(term) | lowered_filename.contains(term)
+            for term in terms
+        ]
+
+        stmt = (
+            select(
+                KnowledgeChunk.id.label("chunk_id"),
+                KnowledgeChunk.document_id.label("document_id"),
+                KnowledgeDocument.filename.label("filename"),
+                KnowledgeDocument.file_type.label("file_type"),
+                KnowledgeChunk.chunk_index.label("chunk_index"),
+                KnowledgeChunk.text_content.label("text_content"),
+                KnowledgeChunk.metadata_.label("metadata"),
+            )
+            .join(KnowledgeDocument, KnowledgeChunk.document_id == KnowledgeDocument.id)
+            .where(
+                KnowledgeChunk.project_id == project_id,
+                KnowledgeDocument.status == "indexed",
+                or_(*filters),
+            )
+            .limit(max(limit * 5, 20))
+        )
+
+        result = await self.session.execute(stmt)
+        rows = result.mappings().all()
+        scored: list[SearchResult] = []
+        for row in rows:
+            haystack = f"{row['filename']} {row['text_content']}".lower()
+            matched = sum(1 for term in terms if term in haystack)
+            if matched == 0:
+                continue
+            scored.append(
+                SearchResult(
+                    chunk_id=row["chunk_id"],
+                    document_id=row["document_id"],
+                    filename=row["filename"],
+                    file_type=row["file_type"],
+                    chunk_index=row["chunk_index"],
+                    text_content=row["text_content"],
+                    similarity_score=matched / len(terms),
+                    metadata=row["metadata"],
+                )
+            )
+        scored.sort(key=lambda r: (r.similarity_score, -r.chunk_index), reverse=True)
+        return scored[:limit]
+
+    @staticmethod
+    def _tokenize_query(query: str) -> list[str]:
+        tokens = re.findall(r"[a-zA-Z0-9_]+", query.lower())
+        return list(dict.fromkeys(token for token in tokens if len(token) >= 3))

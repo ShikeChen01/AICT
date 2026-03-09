@@ -248,6 +248,7 @@ async def search_knowledge(
     raw = await repo.semantic_search(
         project_id,
         query_vec,
+        query_text=body.query,
         limit=body.limit,
         similarity_threshold=body.similarity_threshold,
     )
