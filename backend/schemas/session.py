@@ -36,7 +36,6 @@ class AgentMessageResponse(BaseModel):
     content: str
     tool_name: str | None
     tool_input: dict | None
-    tool_output: str | None
     loop_iteration: int
     created_at: datetime
 

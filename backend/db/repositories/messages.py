@@ -294,7 +294,7 @@ class AgentMessageRepository(BaseRepository[AgentMessage]):
         session_id: UUID | None = None,
         tool_name: str | None = None,
         tool_input: dict | None = None,
-        tool_output: str | None = None,
+        tool_output: str | None = None,  # deprecated — kept for backward compat, ignored
     ) -> AgentMessage:
         msg = AgentMessage(
             agent_id=agent_id,
@@ -304,7 +304,7 @@ class AgentMessageRepository(BaseRepository[AgentMessage]):
             content=content,
             tool_name=tool_name,
             tool_input=tool_input,
-            tool_output=tool_output,
+            # tool_output column no longer populated — full results are ephemeral
             loop_iteration=loop_iteration,
         )
         await self.create(msg)

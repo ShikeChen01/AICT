@@ -347,6 +347,9 @@ class PromptAssembly:
         self.messages.extend(past_candidate)
 
         # Phase 2: Current session (all message types)
+        # Tool results in DB are truncated (ephemeral design).  The agent
+        # sees tool_calls paired with truncated results on session reload;
+        # full results only existed in-memory for one iteration.
         current_candidate: list[dict] = []
         for h in current_session_msgs:
             if h.role == "user":

@@ -216,9 +216,8 @@ class OrchestratorService:
                 project_id=manager.project_id,
                 agent_role="manager",
                 log_type="error",
-                content=f"Manager returned no output ({reason_code}).",
+                content=f"Manager returned no output ({reason_code}). Details: {str(details)[:200]}",
                 agent_id=manager.id,
-                tool_output=str(details),
             )
 
         try:
@@ -264,9 +263,8 @@ class OrchestratorService:
                     agent_id=manager.id,
                     agent_role="manager",
                     log_type="tool_result",
-                    content=f"Tool result: {tool_msg.name or 'tool'}",
+                    content=f"Tool result: {tool_msg.name or 'tool'} — {str(tool_msg.content)[:200]}",
                     tool_name=tool_msg.name,
-                    tool_output=str(tool_msg.content)[:2000],
                 )
             if not messages:
                 reason_code = "EMPTY_MESSAGES"

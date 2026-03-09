@@ -346,7 +346,6 @@ class WebSocketManager:
         content: str,
         tool_name: str | None = None,
         tool_input: dict | None = None,
-        tool_output: str | None = None,
     ) -> int:
         """Broadcast agent activity log (thought, tool use)."""
         event = create_agent_log_event(
@@ -357,7 +356,6 @@ class WebSocketManager:
             content=content,
             tool_name=tool_name,
             tool_input=tool_input,
-            tool_output=tool_output,
         )
         return await self.broadcast(event, Channel.ACTIVITY, project_id)
 

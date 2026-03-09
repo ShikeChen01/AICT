@@ -21,11 +21,28 @@ from backend.services.task_service import TaskService
 
 MAX_TOOL_RESULT_CHARS = 12000
 
+# Tool results persisted to DB / kept in history are aggressively truncated.
+# The full result is only available in-memory for the *next* LLM iteration,
+# then replaced with this short summary.  Agents are instructed to save
+# important data to memory immediately.
+MAX_TOOL_RESULT_HISTORY_CHARS = 200
+
 
 def truncate_tool_output(text: str) -> str:
     if len(text) <= MAX_TOOL_RESULT_CHARS:
         return text
     return text[:MAX_TOOL_RESULT_CHARS] + "\n[output truncated]"
+
+
+def truncate_for_history(text: str) -> str:
+    """Truncate a tool result for DB persistence / conversation history.
+
+    Returns at most MAX_TOOL_RESULT_HISTORY_CHARS characters with a
+    truncation marker appended when the original was longer.
+    """
+    if len(text) <= MAX_TOOL_RESULT_HISTORY_CHARS:
+        return text
+    return text[:MAX_TOOL_RESULT_HISTORY_CHARS] + "\n[tool result truncated — use memory or re-run tool]"
 
 
 def parse_tool_uuid(tool_input: dict, field_name: str, *, required: bool = True) -> UUID | None:

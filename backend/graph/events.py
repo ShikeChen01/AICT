@@ -61,11 +61,10 @@ async def emit_agent_log(
     agent_id: str | UUID | None = None,
     tool_name: str | None = None,
     tool_input: dict[str, Any] | None = None,
-    tool_output: str | None = None,
 ) -> None:
     """
     Emit an agent activity log event for the activity feed.
-    
+
     Args:
         project_id: The project UUID.
         agent_role: Role of the agent (e.g., "manager", "cto", "engineer").
@@ -74,7 +73,6 @@ async def emit_agent_log(
         agent_id: Optional agent UUID (generates a placeholder if not provided).
         tool_name: Name of the tool being called (for tool_call/tool_result).
         tool_input: Tool input arguments.
-        tool_output: Tool output/result.
     """
     try:
         ws_manager = _get_ws_manager()
@@ -82,7 +80,7 @@ async def emit_agent_log(
         from uuid import uuid4
         aid = UUID(str(agent_id)) if agent_id else uuid4()
         pid = UUID(str(project_id)) if isinstance(project_id, str) else project_id
-        
+
         await ws_manager.broadcast_agent_log(
             project_id=pid,
             agent_id=aid,
@@ -91,7 +89,6 @@ async def emit_agent_log(
             content=content,
             tool_name=tool_name,
             tool_input=tool_input,
-            tool_output=tool_output,
         )
     except Exception as exc:
         logger.warning("Failed to emit agent_log: %s", exc)

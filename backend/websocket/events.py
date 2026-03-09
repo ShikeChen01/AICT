@@ -117,7 +117,6 @@ class AgentLogPayload(BaseModel):
     content: str
     tool_name: str | None = None
     tool_input: dict[str, Any] | None = None
-    tool_output: str | None = None
 
 
 class SandboxLogPayload(BaseModel):
@@ -287,7 +286,6 @@ def create_agent_log_event(
     content: str,
     tool_name: str | None = None,
     tool_input: dict[str, Any] | None = None,
-    tool_output: str | None = None,
 ) -> WebSocketEvent:
     """Create an agent log event for activity feed."""
     return WebSocketEvent(
@@ -300,7 +298,6 @@ def create_agent_log_event(
             content=content,
             tool_name=tool_name,
             tool_input=tool_input,
-            tool_output=tool_output,
         ).model_dump(mode="json"),
     )
 
