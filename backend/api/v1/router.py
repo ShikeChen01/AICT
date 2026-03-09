@@ -19,6 +19,7 @@ from backend.api.v1.templates import router as templates_router
 from backend.api.v1.sandbox_configs import router as sandbox_configs_router
 from backend.api.v1.sandboxes import router as sandboxes_router
 from backend.api.v1.tool_configs import router as tool_configs_router
+from backend.api.v1.knowledge import router as knowledge_router
 
 api_router = APIRouter()
 
@@ -51,3 +52,4 @@ api_router.include_router(templates_router)
 api_router.include_router(sandbox_configs_router)
 api_router.include_router(sandboxes_router)
 api_router.include_router(tool_configs_router)
+api_router.include_router(knowledge_router)

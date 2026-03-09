@@ -55,6 +55,7 @@ from backend.tools.executors.agents import (
 )
 from backend.tools.executors.meta import run_sleep, run_get_project_metadata
 from backend.tools.executors.docs import run_write_architecture_doc
+from backend.tools.executors.knowledge import run_search_knowledge
 
 # Re-export for backward-compat with loop.py imports
 __all__ = [
@@ -126,6 +127,7 @@ _TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
     "describe_tool": None,  # assigned below after _TOOLS is built
     "get_project_metadata": run_get_project_metadata,
     "write_architecture_doc": run_write_architecture_doc,
+    "search_knowledge": run_search_knowledge,
     "thinking_done": None,  # stage-transition tool — handled directly by loop.py, not dispatched
 }
 

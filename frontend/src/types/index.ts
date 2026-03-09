@@ -808,3 +808,54 @@ export interface APIError {
   message: string;
   detail?: unknown;
 }
+
+// ─── Knowledge Base (RAG) ─────────────────────────────────────────────
+
+export interface KnowledgeDocument {
+  id: UUID;
+  project_id: UUID;
+  filename: string;
+  file_type: string;
+  mime_type: string;
+  original_size_bytes: number;
+  chunk_count: number;
+  status: 'pending' | 'indexing' | 'indexed' | 'failed';
+  error_message: string | null;
+  indexed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeSearchRequest {
+  query: string;
+  limit?: number;
+  similarity_threshold?: number;
+}
+
+export interface KnowledgeSearchResult {
+  chunk_id: UUID;
+  document_id: UUID;
+  filename: string;
+  file_type: string;
+  chunk_index: number;
+  text_content: string;
+  similarity_score: number;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface KnowledgeSearchResponse {
+  query: string;
+  result_count: number;
+  results: KnowledgeSearchResult[];
+  duration_ms: number;
+}
+
+export interface KnowledgeStatsResponse {
+  project_id: UUID;
+  total_documents: number;
+  indexed_documents: number;
+  total_chunks: number;
+  total_bytes: number;
+  quota_documents: number;
+  quota_bytes: number;
+}

@@ -66,6 +66,14 @@ class Settings(BaseSettings):
     test_login_email: str = "aicttest@aict.com"
     test_login_password: str = "f8a9sfa32!@#%Daf342q98v!%#@dscx90"
 
+    # RAG / Knowledge Base (Voyage AI)
+    voyage_api_key: str = ""
+    voyage_model: str = "voyage-3-large"
+    knowledge_chunk_size_tokens: int = Field(default=512, ge=64, le=2048)
+    knowledge_chunk_overlap_tokens: int = Field(default=100, ge=0, le=512)
+    knowledge_max_file_size_bytes: int = Field(default=52428800, description="50 MB per file")
+    knowledge_embed_batch_size: int = Field(default=128, ge=1, le=512)
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8000

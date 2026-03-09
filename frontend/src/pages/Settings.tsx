@@ -27,6 +27,7 @@ import {
   Trash2,
   Upload,
   Monitor,
+  BookOpen,
 } from 'lucide-react';
 import {
   getProject,
@@ -46,6 +47,7 @@ import type {
 } from '../types';
 import { Button, Card, Input, Textarea } from '../components/ui';
 import { SandboxManager } from '../components/Sandbox/SandboxManager';
+import { KnowledgeBase } from '../components/Knowledge/KnowledgeBase';
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -788,6 +790,20 @@ export function SettingsPage() {
             survive session restarts — agents can install and use GUI applications long-term.
           </p>
           <SandboxManager projectId={projectId!} />
+        </Card>
+
+        {/* ── 10. Knowledge Base (RAG — Feature 1.6) ── */}
+        <Card className="mt-8 p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <BookOpen className="w-5 h-5 text-[var(--text-muted)]" />
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Knowledge Base</h2>
+          </div>
+          <p className="text-sm text-[var(--text-muted)] mb-4">
+            Upload documents (PDF, TXT, Markdown, CSV) to the project knowledge base.
+            Agents can search this knowledge using the <code className="rounded bg-gray-100 px-1 text-xs">search_knowledge</code> tool
+            to ground their work in project-specific context.
+          </p>
+          <KnowledgeBase projectId={projectId!} />
         </Card>
 
       </main>

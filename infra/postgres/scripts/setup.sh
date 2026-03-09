@@ -9,6 +9,7 @@
 #   4. Generates a self-signed SSL certificate
 #   5. Writes a .env file for docker-compose
 #   6. Copies config files and starts Postgres via docker compose
+#      Uses pgvector/pgvector:pg16 image (postgres:16 + pgvector extension pre-installed)
 
 set -euo pipefail
 

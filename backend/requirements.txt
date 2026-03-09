@@ -22,6 +22,11 @@ langchain-google-genai>=1.0.0
 langgraph-checkpoint-postgres>=2.0.0
 psycopg2-binary>=2.9.9
 
+# RAG / Knowledge Base
+voyageai>=0.3.0,<1.0.0
+pymupdf>=1.25.0,<2.0.0
+pgvector>=0.3.0,<1.0.0
+
 # Testing
 pytest>=7.4.0,<9.0.0
 pytest-asyncio>=0.23.0,<1.0.0
