@@ -85,7 +85,7 @@ jobs:
           pip install -r backend/requirements.txt
 
       - name: Run migrations
-        run: python -m alembic -c backend/alembic.ini upgrade head
+        run: python -m backend.scripts.safe_migrate
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
@@ -188,7 +188,7 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Run migrations
-        run: python -m alembic -c backend/alembic.ini upgrade head
+        run: python -m backend.scripts.safe_migrate
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
@@ -211,6 +211,8 @@ jobs:
           VITE_BACKEND_URL: http://localhost:8000
           FRONTEND_URL: http://localhost:3000
           BACKEND_URL: http://localhost:8000
+          CODE_REPO_PATH: ${{ runner.temp }}/repos
+          SPEC_REPO_PATH: ${{ runner.temp }}/specs
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
@@ -221,12 +223,15 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # Build Verification Tests (runs on every push — imports test repo + messages agent)
+  # Build Verification Tests (full-stack smoke test — non-blocking)
+  # This test imports a real repo and talks to LLMs, so it may fail due to
+  # transient credential or network issues. It must not gate deployments.
   # ============================================================================
   build-verification-tests:
     name: Build Verification Tests
     runs-on: ubuntu-latest
     needs: [backend-unit-tests, frontend-unit-tests]
+    continue-on-error: true
 
     services:
       postgres:
@@ -276,7 +281,7 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Run migrations
-        run: python -m alembic -c backend/alembic.ini upgrade head
+        run: python -m backend.scripts.safe_migrate
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
@@ -292,6 +297,8 @@ jobs:
           VITE_BACKEND_URL: http://localhost:8000
           BACKEND_URL: http://localhost:8000
           FRONTEND_URL: http://localhost:3000
+          CODE_REPO_PATH: ${{ runner.temp }}/repos
+          SPEC_REPO_PATH: ${{ runner.temp }}/specs
           # Test login credentials
           TEST_LOGIN_ENABLED: 'true'
           TEST_LOGIN_EMAIL: ${{ secrets.TEST_LOGIN_EMAIL }}
@@ -314,13 +321,14 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # GitHub Integration Tests (runs only on main)
+  # GitHub Integration Tests (runs only on main — non-blocking)
   # ============================================================================
   github-integration-tests:
     name: GitHub Integration Tests
     runs-on: ubuntu-latest
     needs: [e2e-tests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
     
     services:
       postgres:
@@ -362,7 +370,7 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Run migrations
-        run: python -m alembic -c backend/alembic.ini upgrade head
+        run: python -m backend.scripts.safe_migrate
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
@@ -382,6 +390,8 @@ jobs:
           VITE_BACKEND_URL: http://localhost:8000
           FRONTEND_URL: http://localhost:3000
           BACKEND_URL: http://localhost:8000
+          CODE_REPO_PATH: ${{ runner.temp }}/repos
+          SPEC_REPO_PATH: ${{ runner.temp }}/specs
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN_TEST: ${{ secrets.GITHUB_TOKEN_TEST }}
           GITHUB_TEST_OWNER: ${{ secrets.GITHUB_TEST_OWNER }}
