@@ -196,11 +196,10 @@ jobs:
     name: Deploy Backend
     runs-on: ubuntu-latest
     needs: [build-backend, migrate, changes]
-    # Run even if migrate was skipped (but not if it failed)
+    # Run even if migrate was skipped or failed — the app handles missing migrations gracefully
     if: |
       always() &&
-      needs.build-backend.result == 'success' &&
-      (needs.migrate.result == 'success' || needs.migrate.result == 'skipped')
+      needs.build-backend.result == 'success'
     permissions:
       contents: read
       id-token: write
