@@ -223,12 +223,15 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # Build Verification Tests (runs on every push — imports test repo + messages agent)
+  # Build Verification Tests (full-stack smoke test — non-blocking)
+  # This test imports a real repo and talks to LLMs, so it may fail due to
+  # transient credential or network issues. It must not gate deployments.
   # ============================================================================
   build-verification-tests:
     name: Build Verification Tests
     runs-on: ubuntu-latest
     needs: [backend-unit-tests, frontend-unit-tests]
+    continue-on-error: true
 
     services:
       postgres:
@@ -318,13 +321,14 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # GitHub Integration Tests (runs only on main)
+  # GitHub Integration Tests (runs only on main — non-blocking)
   # ============================================================================
   github-integration-tests:
     name: GitHub Integration Tests
     runs-on: ubuntu-latest
     needs: [e2e-tests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
     
     services:
       postgres:
