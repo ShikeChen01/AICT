@@ -246,6 +246,7 @@ jobs:
             --set-env-vars="SANDBOX_VM_POOL_PORT=${{ secrets.SANDBOX_VM_POOL_PORT }}" \
             --set-env-vars="SANDBOX_VM_MASTER_TOKEN=${{ secrets.SANDBOX_VM_MASTER_TOKEN }}" \
             --set-env-vars="SECRET_ENCRYPTION_KEY=${{ secrets.SECRET_ENCRYPTION_KEY }}" \
+            --set-env-vars="VOYAGE_API_KEY=${{ secrets.VOYAGE_API_KEY }}" \
             --set-env-vars="PROVISION_REPOS_ON_STARTUP=true" \
             --set-env-vars="CLONE_CODE_REPO_ON_STARTUP=true" \
             --set-env-vars="MAX_ENGINEERS=5" \

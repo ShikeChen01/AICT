@@ -12,6 +12,7 @@ import {
   BarChart3,
   Monitor,
   Tv2,
+  Settings,
   Sun,
   Moon,
 } from 'lucide-react';
@@ -66,6 +67,11 @@ export function TopNav() {
           label: 'Logs',
           path: `/project/${projectId}/logs`,
           icon: <BarChart3 className="h-4 w-4" aria-hidden="true" />,
+        },
+        {
+          label: 'Settings',
+          path: `/project/${projectId}/settings`,
+          icon: <Settings className="h-4 w-4" aria-hidden="true" />,
         },
       ]
     : [];
