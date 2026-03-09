@@ -33,10 +33,11 @@ def test_engineer_has_all_sandbox_tools() -> None:
         assert name in engineer_names, f"'{name}' missing from engineer tools"
 
 
-def test_manager_does_not_have_execution_tools() -> None:
+def test_manager_has_sandbox_tools() -> None:
+    """All roles (including manager) have sandbox access in the current architecture."""
     manager_names = {tool.name for tool in get_manager_tools()}
-    assert "sandbox_execute_command" not in manager_names
-    assert "sandbox_screenshot" not in manager_names
+    assert "sandbox_execute_command" in manager_names
+    assert "sandbox_start_session" in manager_names
 
 
 def test_no_e2b_tools_in_any_role() -> None:

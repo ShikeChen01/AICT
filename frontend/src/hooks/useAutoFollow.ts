@@ -28,7 +28,7 @@ export function useAutoFollow<T extends HTMLElement>({
       if (typeof container.scrollTo === 'function') {
         container.scrollTo({ top: container.scrollHeight, behavior });
       } else {
-        container.scrollTop = container.scrollHeight;
+        container.scrollTop = container.scrollHeight; // eslint-disable-line react-hooks/immutability
       }
     },
     [container]

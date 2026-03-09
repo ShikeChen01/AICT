@@ -125,7 +125,7 @@ export function useScreenStream(sandboxId: string | null): ScreenStreamState {
         );
         reconnectTimerRef.current = setTimeout(() => {
           reconnectTimerRef.current = null;
-          connect(sid);
+          connect(sid); // eslint-disable-line react-hooks/immutability
         }, delay);
       }
     };

@@ -18,6 +18,7 @@ import type { PromptMeta } from '../../types';
 
 // ── Token estimation (mirrors backend/prompts/assembly.py:estimate_tokens) ──
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function estimateTokens(text: string): number {
   return Math.max(1, Math.floor(text.length / 4));
 }

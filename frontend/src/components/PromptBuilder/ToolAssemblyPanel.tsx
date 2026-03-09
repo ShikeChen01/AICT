@@ -46,7 +46,7 @@ interface EditState {
 
 export function ToolAssemblyPanel({
   agentId,
-  agent: _agent,
+  agent: _agent, // eslint-disable-line @typescript-eslint/no-unused-vars
   meta,
   onToolsSaved,
 }: ToolAssemblyPanelProps) {

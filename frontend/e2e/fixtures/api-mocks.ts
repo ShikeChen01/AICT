@@ -192,7 +192,6 @@ export async function mockProjectAPIs(
   });
 
   await page.route('**/api/v1/messages/send', async (route) => {
-    const body = route.request().postDataJSON();
     await route.fulfill({
       status: 201,
       contentType: 'application/json',

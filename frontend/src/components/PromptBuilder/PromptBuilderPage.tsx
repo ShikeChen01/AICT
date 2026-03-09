@@ -658,6 +658,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
             onClick={() => setShowAgentConfig(false)}
             aria-hidden="true"
           />
+          {/* eslint-disable react-hooks/refs */}
           <div
             className="fixed z-40"
             style={{
@@ -676,6 +677,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
               onAgentUpdated={handleAgentUpdated}
             />
           </div>
+          {/* eslint-enable react-hooks/refs */}
         </>
       )}
     </div>

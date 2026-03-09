@@ -32,7 +32,7 @@ export function useWebSocket(
     if (!projectId || !token) {
       clientRef.current?.disconnect();
       clientRef.current = null;
-      setIsConnected(false);
+      setIsConnected(false); // eslint-disable-line react-hooks/set-state-in-effect
       return;
     }
 

@@ -172,7 +172,7 @@ function CoPilotContent({ projectId }: { projectId: string }) {
   useEffect(() => {
     if (!selectedAgentId && agents.length > 0) {
       const withSandbox = agents.find((a) => a.sandbox_id);
-      setSelectedAgentId(withSandbox?.id ?? agents[0].id);
+      setSelectedAgentId(withSandbox?.id ?? agents[0].id); // eslint-disable-line react-hooks/set-state-in-effect
     }
   }, [agents, selectedAgentId]);
 

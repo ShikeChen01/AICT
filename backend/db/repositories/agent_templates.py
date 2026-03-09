@@ -212,10 +212,12 @@ class AgentTemplateRepository(BaseRepository[AgentTemplate]):
 
         Uses a PostgreSQL advisory lock keyed on the project_id to prevent
         concurrent callers from creating duplicate system-default templates.
+        Falls back to a no-op on non-PostgreSQL dialects (e.g. SQLite in tests).
         """
-        # Derive a stable int64 lock key from the project UUID
-        lock_key = int(hashlib.md5(project_id.bytes).hexdigest()[:15], 16)
-        await self.session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+        dialect = self.session.bind.dialect.name if self.session.bind else ""
+        if dialect == "postgresql":
+            lock_key = int(hashlib.md5(project_id.bytes).hexdigest()[:15], 16)
+            await self.session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
 
         existing = await self.list_by_project(project_id)
         existing_defaults = {t.base_role: t for t in existing if t.is_system_default}

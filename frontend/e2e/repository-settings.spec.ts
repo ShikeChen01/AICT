@@ -4,10 +4,7 @@ import { setupAuth } from './fixtures/auth';
 import { mockAuthenticatedAPIs, mockProjectAPIs } from './fixtures/api-mocks';
 import {
   MOCK_PROJECT_ID,
-  mockProject,
   mockProjectSettings,
-  mockProjectUsage,
-  mockProjectSecrets,
 } from './fixtures/mock-data';
 import { SettingsPage } from './pages/settings.page';
 

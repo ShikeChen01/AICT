@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AgentsPanel } from './AgentsPanel';
 
 const useAgentsMock = vi.fn();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const subscribeHandlers: Record<string, (data: any) => void> = {};
 
 vi.mock('../../hooks', () => ({
@@ -11,6 +12,7 @@ vi.mock('../../hooks', () => ({
 
 vi.mock('../../hooks/useWebSocket', () => ({
   useWebSocket: () => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     subscribe: (eventType: string, handler: (data: any) => void) => {
       subscribeHandlers[eventType] = handler;
       return () => {

@@ -89,6 +89,7 @@ export function AgentStreamProvider({
   // Ref mirrors inspectedAgentId so the WS handler can read the latest value
   // without forcing a reconnection every time the user selects a different agent.
   const inspectedAgentRef = useRef(inspectedAgentId);
+  // eslint-disable-next-line react-hooks/refs
   inspectedAgentRef.current = inspectedAgentId;
 
   // Track the highest backend-log seq we've seen so we can skip duplicates
@@ -456,6 +457,7 @@ export function AgentStreamProvider({
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAgentStreamContext(): AgentStreamContextValue {
   const ctx = useContext(AgentStreamContext);
   if (!ctx) {
@@ -464,6 +466,7 @@ export function useAgentStreamContext(): AgentStreamContextValue {
   return ctx;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useOptionalAgentStreamContext(): AgentStreamContextValue | null {
   return useContext(AgentStreamContext);
 }

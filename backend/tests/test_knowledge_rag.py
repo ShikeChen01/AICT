@@ -532,16 +532,16 @@ class TestRunSearchKnowledge:
 
 class TestEmbeddingService:
 
-    def test_embed_documents_empty_returns_empty(self):
+    @pytest.mark.asyncio
+    async def test_embed_documents_empty_returns_empty(self):
         """Empty input should return [] without calling Voyage."""
-        import asyncio
         from backend.services.embedding_service import EmbeddingService
 
         svc = EmbeddingService.__new__(EmbeddingService)
         svc._model = "voyage-3-large"
         svc._batch_size = 128
 
-        result = asyncio.get_event_loop().run_until_complete(svc.embed_documents([]))
+        result = await svc.embed_documents([])
         assert result == []
 
     def test_embed_query_empty_returns_empty(self):

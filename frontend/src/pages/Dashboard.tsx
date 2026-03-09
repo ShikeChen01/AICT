@@ -69,7 +69,7 @@ export function DashboardPage() {
       setIsLoading(true);
       const proj = await getProject(projectId);
       setProject(proj);
-    } catch (_err) {
+    } catch (_err) { // eslint-disable-line @typescript-eslint/no-unused-vars
       setProject(null);
     } finally {
       setIsLoading(false);
@@ -133,6 +133,7 @@ interface DashboardViewProps {
   onSwitchToBuilder: () => void;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function DashboardView({ projectId, projectName: _projectName, onSwitchToBuilder }: DashboardViewProps) {
   const [agentOverviews, setAgentOverviews] = useState<AgentOverview[]>([]);
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);

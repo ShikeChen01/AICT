@@ -27,14 +27,47 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
-try:
-    from pgvector.sqlalchemy import Vector as _PgVector  # type: ignore[import-untyped]
+from sqlalchemy.types import TypeDecorator
 
-    _VECTOR_1024 = _PgVector(1024)
-except ImportError:  # pragma: no cover — pgvector not installed in some test envs
-    from sqlalchemy import ARRAY  # noqa: E402
 
-    _VECTOR_1024 = ARRAY(Float)  # type: ignore[assignment]
+class _VectorType(TypeDecorator):
+    """Dialect-aware vector column: pgvector VECTOR on PostgreSQL, TEXT on SQLite."""
+
+    impl = Text
+    cache_ok = True
+
+    def __init__(self, dim: int = 1024) -> None:
+        super().__init__()
+        self._dim = dim
+        try:
+            from pgvector.sqlalchemy import Vector as _PgVector  # type: ignore[import-untyped]
+            self._pg_type = _PgVector(dim)
+        except ImportError:
+            self._pg_type = None
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql" and self._pg_type is not None:
+            return dialect.type_descriptor(self._pg_type)
+        return dialect.type_descriptor(Text())
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if dialect.name != "postgresql":
+            import json
+            return json.dumps(value if isinstance(value, list) else list(value))
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if dialect.name != "postgresql" and isinstance(value, str):
+            import json
+            return json.loads(value)
+        return value
+
+
+_VECTOR_1024 = _VectorType(1024)
 
 
 class Base(DeclarativeBase):

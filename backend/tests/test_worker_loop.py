@@ -293,6 +293,7 @@ async def test_run_inner_loop_normalizes_legacy_tool_name_in_history(
     history_row = MagicMock()
     history_row.role = "assistant"
     history_row.content = ""
+    history_row.session_id = uuid4()
     history_row.tool_input = {
         "__tool_calls__": [
             {"id": "tc-legacy-1", "name": "execute_command E2B", "input": {"command": "pwd"}}
@@ -325,11 +326,13 @@ async def test_run_inner_loop_normalizes_legacy_tool_name_in_history(
     assert result == "normal_end"
     assert llm_mock.await_count == 1
     captured_messages = llm_mock.await_args.kwargs["messages"]
+    # Past session assistant messages have tool_calls stripped and converted
+    # to a text summary. Verify the normalized name appears in the summary.
     assistant_messages = [m for m in captured_messages if m.get("role") == "assistant"]
     assert assistant_messages
-    replayed_calls = assistant_messages[0].get("tool_calls") or []
-    assert replayed_calls
-    assert replayed_calls[0]["name"] == "execute_command"
+    content = assistant_messages[0].get("content", "")
+    assert "execute_command" in content
+    assert "execute_command E2B" not in content
 
 
 # ---------------------------------------------------------------------------

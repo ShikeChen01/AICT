@@ -366,33 +366,36 @@ class TestAgentToolFlowHappyPath:
         client._connections["testsandbox"] = conn
 
         marker = "deadbeef12345678"
+        drain_sentinel = f"__AICT_DRAIN_{marker}__"
         sentinel = f"__AICT_CMD_DONE_{marker}__"
 
-        # Craft the bytes the server would emit: command output + sentinel line
-        fake_output = f"Linux sandbox 5.15.0-1 #1 SMP x86_64\n{sentinel}:0\n"
-
-        # Build an async generator that yields chunks from fake_output
-        async def fake_ws_aiter():
-            yield fake_output.encode()
+        drain_data = f"prompt\n{drain_sentinel}\n{drain_sentinel}\n".encode()
+        fake_output = f"Linux sandbox 5.15.0-1 #1 SMP x86_64\n{sentinel}:0\n".encode()
 
         class FakeWS:
+            def __init__(self):
+                self._payloads = [drain_data, fake_output]
+                self._index = 0
             async def __aenter__(self):
                 return self
             async def __aexit__(self, *a):
                 pass
             async def send(self, data):
                 pass
-            def __aiter__(self):
-                return fake_ws_aiter().__aiter__()
+            async def recv(self):
+                if self._index < len(self._payloads):
+                    data = self._payloads[self._index]
+                    self._index += 1
+                    return data
+                return b""
 
-        import secrets as _secrets_mod
         with patch("websockets.connect", return_value=FakeWS()), \
              patch("secrets.token_hex", return_value=marker):
             result = await client.execute_shell("testsandbox", "uname -a")
 
         assert result.exit_code == 0
         assert "Linux" in result.stdout
-        assert sentinel not in result.stdout  # sentinel stripped
+        assert sentinel not in result.stdout
 
     @pytest.mark.asyncio
     async def test_execute_shell_non_zero_exit_code(self):
@@ -402,17 +405,25 @@ class TestAgentToolFlowHappyPath:
         client._connections["testsandbox"] = conn
 
         marker = "cafebabe99887766"
+        drain_sentinel = f"__AICT_DRAIN_{marker}__"
         sentinel = f"__AICT_CMD_DONE_{marker}__"
-        fake_output = f"ls: cannot access '/nonexistent': No such file or directory\n{sentinel}:2\n"
 
-        async def fake_ws_aiter():
-            yield fake_output.encode()
+        drain_data = f"prompt\n{drain_sentinel}\n{drain_sentinel}\n".encode()
+        fake_output = f"ls: cannot access '/nonexistent': No such file or directory\n{sentinel}:2\n".encode()
 
         class FakeWS:
+            def __init__(self):
+                self._payloads = [drain_data, fake_output]
+                self._index = 0
             async def __aenter__(self): return self
             async def __aexit__(self, *a): pass
             async def send(self, data): pass
-            def __aiter__(self): return fake_ws_aiter().__aiter__()
+            async def recv(self):
+                if self._index < len(self._payloads):
+                    data = self._payloads[self._index]
+                    self._index += 1
+                    return data
+                return b""
 
         with patch("websockets.connect", return_value=FakeWS()), \
              patch("secrets.token_hex", return_value=marker):

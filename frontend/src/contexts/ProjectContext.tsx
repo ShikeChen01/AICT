@@ -50,6 +50,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useProjectContext(): ProjectContextValue {
   const ctx = useContext(ProjectContext);
   if (!ctx) {

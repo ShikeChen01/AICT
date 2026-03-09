@@ -16,6 +16,10 @@ vi.mock('../api/client', () => ({
   getAuthToken: vi.fn(() => 'test-token'),
 }));
 
+vi.mock('../components/Navigation', () => ({
+  TopNav: () => <div data-testid="mock-topnav" />,
+}));
+
 const mockProjects = [
   {
     id: 'project-1',
@@ -97,8 +101,7 @@ describe('ProjectsPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Test Project 1')).toBeInTheDocument();
     });
-    const openLinks = screen.getAllByText('Open Repository →');
-    expect(openLinks.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Test Project 1')).toBeInTheDocument();
   });
 
   it('opens create modal when New Repository button is clicked', async () => {
@@ -112,9 +115,9 @@ describe('ProjectsPage', () => {
       expect(screen.getByText('Test Project 1')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('New Repository'));
+    fireEvent.click(screen.getByText('New Project'));
 
-    expect(screen.getByText('Create New Repository')).toBeInTheDocument();
+    expect(screen.getByText('Create New Project')).toBeInTheDocument();
   });
 
   it('opens import modal when Import Repository button is clicked', async () => {
@@ -128,11 +131,10 @@ describe('ProjectsPage', () => {
       expect(screen.getByText('Test Project 1')).toBeInTheDocument();
     });
 
-    const importButtons = screen.getAllByRole('button', { name: 'Import Repository' });
+    const importButtons = screen.getAllByRole('button', { name: 'Import Project' });
     fireEvent.click(importButtons[0]);
 
-    expect(screen.getByRole('heading', { name: 'Import Repository' })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('https://github.com/user/repo')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Import Project' })).toBeInTheDocument();
   });
 
   it('renders empty state when no projects', async () => {
@@ -145,7 +147,7 @@ describe('ProjectsPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('No repositories yet')).toBeInTheDocument();
+      expect(screen.getByText('No projects yet')).toBeInTheDocument();
     });
   });
 

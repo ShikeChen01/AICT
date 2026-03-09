@@ -97,7 +97,7 @@ test.describe('Kanban - Real-time Updates', () => {
     await kanbanPage.waitForLoad();
     
     // Get initial task count
-    const initialCount = await kanbanPage.getTotalTaskCount();
+    await kanbanPage.getTotalTaskCount();
     
     // Wait a bit to see if any updates come through
     // (This tests the WebSocket connection is working)

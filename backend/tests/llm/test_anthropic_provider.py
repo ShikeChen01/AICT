@@ -64,7 +64,10 @@ async def test_anthropic_provider_skips_orphan_tool_result() -> None:
 
     kwargs = mocked.await_args.kwargs
     sent_messages = kwargs["messages"]
-    # only assistant block should be present because tool_result id is orphaned.
-    assert len(sent_messages) == 1
+    # The orphan tool_result is skipped, then the dangling tool_use in the
+    # assistant block is stripped. The provider appends a sentinel user turn
+    # because Anthropic requires conversations to end with a user message.
+    assert len(sent_messages) == 2
     assert sent_messages[0]["role"] == "assistant"
+    assert sent_messages[1]["role"] == "user"
 

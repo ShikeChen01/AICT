@@ -98,6 +98,7 @@ def test_append_tool_result() -> None:
     pa = PromptAssembly.__new__(PromptAssembly)
     pa.messages = []
     pa._current_iteration_tool_result_chars = 0
+    pa._current_session_budget_chars = 100_000
     pa.append_tool_result("test_tool", "success output", "tid-1")
     assert len(pa.messages) == 1
     msg = pa.messages[0]
@@ -110,6 +111,7 @@ def test_append_tool_error() -> None:
     pa = PromptAssembly.__new__(PromptAssembly)
     pa.messages = []
     pa._current_iteration_tool_result_chars = 0
+    pa._current_session_budget_chars = 100_000
     pa.append_tool_error("bad_tool", RuntimeError("boom"), "tid-2")
     assert len(pa.messages) == 1
     msg = pa.messages[0]

@@ -27,7 +27,7 @@ export function AgentBuildPage() {
       setIsLoading(true);
       const proj = await getProject(projectId);
       setProject(proj);
-    } catch (_err) {
+    } catch (_err) { // eslint-disable-line @typescript-eslint/no-unused-vars
       setProject(null);
     } finally {
       setIsLoading(false);

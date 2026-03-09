@@ -27,7 +27,7 @@ describe('Panel', () => {
   });
 
   it('body is a flex column container for proper child layout', () => {
-    const { container } = render(<Panel title="Test">Child</Panel>);
+    render(<Panel title="Test">Child</Panel>);
     const body = screen.getByText('Child').closest('div');
     expect(body?.className).toContain('flex');
     expect(body?.className).toContain('flex-col');
