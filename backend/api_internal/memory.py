@@ -64,7 +64,6 @@ async def read_history(
             "content": m.content,
             "tool_name": m.tool_name,
             "tool_input": m.tool_input,
-            "tool_output": m.tool_output,
             "created_at": m.created_at,
             "loop_iteration": m.loop_iteration,
         }

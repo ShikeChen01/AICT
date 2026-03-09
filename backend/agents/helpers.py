@@ -151,18 +151,25 @@ async def persist_tool_message(
     tool_input: dict,
     result_text: str,
 ) -> None:
-    """Persist a single tool-result message to agent_messages."""
+    """Persist a single tool-result message to agent_messages.
+
+    The content is truncated to MAX_TOOL_RESULT_HISTORY_CHARS because full
+    tool results are ephemeral — only available in-memory for the next LLM
+    iteration.  Persisted history stores a short summary; the agent is
+    expected to save important data to memory or re-run the tool.
+    """
+    from backend.tools.base import truncate_for_history
+
     tool_input_stored = {"__tool_use_id__": tool_use_id, **tool_input}
     await agent_msg_repo.create_message(
         agent_id=agent_id,
         project_id=project_id,
         role="tool",
-        content=result_text,
+        content=truncate_for_history(result_text),
         loop_iteration=iteration,
         session_id=session_id,
         tool_name=tool_name,
         tool_input=tool_input_stored,
-        tool_output=result_text,
     )
 
 

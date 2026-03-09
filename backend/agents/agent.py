@@ -52,6 +52,7 @@ from backend.services.session_service import SessionService
 from backend.services.task_service import TaskService
 from backend.tools.base import RunContext, ToolExecutor
 from backend.tools.executors.sandbox import ScreenshotResult
+from backend.tools.base import truncate_for_history
 from backend.tools.loop_registry import (
     get_handlers_for_role,
     get_thinking_phase_handlers,
@@ -507,6 +508,11 @@ class Agent:
         if gate_result is not None:
             return gate_result
 
+        # Expire tool results from previous iterations so the LLM only ever
+        # sees the *most recent* batch of tool results in full.  Older ones
+        # are replaced with a short truncated summary.
+        self._expire_previous_tool_results()
+
         # Call LLM
         content, tool_calls, llm_response = await self._call_llm()
         if content is None and tool_calls is None:
@@ -645,6 +651,50 @@ class Agent:
         )
         self._prompt.append_loopback(loopback_content)
         return None
+
+    # ── Ephemeral tool result expiry ──
+
+    def _expire_previous_tool_results(self) -> None:
+        """Replace full tool results from earlier iterations with truncated summaries.
+
+        Tool results are ephemeral: the agent sees the full output for exactly
+        one LLM call (the iteration immediately after tool execution).  On the
+        *next* iteration the results are truncated to MAX_TOOL_RESULT_HISTORY_CHARS
+        so they no longer consume context budget.
+
+        The mechanism is simple: every tool-role message that was already present
+        *before* the most recent assistant message is considered "seen" and gets
+        truncated.  Tool-role messages that come *after* the last assistant
+        message are the freshly appended results from the previous iteration's
+        tool execution — those stay intact for the upcoming LLM call.
+        """
+        # Find the index of the last assistant message
+        last_assistant_idx = -1
+        for i in range(len(self._prompt.messages) - 1, -1, -1):
+            if self._prompt.messages[i].get("role") == "assistant":
+                last_assistant_idx = i
+                break
+
+        if last_assistant_idx < 0:
+            return  # no assistant message yet — nothing to expire
+
+        expired_count = 0
+        for i in range(last_assistant_idx):  # everything *before* last assistant
+            msg = self._prompt.messages[i]
+            if msg.get("role") != "tool":
+                continue
+            content = msg.get("content", "")
+            truncated = truncate_for_history(content)
+            if truncated != content:
+                self._prompt.messages[i] = {**msg, "content": truncated}
+                expired_count += 1
+
+        if expired_count:
+            logger.debug(
+                "Agent %s: expired %d tool result(s) from earlier iterations",
+                self._record.id,
+                expired_count,
+            )
 
     # ── Tool dispatch ──
 
