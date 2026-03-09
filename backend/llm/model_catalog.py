@@ -25,6 +25,8 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "claude-sonnet-4.6":            200_000,
 
     # ── OpenAI ─────────────────────────────────────────────────────
+    "gpt-5.4-pro":                1_050_000,  # 1.05M context (922k input + 128k output)
+    "gpt-5.4":                    1_050_000,  # 1.05M context (922k input + 128k output)
     "gpt-5.2":                      400_000,
     "gpt-5":                        400_000,
     "gpt-4.1":                    1_000_000,
@@ -52,6 +54,8 @@ MODEL_IMAGE_TOKENS_PER_IMAGE: dict[str, int] = {
     "claude-sonnet-4-6": 2_000,
     "claude-sonnet-4.6": 2_000,
     # OpenAI — tile-based, ceiling 2,000
+    "gpt-5.4-pro":       2_000,
+    "gpt-5.4":           2_000,
     "gpt-5.2":           2_000,
     "gpt-5":             2_000,
     "gpt-4.1":           2_000,

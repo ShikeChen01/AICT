@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     Column,
     DateTime,
@@ -25,6 +26,15 @@ from sqlalchemy import (
     Uuid,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
+
+try:
+    from pgvector.sqlalchemy import Vector as _PgVector  # type: ignore[import-untyped]
+
+    _VECTOR_1024 = _PgVector(1024)
+except ImportError:  # pragma: no cover — pgvector not installed in some test envs
+    from sqlalchemy import ARRAY  # noqa: E402
+
+    _VECTOR_1024 = ARRAY(Float)  # type: ignore[assignment]
 
 
 class Base(DeclarativeBase):
@@ -119,6 +129,9 @@ class Repository(Base):
     project_secrets = relationship(
         "ProjectSecret", back_populates="project", cascade="all, delete-orphan"
     )
+    knowledge_documents = relationship(
+        "KnowledgeDocument", back_populates="project", cascade="all, delete-orphan"
+    )
 
 
 # Backwards compatibility
@@ -180,6 +193,9 @@ class ProjectSettings(Base):
     tokens_per_hour_limit = Column(Integer, default=0, nullable=False)
     # Phase 4b: daily cost cap in USD (0.0 = unlimited)
     daily_cost_budget_usd = Column(Float, default=0.0, nullable=False)
+    # Phase 1.6: RAG knowledge base quotas (0 = unlimited)
+    knowledge_max_documents = Column(Integer, default=50, nullable=False)
+    knowledge_max_total_bytes = Column(BigInteger, default=100 * 1024 * 1024, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
@@ -759,4 +775,88 @@ class DocumentVersion(Base):
     __table_args__ = (
         Index("ix_document_versions_doc_num", "document_id", "version_number", unique=True),
         Index("ix_document_versions_doc_time", "document_id", "created_at"),
+    )
+
+
+# ── Knowledge Base (RAG — Feature 1.6) ──────────────────────────────
+
+# Valid file types accepted by the ingestion pipeline
+KNOWLEDGE_VALID_FILE_TYPES = frozenset({"pdf", "txt", "markdown", "csv"})
+KNOWLEDGE_VALID_STATUSES = frozenset({"pending", "indexing", "indexed", "failed"})
+
+
+class KnowledgeDocument(Base):
+    """An uploaded document in the project's RAG knowledge base.
+
+    After upload, the ingestion pipeline parses, chunks, and embeds the document.
+    Once status == 'indexed', agents can search its content via the
+    search_knowledge tool.
+    """
+
+    __tablename__ = "knowledge_documents"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    )
+    uploaded_by_user_id = Column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    filename = Column(String(255), nullable=False)
+    file_type = Column(String(20), nullable=False)   # pdf | txt | markdown | csv
+    mime_type = Column(String(100), nullable=False)
+    original_size_bytes = Column(Integer, nullable=False)
+    chunk_count = Column(Integer, default=0, nullable=False)
+    status = Column(String(20), default="pending", nullable=False)
+    error_message = Column(Text, nullable=True)
+    indexed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    project = relationship("Repository", back_populates="knowledge_documents")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_user_id])
+    chunks = relationship(
+        "KnowledgeChunk", back_populates="document", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_knowledge_documents_project_created", "project_id", "created_at"),
+        Index("ix_knowledge_documents_project_status", "project_id", "status"),
+    )
+
+
+class KnowledgeChunk(Base):
+    """A chunked excerpt from a KnowledgeDocument, stored with its embedding.
+
+    The embedding column holds a 1024-dimension float vector produced by
+    Voyage AI (voyage-3-large).  pgvector HNSW index on the embedding column
+    enables sub-millisecond cosine-similarity search.
+    """
+
+    __tablename__ = "knowledge_chunks"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    document_id = Column(
+        Uuid, ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id = Column(
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    )
+    chunk_index = Column(Integer, nullable=False)
+    text_content = Column(Text, nullable=False)
+    char_count = Column(Integer, nullable=False)
+    token_count = Column(Integer, nullable=False)
+    # Voyage-3-large produces 1024-dim vectors
+    embedding = Column(_VECTOR_1024, nullable=True)
+    # Extra metadata: page_num, char_offset, section_title, …
+    metadata_ = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    document = relationship("KnowledgeDocument", back_populates="chunks")
+
+    __table_args__ = (
+        Index("ix_knowledge_chunks_doc_idx", "document_id", "chunk_index", unique=True),
+        Index("ix_knowledge_chunks_project", "project_id", "created_at"),
+        # NOTE: the HNSW vector index is created via raw DDL in migration 024
+        # because Alembic cannot render CREATE INDEX … USING hnsw natively.
     )

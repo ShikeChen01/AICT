@@ -9,8 +9,10 @@ import {
   AgentBuildPage,
   AuthCallbackPage,
   BackendLogsPage,
+  CoPilotPage,
   DashboardPage,
   LoginPage,
+  MonitorPage,
   ProjectsPage,
   RegisterPage,
   SettingsPage,
@@ -100,6 +102,8 @@ function AppShell() {
               )
             }
           />
+          <Route path="/project/:projectId/monitor" element={<MonitorPage />} />
+          <Route path="/project/:projectId/copilot" element={<CoPilotPage />} />
           <Route path="/project/:projectId/workspace" element={<WorkspacePage view="workspace" />} />
           <Route path="/project/:projectId/dashboard" element={<DashboardPage />} />
           <Route path="/project/:projectId/kanban" element={<WorkspacePage view="kanban" />} />

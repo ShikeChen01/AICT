@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { Database, Plus, X } from 'lucide-react';
+import { Database, Plus, X, Settings2 } from 'lucide-react';
 
 import { AgentConfigPanel } from './AgentConfigPanel';
 import { AllocationEditor } from './AllocationEditor';
@@ -72,6 +72,10 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
   const [leftPct, setLeftPct] = useState(DEFAULT_LEFT_PCT);
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Agent config popover (now in the top bar, not the sidebar)
+  const [showAgentConfig, setShowAgentConfig] = useState(false);
+  const configBtnRef = useRef<HTMLButtonElement>(null);
 
   // Add custom block form
   const [showAddBlock, setShowAddBlock] = useState(false);
@@ -177,52 +181,68 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
   );
 
   // ── Block callbacks ───────────────────────────────────────────────────────
+  //
+  // IMPORTANT: persistBlocks must be called OUTSIDE the setBlocks updater.
+  // React may invoke updater functions multiple times (strict mode, concurrent
+  // rendering), and calling an async side-effect inside an updater causes
+  // duplicate API calls that race against each other, triggering the backend's
+  // unique constraint on (agent_id, block_key).
 
   const handleToggle = useCallback((blockId: string) => {
+    let result: PromptBlockConfig[] | null = null;
     setBlocks((prev) => {
-      const updated = prev.map((b) =>
+      result = prev.map((b) =>
         b.id === blockId ? { ...b, enabled: !b.enabled } : b
       );
-      persistBlocks(updated);
-      return updated;
+      return result;
+    });
+    queueMicrotask(() => {
+      if (result) persistBlocks(result);
     });
   }, [persistBlocks]);
 
   const handleMoveUp = useCallback((blockId: string) => {
+    let result: PromptBlockConfig[] | null = null;
     setBlocks((prev) => {
-      const mainBlocks = [...prev]
+      const sorted = [...prev]
         .filter(isMainBlock)
         .sort((a, b) => a.position - b.position);
       const others = prev.filter((b) => !isMainBlock(b));
-      const idx = mainBlocks.findIndex((b) => b.id === blockId);
+      const idx = sorted.findIndex((b) => b.id === blockId);
       if (idx <= 0) return prev;
-      const swapped = mainBlocks.map((b, i) => {
-        if (i === idx - 1) return { ...b, position: mainBlocks[idx].position };
-        if (i === idx) return { ...b, position: mainBlocks[idx - 1].position };
+      const swapped = sorted.map((b, i) => {
+        if (i === idx - 1) return { ...b, position: sorted[idx].position };
+        if (i === idx) return { ...b, position: sorted[idx - 1].position };
         return b;
       });
-      const updated = [...swapped, ...others];
-      persistBlocks(updated);
-      return updated;
+      result = [...swapped, ...others];
+      return result;
+    });
+    // Persist outside the updater — use a microtask to ensure state has settled
+    queueMicrotask(() => {
+      if (result) persistBlocks(result);
     });
   }, [persistBlocks]);
 
   const handleMoveDown = useCallback((blockId: string) => {
+    let result: PromptBlockConfig[] | null = null;
     setBlocks((prev) => {
-      const mainBlocks = [...prev]
+      const sorted = [...prev]
         .filter(isMainBlock)
         .sort((a, b) => a.position - b.position);
       const others = prev.filter((b) => !isMainBlock(b));
-      const idx = mainBlocks.findIndex((b) => b.id === blockId);
-      if (idx < 0 || idx >= mainBlocks.length - 1) return prev;
-      const swapped = mainBlocks.map((b, i) => {
-        if (i === idx) return { ...b, position: mainBlocks[idx + 1].position };
-        if (i === idx + 1) return { ...b, position: mainBlocks[idx].position };
+      const idx = sorted.findIndex((b) => b.id === blockId);
+      if (idx < 0 || idx >= sorted.length - 1) return prev;
+      const swapped = sorted.map((b, i) => {
+        if (i === idx) return { ...b, position: sorted[idx + 1].position };
+        if (i === idx + 1) return { ...b, position: sorted[idx].position };
         return b;
       });
-      const updated = [...swapped, ...others];
-      persistBlocks(updated);
-      return updated;
+      result = [...swapped, ...others];
+      return result;
+    });
+    queueMicrotask(() => {
+      if (result) persistBlocks(result);
     });
   }, [persistBlocks]);
 
@@ -309,17 +329,21 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden bg-[var(--app-bg)]">
-      {/* ── Top bar: agent tabs — compact, pinned ── */}
-      <div className="flex items-center gap-1.5 px-3 py-1 border-b border-[var(--border-color)] bg-[var(--surface-card)] flex-shrink-0 overflow-x-auto">
-        <span className="text-[10px] font-semibold text-[var(--text-faint)] uppercase tracking-wider mr-0.5 flex-shrink-0">
+      {/* ── Top bar: agent tabs + config button — compact, pinned ── */}
+      <div className="flex items-center gap-1.5 px-3 py-1 border-b border-[var(--border-color)] bg-[var(--surface-card)] flex-shrink-0 overflow-x-auto" role="tablist" aria-label="Agent selector">
+        <span className="text-[10px] font-semibold text-[var(--text-faint)] uppercase tracking-wider mr-0.5 flex-shrink-0" aria-hidden="true">
           Agent
         </span>
         {agents.map((a) => (
           <button
             key={a.id}
             type="button"
+            role="tab"
+            aria-selected={a.id === selectedAgentId}
+            aria-controls="prompt-builder-content"
             onClick={() => {
               setEditingBlockId(null);
+              setShowAgentConfig(false);
               setSelectedAgentId(a.id);
             }}
             className={`
@@ -335,14 +359,36 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
           </button>
         ))}
 
-        <div className="flex items-center gap-1 ml-auto flex-shrink-0 text-[10px] text-[var(--color-success)] bg-[var(--color-success-light)] border border-[var(--color-success)]/20 rounded-full px-2 py-0.5">
-          <Database className="w-2.5 h-2.5" />
+        {/* Agent config button — opens popover */}
+        {selectedAgent && (
+          <div className="flex-shrink-0 ml-1">
+            <button
+              ref={configBtnRef}
+              type="button"
+              onClick={() => setShowAgentConfig((v) => !v)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+                showAgentConfig
+                  ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
+              }`}
+              aria-expanded={showAgentConfig}
+              aria-haspopup="dialog"
+              aria-label={`Configure ${selectedAgent.display_name}`}
+            >
+              <Settings2 className="w-3.5 h-3.5" aria-hidden="true" />
+              <span className="hidden sm:inline">Config</span>
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-center gap-1 ml-auto flex-shrink-0 text-[10px] text-[var(--color-success)] bg-[var(--color-success-light)] border border-[var(--color-success)]/20 rounded-full px-2 py-0.5" role="status">
+          <Database className="w-2.5 h-2.5" aria-hidden="true" />
           <span>DB synced</span>
         </div>
       </div>
 
       {/* ── Scrollable content area — whole page scrolls as one unit ── */}
-      <div ref={containerRef} className="flex-1 min-h-0 overflow-y-auto">
+      <div ref={containerRef} id="prompt-builder-content" role="tabpanel" className="flex-1 min-h-0 overflow-y-auto">
         <div className="flex min-h-full">
 
           {/* Left column: context budget — sticky sidebar */}
@@ -373,15 +419,6 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
               </div>
             )}
 
-            {/* Agent config */}
-            {selectedAgent && (
-              <div className="pt-3 border-t border-[var(--border-color-subtle)]">
-                <AgentConfigPanel
-                  agent={selectedAgent}
-                  onAgentUpdated={handleAgentUpdated}
-                />
-              </div>
-            )}
           </div>
         </div>
 
@@ -611,6 +648,35 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
             refreshMeta(selectedAgentId, selectedAgent?.model);
           }}
         />
+      )}
+
+      {/* Agent config popover — rendered at root level to escape overflow clipping */}
+      {showAgentConfig && selectedAgent && (
+        <>
+          <div
+            className="fixed inset-0 z-30"
+            onClick={() => setShowAgentConfig(false)}
+            aria-hidden="true"
+          />
+          <div
+            className="fixed z-40"
+            style={{
+              top: configBtnRef.current
+                ? configBtnRef.current.getBoundingClientRect().bottom + 4
+                : 60,
+              left: configBtnRef.current
+                ? configBtnRef.current.getBoundingClientRect().left
+                : 16,
+            }}
+            role="dialog"
+            aria-label="Agent configuration"
+          >
+            <AgentConfigPanel
+              agent={selectedAgent}
+              onAgentUpdated={handleAgentUpdated}
+            />
+          </div>
+        </>
       )}
     </div>
   );

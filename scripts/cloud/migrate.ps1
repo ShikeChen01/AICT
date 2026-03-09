@@ -81,7 +81,7 @@ try {
         # Ignore
     }
 
-    $MigrateCmd = "python -m alembic -c backend/alembic.ini upgrade head"
+    $MigrateCmd = "python -m backend.scripts.safe_migrate"
     $ShArgs = "-c," + $MigrateCmd
     if ($jobExists) {
         Write-Host "Updating existing job..."

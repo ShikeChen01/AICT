@@ -106,6 +106,40 @@ class GeminiProviderAdapter(BaseLLMProvider):
                         })
                     contents.append({"role": "user", "parts": img_parts})
 
+        # ── Repair dangling functionCalls ──────────────────────────────────
+        # Gemini requires functionResponse for every functionCall.
+        # Inject synthetic responses for any unresolved calls.
+        resolved_ids: set[str] = set()
+        for c in contents:
+            for p in c.get("parts", []):
+                fr = p.get("functionResponse")
+                if isinstance(fr, dict) and fr.get("id"):
+                    resolved_ids.add(fr["id"])
+
+        patched_contents: list[dict[str, Any]] = []
+        for c in contents:
+            patched_contents.append(c)
+            if c.get("role") == "model":
+                for p in c.get("parts", []):
+                    fc = p.get("functionCall")
+                    if isinstance(fc, dict) and fc.get("id") and fc["id"] not in resolved_ids:
+                        fn_name = fc.get("name", "unknown")
+                        patched_contents.append({
+                            "role": "user",
+                            "parts": [{
+                                "functionResponse": {
+                                    "id": fc["id"],
+                                    "name": fn_name,
+                                    "response": {"result": f"[Tool '{fn_name}' result unavailable — history truncated]"},
+                                }
+                            }],
+                        })
+                        logger.warning(
+                            "Gemini safety net: patched dangling functionCall id=%s name=%s",
+                            fc["id"], fn_name,
+                        )
+        contents = patched_contents
+
         if not contents:
             # Avoid 400 when all prior messages are filtered out (e.g., orphan tool results only).
             contents = [{"role": "user", "parts": [{"text": ""}]}]

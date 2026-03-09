@@ -10,6 +10,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   Loader2,
   AlertCircle,
+  Blocks,
   Bot,
   BrainCircuit,
   Cpu,
@@ -132,7 +133,7 @@ interface DashboardViewProps {
   onSwitchToBuilder: () => void;
 }
 
-function DashboardView({ projectId, projectName, onSwitchToBuilder }: DashboardViewProps) {
+function DashboardView({ projectId, projectName: _projectName, onSwitchToBuilder }: DashboardViewProps) {
   const [agentOverviews, setAgentOverviews] = useState<AgentOverview[]>([]);
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -418,8 +419,5 @@ function TemplateRow({ template }: { template: AgentTemplate }) {
     </div>
   );
 }
-
-// Need Blocks import for agent cards
-import { Blocks } from 'lucide-react';
 
 export default DashboardPage;

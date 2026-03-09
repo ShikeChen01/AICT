@@ -867,5 +867,46 @@
       "required": ["summary"]
     },
     "allowed_roles": ["*"]
+  },
+  {
+    "name": "search_knowledge",
+    "description": "Search the project knowledge base for relevant documents.",
+    "detailed_description": [
+      "Perform a semantic similarity search over all indexed documents in the",
+      "project knowledge base (uploaded PDFs, text files, Markdown, CSVs).",
+      "",
+      "Returns the most relevant text excerpts ranked by similarity score,",
+      "with source file name, page/chunk location, and relevance percentage.",
+      "",
+      "When to use:",
+      "  - Before implementing a feature: understand existing architecture or requirements",
+      "  - When the task references a spec or document: retrieve the relevant sections",
+      "  - When you need domain-specific terminology or brand guidelines",
+      "  - Any time you are uncertain about project-specific details",
+      "",
+      "Tips:",
+      "  - Use natural language queries: 'authentication flow' not 'auth'",
+      "  - Try multiple queries if the first returns no results",
+      "  - Increase limit if you need broader coverage"
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "What you are looking for, in natural language. Be specific."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum number of results to return (default: 5, max: 20)"
+        },
+        "similarity_threshold": {
+          "type": "number",
+          "description": "Minimum relevance score 0.0-1.0 (default: 0.4). Lower = more results."
+        }
+      },
+      "required": ["query"]
+    },
+    "allowed_roles": ["*"]
   }
 ]

@@ -862,3 +862,68 @@ export async function getDocument(repositoryId: string, docType: string): Promis
     `/repositories/${repositoryId}/documents/${encodeURIComponent(docType)}`
   );
 }
+
+// ─── Knowledge Base (RAG — Feature 1.6) ──────────────────────────────
+
+import type {
+  KnowledgeDocument,
+  KnowledgeSearchRequest,
+  KnowledgeSearchResponse,
+  KnowledgeStatsResponse,
+} from '../types';
+
+/** Upload a document to the project knowledge base. */
+export async function uploadKnowledgeDocument(
+  projectId: string,
+  file: File
+): Promise<KnowledgeDocument> {
+  const form = new FormData();
+  form.append('file', file);
+
+  const headers: Record<string, string> = {};
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+
+  const response = await fetch(`${API_BASE}/knowledge/${projectId}/documents`, {
+    method: 'POST',
+    headers,
+    body: form,
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({})) as { detail?: string };
+    throw new APIClientError(
+      response.status,
+      'upload_error',
+      err.detail ?? `Upload failed (HTTP ${response.status})`,
+    );
+  }
+  return response.json() as Promise<KnowledgeDocument>;
+}
+
+/** List all knowledge documents for a project. */
+export async function listKnowledgeDocuments(projectId: string): Promise<KnowledgeDocument[]> {
+  return request<KnowledgeDocument[]>('GET', `/knowledge/${projectId}/documents`);
+}
+
+/** Delete a knowledge document (and its chunks). */
+export async function deleteKnowledgeDocument(
+  projectId: string,
+  documentId: string
+): Promise<void> {
+  await request<void>('DELETE', `/knowledge/${projectId}/documents/${documentId}`);
+}
+
+/** Semantic search over the project knowledge base. */
+export async function searchKnowledge(
+  projectId: string,
+  body: KnowledgeSearchRequest
+): Promise<KnowledgeSearchResponse> {
+  return request<KnowledgeSearchResponse>('POST', `/knowledge/${projectId}/search`, body);
+}
+
+/** Get usage and quota stats for the project knowledge base. */
+export async function getKnowledgeStats(projectId: string): Promise<KnowledgeStatsResponse> {
+  return request<KnowledgeStatsResponse>('GET', `/knowledge/${projectId}/stats`);
+}

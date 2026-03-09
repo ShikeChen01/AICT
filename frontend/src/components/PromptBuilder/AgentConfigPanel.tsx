@@ -12,15 +12,26 @@ import { updateAgent } from '../../api/client';
 // ── Model / Provider options (mirrors AgentTemplatesSection) ───────────────
 
 const MODEL_OPTIONS = [
+  // Anthropic
   { value: 'claude-opus-4-6', label: 'Claude Opus 4.6 (powerful)' },
   { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (balanced)' },
   { value: 'claude-haiku-4-6', label: 'Claude Haiku 4.6 (fast)' },
+  // OpenAI — GPT
+  { value: 'gpt-5.4', label: 'GPT-5.4 (frontier, 1M ctx)' },
+  { value: 'gpt-5.4-pro', label: 'GPT-5.4 Pro (max reasoning)' },
   { value: 'gpt-5.2', label: 'GPT-5.2' },
   { value: 'gpt-4o', label: 'GPT-4o' },
   { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-  { value: 'o4-mini', label: 'o4-mini (reasoning)' },
+  // OpenAI — reasoning (o-series)
+  { value: 'o3', label: 'o3 (reasoning)' },
+  { value: 'o3-mini', label: 'o3-mini (reasoning, fast)' },
+  { value: 'o4-mini', label: 'o4-mini (reasoning, fast)' },
+  { value: 'o1', label: 'o1 (reasoning)' },
+  { value: 'o1-mini', label: 'o1-mini (reasoning, fast)' },
+  // Google
   { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
   { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+  // Kimi / Moonshot
   { value: 'kimi-k2-0711-preview', label: 'Kimi K2 (very cheap)' },
 ];
 
@@ -87,24 +98,25 @@ export function AgentConfigPanel({ agent, onAgentUpdated }: AgentConfigPanelProp
     <div className="bg-[var(--surface-card)] border border-[var(--border-color)] rounded-xl shadow-lg p-4 w-72 space-y-4">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <Brain className="w-4 h-4 text-violet-600" />
+        <Brain className="w-4 h-4 text-violet-600" aria-hidden="true" />
         <div className="min-w-0">
           <p className="text-xs text-[var(--text-muted)] uppercase font-semibold tracking-wide">Agent Config</p>
           <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{agent.display_name}</p>
         </div>
         {saving && (
-          <span className="ml-auto text-xs text-[var(--text-muted)] animate-pulse">saving…</span>
+          <span className="ml-auto text-xs text-[var(--text-muted)] animate-pulse" role="status">saving…</span>
         )}
       </div>
 
       {error && (
-        <p className="text-xs text-[var(--color-danger)] bg-[var(--color-danger-light)] rounded px-2 py-1">{error}</p>
+        <p className="text-xs text-[var(--color-danger)] bg-[var(--color-danger-light)] rounded px-2 py-1" role="alert">{error}</p>
       )}
 
       {/* Model */}
       <div>
-        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">Model</label>
+        <label htmlFor="agent-config-model" className="block text-xs font-medium text-[var(--text-secondary)] mb-1">Model</label>
         <select
+          id="agent-config-model"
           className="w-full text-sm border border-[var(--border-color)] rounded-lg px-2 py-1.5 bg-[var(--surface-card)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
           value={model}
           onChange={handleModelChange}
@@ -118,8 +130,9 @@ export function AgentConfigPanel({ agent, onAgentUpdated }: AgentConfigPanelProp
 
       {/* Provider */}
       <div>
-        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">Provider</label>
+        <label htmlFor="agent-config-provider" className="block text-xs font-medium text-[var(--text-secondary)] mb-1">Provider</label>
         <select
+          id="agent-config-provider"
           className="w-full text-sm border border-[var(--border-color)] rounded-lg px-2 py-1.5 bg-[var(--surface-card)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
           value={provider}
           onChange={handleProviderChange}
@@ -130,20 +143,23 @@ export function AgentConfigPanel({ agent, onAgentUpdated }: AgentConfigPanelProp
         </select>
       </div>
 
-      {/* Thinking */}
+      {/* Thinking toggle */}
       <label className="flex items-center gap-3 cursor-pointer select-none">
         <div className="relative">
           <input
             type="checkbox"
-            className="sr-only"
+            className="sr-only peer"
             checked={thinking}
             onChange={handleThinkingChange}
+            aria-label="Enable thinking mode"
           />
           <div
-            className={`w-9 h-5 rounded-full transition-colors ${thinking ? 'bg-[var(--color-accent)]' : 'bg-[var(--surface-muted)]'}`}
+            className={`w-9 h-5 rounded-full transition-colors ${thinking ? 'bg-[var(--color-accent)]' : 'bg-[var(--surface-muted)]'} peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--color-accent)] peer-focus-visible:ring-offset-2`}
+            aria-hidden="true"
           />
           <div
             className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${thinking ? 'translate-x-4' : ''}`}
+            aria-hidden="true"
           />
         </div>
         <span className="text-sm text-[var(--text-secondary)]">Thinking enabled</span>
