@@ -115,12 +115,14 @@ jobs:
 
   # ============================================================================
   # Backend: Run database migrations (if needed)
+  # Uses safe_migrate to gracefully handle pgvector availability:
+  # - If pgvector is available: migrates all the way to head
+  # - If pgvector is not available: stops at revision 024 (safe fallback)
   # ============================================================================
   migrate:
     name: Run Migrations
     runs-on: ubuntu-latest
-    needs: [build-backend, changes]
-    continue-on-error: true
+    needs: [tests, changes]
     if: |
       (needs.changes.outputs.migrations == 'true') ||
       (github.event_name == 'workflow_dispatch' && inputs.run_migrations)
@@ -141,10 +143,11 @@ jobs:
         with:
           install_components: 'beta'
 
-      - name: Run Alembic migrations via Cloud Run Job
+      - name: Run migrations via Cloud Run Job
         run: |
           JOB_NAME="aict-migrate-dev"
           IMAGE="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:latest"
+          MIGRATE_CMD="python -m backend.scripts.safe_migrate"
 
           # Check if job exists
           if gcloud run jobs describe "$JOB_NAME" \
@@ -157,7 +160,7 @@ jobs:
               --image "$IMAGE" \
               --region "$GCLOUD_REGION" \
               --command "/bin/sh" \
-              --args="-c,python -m alembic -c backend/alembic.ini upgrade head" \
+              --args="-c,$MIGRATE_CMD" \
               --set-env-vars="ENV=development,PYTHONPATH=/app" \
               --set-env-vars="DATABASE_URL=${{ secrets.DATABASE_URL }}" \
               --set-env-vars="DB_SSL_MODE=${{ secrets.DB_SSL_MODE }}" \
@@ -173,7 +176,7 @@ jobs:
               --image "$IMAGE" \
               --region "$GCLOUD_REGION" \
               --command "/bin/sh" \
-              --args="-c,python -m alembic -c backend/alembic.ini upgrade head" \
+              --args="-c,$MIGRATE_CMD" \
               --set-env-vars="ENV=development,PYTHONPATH=/app" \
               --set-env-vars="DATABASE_URL=${{ secrets.DATABASE_URL }}" \
               --set-env-vars="DB_SSL_MODE=${{ secrets.DB_SSL_MODE }}" \
@@ -196,11 +199,13 @@ jobs:
   deploy-backend:
     name: Deploy Backend
     runs-on: ubuntu-latest
-    needs: [build-backend, migrate, changes]
-    # Run even if migrate was skipped or failed — the app handles missing migrations gracefully
+    needs: [build-backend, migrate]
+    # Deploy if build succeeded and migrations either passed or were skipped.
+    # Block deploy if migrations actually failed to prevent schema drift.
     if: |
       always() &&
-      needs.build-backend.result == 'success'
+      needs.build-backend.result == 'success' &&
+      (needs.migrate.result == 'success' || needs.migrate.result == 'skipped')
     permissions:
       contents: read
       id-token: write
