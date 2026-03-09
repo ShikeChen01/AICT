@@ -18,24 +18,16 @@ test.describe('Projects Dashboard', () => {
     await expect(projectsPage.heading).toBeVisible();
   });
 
-  test('shows project cards if projects exist', async ({ page }) => {
+  test('shows project cards or empty state', async ({ page }) => {
     const projectsPage = new ProjectsPage(page);
     await projectsPage.goto();
-    
-    // Wait for page to load
     await projectsPage.waitForLoad();
-    
-    // Either we have projects or we see an empty state
-    const projectCount = await projectsPage.getProjectCount();
-    
-    if (projectCount > 0) {
-      await expect(projectsPage.projectCards.first()).toBeVisible();
-    } else {
-      // Check for empty state message
-      await expect(
-        page.getByText(/no projects|create your first|get started/i)
-      ).toBeVisible();
-    }
+
+    // Wait for the API call to finish: either project cards appear or the empty state shows
+    const projectCard = projectsPage.projectCards.first();
+    const emptyState = page.getByRole('heading', { name: /no projects yet/i });
+
+    await expect(projectCard.or(emptyState)).toBeVisible({ timeout: 15_000 });
   });
 
   test('can navigate to project chat', async ({ page }) => {
