@@ -85,7 +85,7 @@ jobs:
           pip install -r backend/requirements.txt
 
       - name: Run migrations
-        run: python -m alembic -c backend/alembic.ini upgrade head
+        run: python -m backend.scripts.safe_migrate
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
@@ -188,7 +188,7 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Run migrations
-        run: python -m alembic -c backend/alembic.ini upgrade head
+        run: python -m backend.scripts.safe_migrate
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
@@ -281,7 +281,7 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Run migrations
-        run: python -m alembic -c backend/alembic.ini upgrade head
+        run: python -m backend.scripts.safe_migrate
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
@@ -370,7 +370,7 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Run migrations
-        run: python -m alembic -c backend/alembic.ini upgrade head
+        run: python -m backend.scripts.safe_migrate
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
