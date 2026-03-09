@@ -35,7 +35,7 @@ export default defineConfig({
   // Shared settings for all the projects below
   use: {
     // Base URL to use in actions like `await page.goto('/')`
-    baseURL: process.env.FRONTEND_URL || 'http://localhost:5173',
+    baseURL: process.env.FRONTEND_URL || 'http://localhost:3000',
     
     // Collect trace when retrying the failed test
     trace: 'on-first-retry',
@@ -68,19 +68,16 @@ export default defineConfig({
   ...(process.env.CI || process.env.START_SERVERS === '1' ? {
     webServer: [
       {
-        command: 'npm run dev',
-        url: 'http://localhost:5173',
-        reuseExistingServer: !process.env.CI,
-        timeout: 120 * 1000,
-      },
-      {
         command: 'cd .. && uvicorn backend.main:app --host 0.0.0.0 --port 8000',
         url: 'http://localhost:8000/api/v1/health',
         reuseExistingServer: !process.env.CI,
         timeout: 120 * 1000,
-        env: {
-          ENV: 'development',
-        },
+      },
+      {
+        command: 'npm run dev',
+        url: 'http://localhost:3000',
+        reuseExistingServer: !process.env.CI,
+        timeout: 120 * 1000,
       },
     ],
   } : {}),

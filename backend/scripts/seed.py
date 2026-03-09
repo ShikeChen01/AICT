@@ -24,7 +24,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 os.environ.setdefault("PYTHONPATH", "/app")
 
 from backend.db.models import Base, Project, Agent
-from backend.db.session import _resolve_database_url
 from backend.services.agent_service import get_agent_service
 from backend.config import settings
 
@@ -45,7 +44,7 @@ async def seed(
         repo_path: Local path where repo will be cloned.
         force: If True, delete and recreate existing project.
     """
-    url = _resolve_database_url()
+    url = settings.database_url
     print("Connecting to database...")
     engine = create_async_engine(url, echo=False)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

@@ -208,7 +208,8 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
           ENV: development
           API_TOKEN: test-token
-          FRONTEND_URL: http://localhost:5173
+          VITE_BACKEND_URL: http://localhost:8000
+          FRONTEND_URL: http://localhost:3000
           BACKEND_URL: http://localhost:8000
 
       - name: Upload Playwright report
@@ -288,8 +289,9 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
           ENV: development
           API_TOKEN: ${{ secrets.API_TOKEN }}
+          VITE_BACKEND_URL: http://localhost:8000
           BACKEND_URL: http://localhost:8000
-          FRONTEND_URL: http://localhost:5173
+          FRONTEND_URL: http://localhost:3000
           # Test login credentials
           TEST_LOGIN_ENABLED: 'true'
           TEST_LOGIN_EMAIL: ${{ secrets.TEST_LOGIN_EMAIL }}
@@ -373,6 +375,9 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
           ENV: development
           API_TOKEN: ${{ secrets.API_TOKEN }}
+          VITE_BACKEND_URL: http://localhost:8000
+          FRONTEND_URL: http://localhost:3000
+          BACKEND_URL: http://localhost:8000
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN_TEST: ${{ secrets.GITHUB_TOKEN_TEST }}
           GITHUB_TEST_OWNER: ${{ secrets.GITHUB_TEST_OWNER }}
