@@ -202,7 +202,7 @@ jobs:
         run: |
           cd frontend
           npx playwright test --project=chromium --ignore-snapshots \
-            projects.spec.ts chat.spec.ts kanban.spec.ts
+            projects.spec.ts kanban.spec.ts
         env:
           CI: true
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test

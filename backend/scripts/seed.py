@@ -82,7 +82,6 @@ async def seed(
             spec_repo_path=settings.spec_repo_path or "/data/specs",
             code_repo_url=actual_repo_url,
             code_repo_path=actual_repo_path,
-            git_token=settings.github_token if settings.github_token else None,
         )
         session.add(project)
         await session.flush()
@@ -117,7 +116,7 @@ async def _ensure_agents(session: AsyncSession, project: Project, agent_service)
             project_id=project.id,
             role="manager",
             display_name="Manager",
-            model=settings.claude_model or "claude-opus-4-5-20251101",
+            model=settings.manager_model_default,
             status="sleeping",
             sandbox_persist=True,
         )

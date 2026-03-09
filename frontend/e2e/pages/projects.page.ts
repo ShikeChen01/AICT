@@ -15,7 +15,7 @@ export class ProjectsPage {
 
   constructor(page: Page) {
     this.page = page;
-    this.heading = page.getByRole('heading', { name: /projects/i });
+    this.heading = page.getByRole('heading', { name: /^projects$/i });
     this.newProjectButton = page.getByRole('button', { name: /new project|create project/i });
     this.projectCards = page.getByTestId('project-card');
     this.projectNameInput = page.getByLabel(/name/i);
