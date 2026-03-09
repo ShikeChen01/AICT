@@ -297,8 +297,8 @@ jobs:
           TEST_LOGIN_EMAIL: ${{ secrets.TEST_LOGIN_EMAIL }}
           TEST_LOGIN_PASSWORD: ${{ secrets.TEST_LOGIN_PASSWORD }}
           # Test repository
-          GITHUB_TEST_TOKEN: ${{ secrets.GITHUB_TEST_TOKEN }}
-          GITHUB_TEST_REPOSITORY_LINK: ${{ secrets.GITHUB_TEST_REPOSITORY_LINK }}
+          GITHUB_TEST_TOKEN: ${{ secrets.GH_TEST_TOKEN }}
+          GITHUB_TEST_REPOSITORY_LINK: ${{ secrets.GH_TEST_REPOSITORY_LINK }}
           # Enable full LLM round-trip check when keys are available
           WAIT_FOR_AGENT_RESPONSE: 'true'
           CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
