@@ -193,9 +193,7 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
       - name: Seed test data
-        run: |
-          cd backend
-          python scripts/seed.py || echo "Seed script not available, continuing..."
+        run: python -m backend.scripts.seed || echo "Seed script not available, continuing..."
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
           ENV: development

@@ -36,7 +36,8 @@ async def api_client(session: AsyncSession):
 @pytest.fixture
 def auth_headers():
     """Standard auth headers for API requests."""
-    return {"Authorization": "Bearer change-me-in-production"}
+    from backend.config import settings
+    return {"Authorization": f"Bearer {settings.api_token}"}
 
 
 class TestHealthEndpoints:

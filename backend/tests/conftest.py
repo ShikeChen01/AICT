@@ -63,11 +63,14 @@ def postgres_container():
     _postgres_container = None
 
 
+_CI_DATABASE = bool(os.getenv("DATABASE_URL"))
+
+
 @pytest_asyncio.fixture
 async def engine(postgres_container):
     """
     Create database engine.
-    - Uses DATABASE_URL env if set (CI with service container)
+    - Uses DATABASE_URL env if set (CI with service container — schema via Alembic)
     - Uses PostgreSQL via testcontainers if INTEGRATION_TEST=1
     - Uses SQLite in-memory otherwise (faster for unit tests)
     """
@@ -87,17 +90,23 @@ async def engine(postgres_container):
             json_serializer=lambda obj: json.dumps(obj),
             json_deserializer=lambda s: json.loads(s) if s else None,
         )
-    
-    async with eng.begin() as conn:
-        if USE_POSTGRES:
-            await conn.execute(sa_text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.run_sync(Base.metadata.create_all)
-    
+
+    if _CI_DATABASE:
+        # Schema already created by `alembic upgrade head` in CI;
+        # calling create_all/drop_all would conflict with migration-managed
+        # constraint names (e.g. fk_agents_current_task vs fk_agent_current_task).
+        pass
+    else:
+        async with eng.begin() as conn:
+            if USE_POSTGRES:
+                await conn.execute(sa_text("CREATE EXTENSION IF NOT EXISTS vector"))
+            await conn.run_sync(Base.metadata.create_all)
+
     yield eng
-    
-    # Drop all tables and dispose
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+
+    if not _CI_DATABASE:
+        async with eng.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
     await eng.dispose()
 
 
