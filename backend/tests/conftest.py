@@ -67,16 +67,20 @@ def postgres_container():
 async def engine(postgres_container):
     """
     Create database engine.
-    - Uses PostgreSQL if INTEGRATION_TEST=1
+    - Uses DATABASE_URL env if set (CI with service container)
+    - Uses PostgreSQL via testcontainers if INTEGRATION_TEST=1
     - Uses SQLite in-memory otherwise (faster for unit tests)
     """
-    if USE_POSTGRES and postgres_container:
-        # Convert psycopg2 URL to asyncpg URL
+    from sqlalchemy import text as sa_text
+
+    db_url = os.getenv("DATABASE_URL")
+    if USE_POSTGRES and db_url:
+        eng = create_async_engine(db_url, echo=False)
+    elif USE_POSTGRES and postgres_container:
         url = postgres_container.get_connection_url()
         url = url.replace("psycopg2", "asyncpg")
         eng = create_async_engine(url, echo=False)
     else:
-        # SQLite for fast unit tests - requires explicit JSON serialization
         eng = create_async_engine(
             "sqlite+aiosqlite://",
             echo=False,
@@ -84,8 +88,9 @@ async def engine(postgres_container):
             json_deserializer=lambda s: json.loads(s) if s else None,
         )
     
-    # Create all tables
     async with eng.begin() as conn:
+        if USE_POSTGRES:
+            await conn.execute(sa_text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
     
     yield eng
