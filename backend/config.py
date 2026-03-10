@@ -81,11 +81,18 @@ class Settings(BaseSettings):
     auto_run_migrations_on_startup: bool = True
     startup_step_timeout_seconds: int = Field(default=20, ge=1, le=300)
 
-    # Sandbox VM — self-hosted Docker sandbox on a GCE instance
+    # Sandbox VM — self-hosted Docker sandbox on a GCE instance (legacy)
     sandbox_vm_host: str = ""          # e.g. "34.9.162.152" (external); used when internal not set
     sandbox_vm_internal_host: str = ""  # e.g. "10.128.0.3" — use for backend→sandbox when set (VPC)
     sandbox_vm_pool_port: int = 9090
     sandbox_vm_master_token: str = ""
+
+    # Sandbox Orchestrator (GKE) — replaces sandbox VM when set
+    # When sandbox_orchestrator_host is set, the backend uses GKE orchestrator
+    # instead of the legacy Docker pool manager on the sandbox VM.
+    sandbox_orchestrator_host: str = ""  # e.g. "sandbox-orchestrator.sandbox-system.svc.cluster.local"
+    sandbox_orchestrator_port: int = 9090
+    sandbox_orchestrator_token: str = ""
 
     # Logging — Cloud Logging on Cloud Run (K_SERVICE) or when USE_CLOUD_LOGGING=true
     use_cloud_logging: bool = Field(

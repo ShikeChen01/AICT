@@ -647,6 +647,7 @@ export interface SandboxInfo {
   status: string | null;
   sandbox_config_id: string | null;
   sandbox_config_name: string | null;
+  os_image: string | null;
 }
 
 export async function listSandboxes(projectId: string): Promise<SandboxInfo[]> {
@@ -679,6 +680,23 @@ export async function destroySandbox(agentId: string): Promise<{ ok: boolean }> 
 
 export async function applySandboxConfig(agentId: string): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>('POST', `/sandboxes/${agentId}/apply-config`, undefined, 300_000);
+}
+
+// ─── Sandbox OS Images ───────────────────────────────────────────────
+
+export interface SandboxOSImage {
+  slug: string;
+  display_name: string;
+  os_family: 'linux' | 'windows';
+  default: boolean;
+  resources: {
+    requests: { cpu: string; memory: string };
+    limits?: { cpu: string; memory: string };
+  };
+}
+
+export async function listSandboxImages(): Promise<SandboxOSImage[]> {
+  return request<SandboxOSImage[]>('GET', '/sandboxes/images');
 }
 
 // ─── Sandbox Configs (user-level) ────────────────────────────────────

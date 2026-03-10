@@ -46,32 +46,60 @@ class SandboxMetadata:
 
 
 class PoolManagerClient:
-    """Thin async REST client for the VM-side pool manager."""
+    """Thin async REST client for the sandbox orchestrator (GKE or legacy VM)."""
 
     def __init__(self) -> None:
-        vm_host = settings.sandbox_vm_internal_host or settings.sandbox_vm_host
-        self._base = (
-            f"http://{vm_host}:{settings.sandbox_vm_pool_port}/api"
-        )
+        # Prefer GKE orchestrator when configured; fall back to legacy VM
+        if settings.sandbox_orchestrator_host:
+            host = settings.sandbox_orchestrator_host
+            port = settings.sandbox_orchestrator_port
+            token = settings.sandbox_orchestrator_token
+        else:
+            host = settings.sandbox_vm_internal_host or settings.sandbox_vm_host
+            port = settings.sandbox_vm_pool_port
+            token = settings.sandbox_vm_master_token
+
+        self._base = f"http://{host}:{port}/api"
         self._headers = {
-            "Authorization": f"Bearer {settings.sandbox_vm_master_token}",
+            "Authorization": f"Bearer {token}",
         }
+        self._is_gke = bool(settings.sandbox_orchestrator_host)
 
     async def session_start(
         self,
         agent_id: str,
         persistent: bool = False,
         setup_script: str | None = None,
+        os_image: str | None = None,
+        tenant_id: str | None = None,
+        project_id: str | None = None,
     ) -> dict:
         body: dict = {"agent_id": agent_id, "persistent": persistent}
         if setup_script:
             body["setup_script"] = setup_script
-        # Longer timeout when setup_script is provided (scripts can install packages)
-        timeout = 300.0 if setup_script else 30.0
+        if os_image:
+            body["os_image"] = os_image
+        if tenant_id:
+            body["tenant_id"] = tenant_id
+        if project_id:
+            body["project_id"] = project_id
+        # Longer timeout: setup scripts can install packages, Windows pods
+        # can take up to 5 min for Autopilot node provisioning
+        timeout = 300.0 if setup_script else 120.0
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 f"{self._base}/sandbox/session/start",
                 json=body,
+                headers=self._headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def list_images(self) -> list[dict]:
+        """Fetch the OS image catalog from the orchestrator."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{self._base}/images",
                 headers=self._headers,
             )
             resp.raise_for_status()
@@ -153,7 +181,7 @@ class PoolManagerClient:
 
 
 class SandboxService:
-    """Manages sandbox lifecycle for agents using the self-hosted VM pool."""
+    """Manages sandbox lifecycle for agents using GKE orchestrator or legacy VM pool."""
 
     def __init__(self) -> None:
         self._pool = PoolManagerClient()
@@ -162,7 +190,7 @@ class SandboxService:
     # ── Core lifecycle ────────────────────────────────────────────────────────
 
     def _vm_configured(self) -> bool:
-        return bool(settings.sandbox_vm_host)
+        return bool(settings.sandbox_orchestrator_host or settings.sandbox_vm_host)
 
     async def ensure_running_sandbox(
         self,
@@ -196,23 +224,31 @@ class SandboxService:
         agent_id = str(agent.id)
         is_persistent = persistent if persistent is not None else bool(agent.sandbox_persist)
 
-        # Load the agent's sandbox config setup script (if assigned)
+        # Load the agent's sandbox config (setup script + os_image) if assigned
         setup_script: str | None = None
+        os_image: str | None = None
         if agent.sandbox_config_id:
             from backend.db.models import SandboxConfig
             from sqlalchemy import select
             result = await session.execute(
-                select(SandboxConfig.setup_script).where(SandboxConfig.id == agent.sandbox_config_id)
+                select(SandboxConfig.setup_script, SandboxConfig.os_image)
+                .where(SandboxConfig.id == agent.sandbox_config_id)
             )
-            row = result.scalar_one_or_none()
+            row = result.one_or_none()
             if row:
-                setup_script = row
+                setup_script = row.setup_script or None
+                os_image = row.os_image or None
 
         try:
             data = await self._pool.session_start(
                 agent_id,
                 persistent=is_persistent,
                 setup_script=setup_script,
+                os_image=os_image,
+                # tenant_id maps to project_id — in AICT, projects are the
+                # tenant boundary for sandbox isolation / billing.
+                tenant_id=str(agent.project_id) if agent.project_id else None,
+                project_id=str(agent.project_id) if agent.project_id else None,
             )
         except httpx.HTTPStatusError as exc:
             raise RuntimeError(
@@ -221,14 +257,20 @@ class SandboxService:
             ) from exc
 
         sandbox_id: str = data["sandbox_id"]
-        host_port: int = data["host_port"]
+        host_port: int = data.get("host_port", 8080)
         auth_token: str = data["auth_token"]
         created: bool = data.get("created", False)
-        ready: bool = data.get("ready", True)  # older pool managers don't send this
+        ready: bool = data.get("ready", True)
 
         # Register (or re-register) this sandbox in the client multiplexer.
-        # Prefer internal host when set (e.g. Cloud Run VPC connector → GCE private IP).
-        vm_host = settings.sandbox_vm_internal_host or settings.sandbox_vm_host
+        # GKE mode: orchestrator returns a K8s service hostname in "host".
+        # Legacy mode: use VM internal/external host + port mapping.
+        if self._pool._is_gke and data.get("host"):
+            vm_host = data["host"]
+            host_port = data.get("host_port", 8080)
+        else:
+            vm_host = settings.sandbox_vm_internal_host or settings.sandbox_vm_host
+
         self._client.register(
             sandbox_id=sandbox_id,
             vm_host=vm_host,

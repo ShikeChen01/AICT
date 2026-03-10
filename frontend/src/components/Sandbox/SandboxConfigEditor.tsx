@@ -7,12 +7,14 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Plus, Trash2, Save, X } from 'lucide-react';
+import { Loader2, Plus, Trash2, Save, X, Monitor } from 'lucide-react';
 import {
   listSandboxConfigs,
+  listSandboxImages,
   createSandboxConfig,
   updateSandboxConfig,
   deleteSandboxConfig,
+  type SandboxOSImage,
 } from '../../api/client';
 import type { SandboxConfig } from '../../types';
 import { Button, Card, Input, Textarea } from '../ui';
@@ -22,10 +24,12 @@ interface EditingConfig {
   name: string;
   description: string;
   setup_script: string;
+  os_image: string;
 }
 
 export function SandboxConfigEditor() {
   const [configs, setConfigs] = useState<SandboxConfig[]>([]);
+  const [osImages, setOsImages] = useState<SandboxOSImage[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<EditingConfig | null>(null);
@@ -34,8 +38,12 @@ export function SandboxConfigEditor() {
 
   const refresh = useCallback(async () => {
     try {
-      const data = await listSandboxConfigs();
+      const [data, images] = await Promise.all([
+        listSandboxConfigs(),
+        listSandboxImages().catch(() => []),
+      ]);
       setConfigs(data);
+      if (images.length > 0) setOsImages(images);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load configs');
     } finally {
@@ -58,6 +66,7 @@ export function SandboxConfigEditor() {
           name: editing.name.trim(),
           description: editing.description.trim() || null,
           setup_script: editing.setup_script,
+          os_image: editing.os_image || null,
         });
       } else {
         // Create new
@@ -65,6 +74,7 @@ export function SandboxConfigEditor() {
           name: editing.name.trim(),
           description: editing.description.trim() || null,
           setup_script: editing.setup_script,
+          os_image: editing.os_image || null,
         });
       }
       setEditing(null);
@@ -88,12 +98,15 @@ export function SandboxConfigEditor() {
     }
   };
 
+  const defaultOsImage = osImages.find((img) => img.default)?.slug ?? 'ubuntu-22.04';
+
   const startEditing = (config: SandboxConfig) => {
     setEditing({
       id: config.id,
       name: config.name,
       description: config.description ?? '',
       setup_script: config.setup_script,
+      os_image: config.os_image ?? defaultOsImage,
     });
     setError(null);
   };
@@ -104,6 +117,7 @@ export function SandboxConfigEditor() {
       name: '',
       description: '',
       setup_script: '#!/bin/bash\n# Install apps and configure the sandbox environment\n\n',
+      os_image: defaultOsImage,
     });
     setError(null);
   };
@@ -142,8 +156,20 @@ export function SandboxConfigEditor() {
             {cfg.description && (
               <div className="text-xs text-[var(--text-muted)] mt-0.5">{cfg.description}</div>
             )}
-            <div className="text-xs text-gray-400 mt-0.5">
-              {cfg.setup_script ? `${cfg.setup_script.split('\n').length} lines` : 'Empty script'}
+            <div className="flex items-center gap-2 mt-0.5">
+              {cfg.os_image && (
+                <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                  cfg.os_image.startsWith('windows')
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'bg-orange-100 text-orange-700'
+                }`}>
+                  <Monitor className="w-3 h-3" />
+                  {osImages.find((img) => img.slug === cfg.os_image)?.display_name ?? cfg.os_image}
+                </span>
+              )}
+              <span className="text-xs text-gray-400">
+                {cfg.setup_script ? `${cfg.setup_script.split('\n').length} lines` : 'Empty script'}
+              </span>
             </div>
           </div>
 
@@ -219,6 +245,34 @@ export function SandboxConfigEditor() {
                 onChange={(e) => setEditing({ ...editing, description: e.target.value })}
                 placeholder="Optional description of what this config sets up"
               />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Operating System</label>
+              <select
+                value={editing.os_image}
+                onChange={(e) => setEditing({ ...editing, os_image: e.target.value })}
+                className="w-full rounded border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                {osImages.length > 0 ? (
+                  osImages.map((img) => (
+                    <option key={img.slug} value={img.slug}>
+                      {img.display_name}
+                      {img.os_family === 'windows' ? ' (Windows)' : ''}
+                      {img.default ? ' — Default' : ''}
+                    </option>
+                  ))
+                ) : (
+                  <>
+                    <option value="ubuntu-22.04">Ubuntu 22.04 LTS</option>
+                    <option value="ubuntu-24.04">Ubuntu 24.04 LTS</option>
+                    <option value="debian-12">Debian 12 (Bookworm)</option>
+                    <option value="windows-server-2022">Windows Server 2022</option>
+                  </>
+                )}
+              </select>
+              <p className="text-xs text-gray-400 mt-1">
+                Base operating system for the sandbox VM. Windows sandboxes may take longer to start.
+              </p>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Setup Script</label>

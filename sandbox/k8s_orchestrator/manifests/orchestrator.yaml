@@ -1,0 +1,97 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Sandbox Orchestrator — K8s Deployment + Service
+#
+# Runs in the sandbox-system namespace with a ServiceAccount that has
+# RBAC permissions to create/delete Pods, Services, PVCs in the
+# "sandboxes" namespace.
+#
+# Apply: kubectl apply -f orchestrator.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-orchestrator
+  namespace: sandbox-system
+  labels:
+    app: sandbox-orchestrator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sandbox-orchestrator
+  template:
+    metadata:
+      labels:
+        app: sandbox-orchestrator
+    spec:
+      serviceAccountName: sandbox-orchestrator
+      containers:
+        - name: orchestrator
+          image: us-central1-docker.pkg.dev/aict-487016/aict-dev/sandbox-orchestrator:latest
+          ports:
+            - containerPort: 9090
+              name: http
+          env:
+            - name: MASTER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: orchestrator-secrets
+                  key: master-token
+            - name: SANDBOX_NAMESPACE
+              value: "sandboxes"
+            - name: REGISTRY_BASE
+              value: "us-central1-docker.pkg.dev/aict-487016/aict-dev"
+            - name: MAX_SANDBOXES
+              value: "50"
+            - name: PORT
+              value: "9090"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-orchestrator
+  namespace: sandbox-system
+  labels:
+    app: sandbox-orchestrator
+spec:
+  type: ClusterIP
+  selector:
+    app: sandbox-orchestrator
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+
+---
+
+# Secret for the orchestrator master token.
+# Create BEFORE applying this manifest:
+#
+#   TOKEN=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+#   kubectl create secret generic orchestrator-secrets \
+#     --namespace=sandbox-system \
+#     --from-literal=master-token="$TOKEN"
+#
+# Then set the same token in your backend .env as SANDBOX_ORCHESTRATOR_TOKEN.

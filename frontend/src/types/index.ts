@@ -785,6 +785,7 @@ export interface SandboxConfig {
   name: string;
   description: string | null;
   setup_script: string;
+  os_image: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -793,12 +794,14 @@ export interface SandboxConfigCreate {
   name: string;
   description?: string | null;
   setup_script?: string;
+  os_image?: string | null;
 }
 
 export interface SandboxConfigUpdate {
   name?: string;
   description?: string | null;
   setup_script?: string;
+  os_image?: string | null;
 }
 
 // ─── API Response ────────────────────────────────────────────────────

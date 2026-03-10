@@ -27,12 +27,14 @@ class SandboxConfigCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: str | None = None
     setup_script: str = ""
+    os_image: str | None = None  # e.g. "ubuntu-22.04", "windows-server-2022"
 
 
 class SandboxConfigUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
     description: str | None = None
     setup_script: str | None = None
+    os_image: str | None = None
 
 
 class SandboxConfigResponse(BaseModel):
@@ -41,6 +43,7 @@ class SandboxConfigResponse(BaseModel):
     name: str
     description: str | None
     setup_script: str
+    os_image: str | None
     created_at: str
     updated_at: str
 
@@ -80,6 +83,7 @@ async def create_config(
         name=body.name,
         description=body.description,
         setup_script=body.setup_script,
+        os_image=body.os_image,
     )
     db.add(config)
     try:
@@ -120,6 +124,8 @@ async def update_config(
         config.description = body.description
     if body.setup_script is not None:
         config.setup_script = body.setup_script
+    if body.os_image is not None:
+        config.os_image = body.os_image
     try:
         await db.commit()
     except Exception:

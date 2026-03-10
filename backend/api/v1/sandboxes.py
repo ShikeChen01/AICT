@@ -111,6 +111,32 @@ async def list_sandboxes(
     return items
 
 
+@router.get("/images")
+async def list_sandbox_images(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    List available OS images for sandbox creation.
+
+    Returns the OS catalog from the orchestrator (GKE) or a static list
+    for the legacy VM pool manager.
+    """
+    svc = _get_sandbox_service()
+    try:
+        return await svc._pool.list_images()
+    except Exception:
+        # Fallback: return a minimal static catalog if orchestrator is unreachable
+        return [
+            {
+                "slug": "ubuntu-22.04",
+                "display_name": "Ubuntu 22.04 LTS",
+                "os_family": "linux",
+                "default": True,
+                "resources": {"requests": {"cpu": "250m", "memory": "256Mi"}},
+            },
+        ]
+
+
 class PersistentToggle(BaseModel):
     persistent: bool
 

@@ -116,6 +116,7 @@ class SandboxConfig(Base):
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     setup_script = Column(Text, nullable=False, default="")
+    os_image = Column(String(50), nullable=True)  # e.g. "ubuntu-22.04", "windows-server-2022"
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 

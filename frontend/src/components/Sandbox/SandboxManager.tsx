@@ -182,8 +182,17 @@ export function SandboxManager({ projectId }: SandboxManagerProps) {
                   </span>
                   <Badge variant="default" className="text-[10px]">{sb.agent_role}</Badge>
                 </div>
-                <div className="mt-0.5 text-xs text-[var(--text-muted)]">
-                  {sb.sandbox_id}
+                <div className="mt-0.5 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                  <span>{sb.sandbox_id}</span>
+                  {sb.os_image && (
+                    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                      sb.os_image.startsWith('windows')
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-orange-100 text-orange-700'
+                    }`}>
+                      {sb.os_image}
+                    </span>
+                  )}
                 </div>
               </div>
 
