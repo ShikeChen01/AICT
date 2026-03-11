@@ -8,6 +8,7 @@ import type { Agent, AgentRole, ChannelMessage } from '../../types';
 import { Button } from '../ui';
 import { useAutoFollow } from '../../hooks';
 import { fetchAttachmentBlob } from '../../api/client';
+import { USER_AGENT_ID } from '../../constants';
 
 /** Fetches an attachment's bytes, memoises the blob URL, and cleans up on unmount. */
 function AttachmentImage({ attachmentId }: { attachmentId: string }) {
@@ -55,8 +56,6 @@ function AttachmentImage({ attachmentId }: { attachmentId: string }) {
     />
   );
 }
-
-const USER_AGENT_ID = '00000000-0000-0000-0000-000000000000';
 
 const ROLE_ABBREVIATION: Record<AgentRole, string> = {
   manager: 'GM',

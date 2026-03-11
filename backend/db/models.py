@@ -455,6 +455,11 @@ class Agent(Base):
         cascade="all, delete-orphan",
     )
 
+    __table_args__ = (
+        Index("ix_agents_project_status", "project_id", "status"),
+        Index("ix_agents_project_role", "project_id", "role"),
+    )
+
 
 # ── Tasks (MODIFIED: abort fields removed) ───────────────────────────
 
@@ -502,6 +507,10 @@ class Task(Base):
     created_by = relationship("Agent", foreign_keys=[created_by_id])
     subtasks = relationship("Task", back_populates="parent_task", foreign_keys=[parent_task_id])
     parent_task = relationship("Task", remote_side=[id], foreign_keys=[parent_task_id])
+
+    __table_args__ = (
+        Index("ix_tasks_project_status", "project_id", "status"),
+    )
 
 
 # ── Channel Messages (NEW) ──────────────────────────────────────────

@@ -10,6 +10,7 @@ v3 security hardening:
 
 import asyncio
 import os
+from dataclasses import dataclass
 from contextlib import asynccontextmanager
 from collections.abc import Awaitable
 
@@ -37,6 +38,37 @@ logger = get_logger(__name__)
 
 # Track background tasks
 _background_tasks: list[asyncio.Task] = []
+
+
+@dataclass
+class StartupState:
+    ready: bool = False
+    phase: str = "starting"
+    error: str | None = None
+
+
+def _get_startup_state(app: FastAPI) -> StartupState:
+    state = getattr(app.state, "startup_state", None)
+    if state is None:
+        state = StartupState()
+        app.state.startup_state = state
+    return state
+
+
+def _cloud_run_background_startup_enabled() -> bool:
+    return os.getenv("K_SERVICE") is not None
+
+
+def _is_startup_exempt_path(path: str) -> bool:
+    exempt_prefixes = (
+        "/health",
+        "/api/v1/health",
+        "/internal/agent/health",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+    )
+    return any(path == prefix or path.startswith(f"{prefix}/") for prefix in exempt_prefixes)
 
 
 async def _run_startup_step(name: str, step: Awaitable[None]) -> None:
@@ -201,28 +233,73 @@ async def _stop_background_tasks() -> None:
     logger.info("Background tasks stopped")
 
 
+async def _bootstrap_application(app: FastAPI, *, crash_on_failure: bool) -> None:
+    state = _get_startup_state(app)
+    try:
+        state.phase = "running_migrations"
+        await _run_startup_migrations()
+
+        state.phase = "provisioning_repositories"
+        await _run_startup_step("provision_repositories_on_startup", _provision_repositories_on_startup())
+
+        state.phase = "starting_workers"
+        await _start_worker_manager()
+
+        wm = get_worker_manager()
+        if wm.worker_count == 0:
+            logger.warning(
+                "WorkerManager started but registered 0 agent workers. "
+                "No agents are in the database for this project yet."
+            )
+
+        state.phase = "starting_background_tasks"
+        _background_tasks.append(asyncio.create_task(_run_broadcaster_forever()))
+        _background_tasks.append(asyncio.create_task(_run_reconciler_forever()))
+        _background_tasks.append(asyncio.create_task(_run_config_listener_forever()))
+
+        state.ready = True
+        state.phase = "ready"
+        state.error = None
+        logger.info("Application startup complete")
+    except asyncio.CancelledError:
+        state.phase = "cancelled"
+        raise
+    except Exception as exc:
+        state.ready = False
+        state.phase = "failed"
+        state.error = str(exc)
+        logger.critical("Application startup failed: %s", exc, exc_info=True)
+        if crash_on_failure:
+            raise
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Migrations: hard-fail so startup aborts on schema drift
-    await _run_startup_migrations()
+    state = _get_startup_state(app)
+    state.ready = False
+    state.phase = "starting"
+    state.error = None
 
-    # Repo provisioning: still soft-fail (non-critical)
-    await _run_startup_step("provision_repositories_on_startup", _provision_repositories_on_startup())
-
-    # Workers: hard-fail (already raises after retries)
-    await _start_worker_manager()
-
-    wm = get_worker_manager()
-    if wm.worker_count == 0:
-        logger.warning(
-            "WorkerManager started but registered 0 agent workers. "
-            "No agents are in the database for this project yet."
-        )
-    _background_tasks.append(asyncio.create_task(_run_broadcaster_forever()))
-    _background_tasks.append(asyncio.create_task(_run_reconciler_forever()))
-    _background_tasks.append(asyncio.create_task(_run_config_listener_forever()))
-    yield
-    await _stop_background_tasks()
+    startup_task: asyncio.Task | None = None
+    try:
+        if _cloud_run_background_startup_enabled():
+            logger.info("Cloud Run detected; deferring heavy startup behind readiness gate")
+            startup_task = asyncio.create_task(
+                _bootstrap_application(app, crash_on_failure=False)
+            )
+            app.state.startup_task = startup_task
+        else:
+            await _bootstrap_application(app, crash_on_failure=True)
+        yield
+    finally:
+        if startup_task is not None and not startup_task.done():
+            startup_task.cancel()
+            try:
+                await startup_task
+            except asyncio.CancelledError:
+                pass
+        if _background_tasks or get_worker_manager().is_started:
+            await _stop_background_tasks()
 
 
 app = FastAPI(title="AICT Backend", version="0.3.0", lifespan=lifespan)
@@ -253,6 +330,25 @@ app.add_middleware(
 # ---- Exception handlers -----------------------------------------------------
 
 app.add_exception_handler(AICTException, aict_exception_handler)
+
+
+@app.middleware("http")
+async def readiness_gate_middleware(request: Request, call_next):
+    if request.method == "OPTIONS" or _is_startup_exempt_path(request.url.path):
+        return await call_next(request)
+
+    startup_state = _get_startup_state(request.app)
+    if startup_state.ready:
+        return await call_next(request)
+
+    return JSONResponse(
+        status_code=503,
+        content={
+            "status": "failed" if startup_state.error else "starting",
+            "message": "Application startup is still in progress",
+            "phase": startup_state.phase,
+        },
+    )
 
 
 @app.exception_handler(Exception)

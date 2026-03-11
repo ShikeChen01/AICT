@@ -115,7 +115,6 @@ export function DashboardPage() {
           <main className="max-w-5xl mx-auto px-6 py-6">
             <DashboardView
               projectId={projectId}
-              projectName={project.name}
               onSwitchToBuilder={() => navigate(`/project/${projectId}/agent-build`)}
             />
           </main>
@@ -129,12 +128,10 @@ export function DashboardPage() {
 
 interface DashboardViewProps {
   projectId: string;
-  projectName: string;
   onSwitchToBuilder: () => void;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function DashboardView({ projectId, projectName: _projectName, onSwitchToBuilder }: DashboardViewProps) {
+function DashboardView({ projectId, onSwitchToBuilder }: DashboardViewProps) {
   const [agentOverviews, setAgentOverviews] = useState<AgentOverview[]>([]);
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);
   const [loading, setLoading] = useState(true);

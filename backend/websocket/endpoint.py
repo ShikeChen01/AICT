@@ -230,8 +230,8 @@ async def screen_stream_endpoint(
                     pass
     except WebSocketDisconnect:
         pass
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("screen_stream_endpoint: unexpected error for sandbox %s: %s", sandbox_id, exc)
     finally:
         await proxy.remove_viewer(sandbox_id, websocket)
 

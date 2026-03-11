@@ -6,8 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMessages, sendMessage } from '../api/client';
 import { useOptionalAgentStreamContext } from '../contexts/AgentStreamContext';
 import type { ChannelMessage } from '../types';
-
-const USER_AGENT_ID = '00000000-0000-0000-0000-000000000000';
+import { USER_AGENT_ID } from '../constants';
 
 interface UseMessagesOptions {
   projectId: string | null;

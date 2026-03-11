@@ -108,8 +108,12 @@ class BudgetService:
             total_seconds: float = result.scalar_one() or 0.0
             # Convert pod-seconds to cost
             return (total_seconds / 3600.0) * self.SANDBOX_COST_PER_HOUR_USD
-        except Exception:
-            return 0.0  # Table not yet migrated
+        except Exception as exc:
+            # Table not yet migrated — log at WARNING so silent budget bypass is visible
+            logger.warning(
+                "BudgetService: sandbox_usage_events query failed (migration pending?): %s", exc
+            )
+            return 0.0
 
     async def check_llm_budget(
         self,
@@ -185,8 +189,8 @@ class BudgetService:
                 },
             )
         except Exception as exc:
-            # Table not yet migrated — log and continue (non-fatal)
-            logger.debug("BudgetService: sandbox usage record skipped (migration pending?): %s", exc)
+            # Table not yet migrated — log at WARNING so metering gaps are visible
+            logger.warning("BudgetService: sandbox usage record failed (migration pending?): %s", exc)
 
     async def get_budget_summary(self, project_id: UUID) -> dict:
         """

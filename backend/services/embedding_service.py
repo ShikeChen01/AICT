@@ -55,6 +55,23 @@ class EmbeddingError(Exception):
     """Raised when Voyage AI returns an unexpected error."""
 
 
+def _is_retryable(exc: Exception) -> bool:
+    """Determine whether an embedding API error is transient and worth retrying.
+
+    Retryable conditions: HTTP 429 (rate-limit), 5xx server errors, and
+    connection/timeout exceptions.  The previous heuristic ("5" in str[:3])
+    matched false positives like "500 Internal" but also "5 results found".
+    """
+    if isinstance(exc, (asyncio.TimeoutError, ConnectionError, OSError)):
+        return True
+    error_str = str(exc).lower()
+    # Explicit status codes we know are transient
+    for code in ("429", "500", "502", "503", "504"):
+        if code in error_str:
+            return True
+    return False
+
+
 class EmbeddingService:
     """Async wrapper for Voyage AI text embeddings.
 
@@ -120,9 +137,7 @@ class EmbeddingService:
                 return result
             except Exception as exc:
                 last_exc = exc
-                error_str = str(exc).lower()
-                # Retryable: rate-limit (429) or transient 5xx
-                retryable = "429" in error_str or "5" in error_str[:3]
+                retryable = _is_retryable(exc)
                 if not retryable or attempt == max_retries:
                     break
                 wait = 2 ** attempt  # 2s, 4s, 8s
