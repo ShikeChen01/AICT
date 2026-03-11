@@ -53,7 +53,7 @@ from backend.tools.executors.agents import (
     run_remove_agent,
     run_interrupt_agent,
 )
-from backend.tools.executors.meta import run_sleep, run_get_project_metadata
+from backend.tools.executors.meta import run_sleep, run_think, run_get_project_metadata
 from backend.tools.executors.docs import run_write_architecture_doc
 from backend.tools.executors.knowledge import run_search_knowledge
 
@@ -102,6 +102,7 @@ _TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
     "read_history": run_read_history,
     "list_sessions": run_list_sessions,
     "sleep": run_sleep,
+    "think": run_think,
     "list_tasks": run_list_tasks,
     "get_task_details": run_get_task_details,
     "execute_command": run_execute_command,
@@ -297,6 +298,7 @@ def get_handlers_for_role(role: str) -> dict[str, ToolExecutor]:
 
 # Tools available during the thinking phase (Stage 1)
 _THINKING_PHASE_TOOL_NAMES = frozenset({
+    "think",
     "compact_history",
     "update_memory",
     "read_history",

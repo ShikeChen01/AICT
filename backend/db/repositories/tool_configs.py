@@ -106,6 +106,45 @@ class ToolConfigRepository(BaseRepository[ToolConfig]):
         await self.session.flush()
         return configs
 
+    async def _add_missing_defaults_for_agent(
+        self,
+        agent_id: UUID,
+        base_role: str,
+        existing: list[ToolConfig],
+    ) -> list[ToolConfig]:
+        """Backfill newly introduced default tools onto existing agents."""
+        existing_names = {tc.tool_name for tc in existing}
+        tool_defs = build_tool_defs_for_role(base_role)
+        next_position = (max((tc.position for tc in existing), default=-1) + 1)
+
+        added = False
+        for t in tool_defs:
+            if t["name"] in existing_names:
+                continue
+            tc = ToolConfig(
+                id=uuid.uuid4(),
+                agent_id=agent_id,
+                template_id=None,
+                tool_name=t["name"],
+                description=t["description"],
+                detailed_description=_normalize_detailed_description(
+                    t.get("detailed_description", "")
+                ),
+                input_schema=t["input_schema"],
+                allowed_roles=t.get("allowed_roles", ["*"]),
+                enabled=True,
+                position=next_position,
+            )
+            self.session.add(tc)
+            existing.append(tc)
+            existing_names.add(t["name"])
+            next_position += 1
+            added = True
+
+        if added:
+            await self.session.flush()
+        return existing
+
     async def bulk_update_agent_tools(
         self,
         agent_id: UUID,
@@ -159,5 +198,5 @@ class ToolConfigRepository(BaseRepository[ToolConfig]):
         """Return existing tool configs for agent, seeding defaults if missing."""
         existing = await self.list_for_agent(agent_id)
         if existing:
-            return existing
+            return await self._add_missing_defaults_for_agent(agent_id, base_role, existing)
         return await self.seed_for_agent(agent_id, base_role)

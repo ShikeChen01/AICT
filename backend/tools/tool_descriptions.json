@@ -193,6 +193,27 @@
     ]
   },
   {
+    "name": "think",
+    "description": "No-op thinking step for self-prompting.",
+    "detailed_description": [
+      "Use this when you want one deliberate extra reasoning turn without taking any external action.",
+      "It performs no side effects and returns no meaningful output.",
+      "Optionally include a short prompt to yourself so your next turn has a clear focus."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "Optional private self-prompt or note for the next reasoning step."
+        }
+      }
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
     "name": "list_tasks",
     "description": "List project tasks.",
     "detailed_description": [

@@ -7,6 +7,7 @@ import pytest
 
 from backend.config import settings
 from backend.services.sandbox_service import SandboxMetadata
+from backend.db.repositories.tool_configs import ToolConfigRepository
 from backend.tools.loop_registry import (
     RunContext,
     _run_execute_command,
@@ -105,6 +106,7 @@ def test_tool_defs_include_sandbox_tools_for_all_roles() -> None:
     for role in ("manager", "cto", "engineer"):
         tool_names = {tool["name"] for tool in get_tool_defs_for_role(role)}
         assert "sandbox_start_session" in tool_names
+        assert "think" in tool_names
 
 
 def test_tool_defs_include_spawn_engineer_for_manager_and_cto() -> None:
@@ -114,6 +116,19 @@ def test_tool_defs_include_spawn_engineer_for_manager_and_cto() -> None:
     assert "spawn_engineer" in manager_tools
     assert "spawn_engineer" in cto_tools
     assert "spawn_engineer" not in engineer_tools
+
+
+@pytest.mark.asyncio
+async def test_ensure_agent_tools_backfills_new_defaults(sample_manager, session) -> None:
+    repo = ToolConfigRepository(session)
+    tools = await repo.ensure_agent_tools(sample_manager.id, "manager")
+    think_tool = next(tc for tc in tools if tc.tool_name == "think")
+
+    await session.delete(think_tool)
+    await session.flush()
+
+    refreshed = await repo.ensure_agent_tools(sample_manager.id, "manager")
+    assert any(tc.tool_name == "think" for tc in refreshed)
 
 
 @pytest.mark.asyncio
@@ -400,12 +415,11 @@ async def test_llm_error_emits_fallback_message(
 
 
 @pytest.mark.asyncio
-async def test_max_loopbacks_emits_fallback_message(
+async def test_text_only_response_ends_session_normally(
     sample_manager, sample_project, session, monkeypatch
 ) -> None:
-    """When agent repeatedly produces text without tools, loop emits a fallback after MAX_LOOPBACKS."""
+    """A text-only assistant response should be treated as a valid completion."""
     unread = [_make_unread_msg(USER_AGENT_ID, sample_project.id, sample_manager.id, "hello")]
-    # Always return text content with no tool calls → triggers loopback every iteration
     _patch_loop_basics(monkeypatch, unread, llm_return=("some thinking text", [], _make_llm_response()))
 
     sess = await SessionService(session).create_session(
@@ -427,10 +441,8 @@ async def test_max_loopbacks_emits_fallback_message(
         emit_agent_message=capture_emit,
     )
 
-    assert result == "max_loopbacks"
-    assert len(emitted_messages) == 1
-    assert "unable" in emitted_messages[0].content.lower() or "rephrase" in emitted_messages[0].content.lower()
-    assert emitted_messages[0].target_agent_id == USER_AGENT_ID
+    assert result == "normal_end"
+    assert emitted_messages == []
 
 
 # ---------------------------------------------------------------------------
