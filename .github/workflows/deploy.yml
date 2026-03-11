@@ -85,18 +85,18 @@ jobs:
 
       - name: Build and push with Cloud Build
         run: |
-          IMAGE_TAG="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:latest"
           IMAGE_SHA="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:${{ github.sha }}"
+          IMAGE_LATEST="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:latest"
           gcloud builds submit \
             --project "$GCLOUD_PROJECT_ID" \
-            --tag "$IMAGE_TAG" \
+            --tag "$IMAGE_SHA" \
             --timeout=1200 .
-          # Also tag with commit SHA for rollback capability
-          gcloud artifacts docker tags add "$IMAGE_TAG" "$IMAGE_SHA" \
+          # Keep latest as a convenience alias, but deploy from the immutable SHA tag.
+          gcloud artifacts docker tags add "$IMAGE_SHA" "$IMAGE_LATEST" \
             --quiet 2>/dev/null || true
 
     outputs:
-      image: ${{ env.GCLOUD_ARTIFACT_REGISTRY_URL }}/backend:latest
+      image: ${{ env.GCLOUD_ARTIFACT_REGISTRY_URL }}/backend:${{ github.sha }}
 
   # ============================================================================
   # Backend: Run database migrations (if needed)
@@ -107,7 +107,10 @@ jobs:
   migrate:
     name: Run Migrations
     runs-on: ubuntu-latest
-    needs: [changes]
+    needs: [changes, build-backend]
+    if: |
+      (needs.changes.outputs.backend == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy_backend)
     permissions:
       contents: read
       id-token: write
@@ -128,7 +131,7 @@ jobs:
       - name: Run migrations via Cloud Run Job
         run: |
           JOB_NAME="aict-migrate-dev"
-          IMAGE="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:latest"
+          IMAGE="${{ needs.build-backend.outputs.image }}"
           MIGRATE_CMD="python -m backend.scripts.safe_migrate"
 
           # Check if job exists
@@ -205,7 +208,7 @@ jobs:
 
       - name: Deploy to Cloud Run
         run: |
-          IMAGE="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:latest"
+          IMAGE="${{ needs.build-backend.outputs.image }}"
           gcloud run deploy "$CLOUD_RUN_SERVICE" \
             --project "$GCLOUD_PROJECT_ID" \
             --image "$IMAGE" \
