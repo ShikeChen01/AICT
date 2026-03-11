@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     moonshot_base_url: str = "https://api.moonshot.ai/v1"
     manager_model_default: str = "claude-sonnet-4-6"
     cto_model_default: str = "claude-opus-4-6"
-    engineer_junior_model: str = "kimi-k2"
+    engineer_junior_model: str = "gpt-5.4"
     engineer_intermediate_model: str = "claude-sonnet-4-6"
     engineer_senior_model: str = "claude-opus-4-6"
     llm_request_timeout_seconds: int = Field(default=60, ge=5, le=300)
