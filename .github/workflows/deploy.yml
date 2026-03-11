@@ -133,8 +133,13 @@ jobs:
       - name: Run migrations via Cloud Run Job
         run: |
           JOB_NAME="aict-migrate-dev"
-          IMAGE="${{ needs.build-backend.outputs.image }}"
+          IMAGE="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:${{ github.sha }}"
           MIGRATE_CMD="python -m backend.scripts.safe_migrate"
+
+          if [ -z "$IMAGE" ]; then
+            echo "Resolved migration image is empty"
+            exit 1
+          fi
 
           # Check if job exists
           if gcloud run jobs describe "$JOB_NAME" \
@@ -210,7 +215,11 @@ jobs:
 
       - name: Deploy to Cloud Run
         run: |
-          IMAGE="${{ needs.build-backend.outputs.image }}"
+          IMAGE="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:${{ github.sha }}"
+          if [ -z "$IMAGE" ]; then
+            echo "Resolved deploy image is empty"
+            exit 1
+          fi
           gcloud run deploy "$CLOUD_RUN_SERVICE" \
             --project "$GCLOUD_PROJECT_ID" \
             --image "$IMAGE" \
