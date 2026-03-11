@@ -2,20 +2,31 @@
 WebSocket endpoint for real-time updates.
 
 Docs contract: /ws?token=<TOKEN>&project_id=<UUID>&channels=agent_stream,messages,kanban,agents,activity,backend_logs,workflow,all
+
+Security (v3 hardening — code review critical #1):
+  Every endpoint verifies (a) token validity AND (b) project/sandbox ownership before
+  accepting. This prevents cross-tenant data leakage for live project events, screen
+  streaming, and VNC access.
 """
 
 import json
 from uuid import UUID
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
 
-from backend.core.auth import verify_ws_token
+from backend.config import settings
+from backend.core.auth import verify_ws_token, _verify_firebase_token
 from backend.core.ws_backend_log_stream import ws_backend_log_stream
+from backend.db.session import AsyncSessionLocal
+from backend.db.models import Agent, Repository, RepositoryMembership, User
 from backend.websocket.events import create_backend_log_snapshot_event
 from backend.websocket.manager import Channel, ws_manager
 from backend.websocket.screen_stream import get_screen_stream_proxy
 from backend.websocket.vnc_proxy import proxy_vnc
+from backend.logging.my_logger import get_logger
 
+logger = get_logger(__name__)
 router = APIRouter()
 
 _CHANNEL_MAP = {
@@ -28,6 +39,83 @@ _CHANNEL_MAP = {
     "workflow": Channel.WORKFLOW,
     "all": Channel.ALL,
 }
+
+
+async def _verify_ws_project_access(token: str, project_id: UUID) -> bool:
+    """
+    Return True iff the token is valid AND the caller has access to project_id.
+
+    Rules (mirrors project_access.py):
+    - Shared api_token -> full access (dev/internal).
+    - Firebase token -> user must have a membership row OR project owner_id IS NULL.
+    """
+    if not token:
+        return False
+    if token == settings.api_token:
+        return True
+
+    decoded = _verify_firebase_token(token)
+    if decoded is None:
+        return False
+    firebase_uid = decoded.get("uid")
+    if not firebase_uid:
+        return False
+
+    async with AsyncSessionLocal() as db:
+        user_result = await db.execute(select(User).where(User.firebase_uid == firebase_uid))
+        user = user_result.scalar_one_or_none()
+        if user is None:
+            return False
+
+        repo_result = await db.execute(select(Repository).where(Repository.id == project_id))
+        repo = repo_result.scalar_one_or_none()
+        if repo is None:
+            return False
+
+        # Legacy unowned project accessible to any authenticated user
+        if repo.owner_id is None:
+            return True
+
+        mem_result = await db.execute(
+            select(RepositoryMembership).where(
+                RepositoryMembership.repository_id == project_id,
+                RepositoryMembership.user_id == user.id,
+            )
+        )
+        return mem_result.scalar_one_or_none() is not None
+
+
+async def _verify_ws_sandbox_access(token: str, sandbox_id: str) -> bool:
+    """
+    Return True iff the token is valid AND the caller has access to sandbox_id.
+
+    Resolves the agent that owns the sandbox, then delegates to project access check.
+    Falls back to True (token-only) if no agent is linked yet.
+    """
+    if not token:
+        return False
+    if token == settings.api_token:
+        return True
+
+    decoded = _verify_firebase_token(token)
+    if decoded is None:
+        return False
+    firebase_uid = decoded.get("uid")
+    if not firebase_uid:
+        return False
+
+    async with AsyncSessionLocal() as db:
+        agent_result = await db.execute(select(Agent).where(Agent.sandbox_id == sandbox_id))
+        agent = agent_result.scalar_one_or_none()
+
+    if agent is None:
+        # Sandbox not yet linked to an agent — allow if token is valid
+        return True
+
+    return await _verify_ws_project_access(token, agent.project_id)
+
+
+# ---- /ws  main event stream -------------------------------------------------
 
 
 @router.websocket("/ws")
@@ -43,11 +131,15 @@ async def websocket_endpoint(
     """
     WebSocket endpoint for real-time updates (docs contract).
 
-    Channels: agent_stream (agent_text, agent_tool_call, agent_tool_result),
-    messages (agent_message, system_message), kanban, agents, activity, workflow, all.
+    Security: verifies token validity then project ownership before accepting.
     """
     if not verify_ws_token(token):
         await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    # Ownership guard (code review critical #1)
+    if not await _verify_ws_project_access(token, project_id):
+        await websocket.close(code=4003, reason="Access denied to project")
         return
 
     channel_list = []
@@ -97,6 +189,9 @@ async def websocket_endpoint(
         await ws_manager.disconnect(websocket)
 
 
+# ---- /ws/screen  MJPEG screen stream ----------------------------------------
+
+
 @router.websocket("/ws/screen")
 async def screen_stream_endpoint(
     websocket: WebSocket,
@@ -106,12 +201,15 @@ async def screen_stream_endpoint(
     """
     WebSocket endpoint for live screen streaming from a sandbox container.
 
-    Transparently relays binary JPEG frames from the sandbox's /ws/screen
-    endpoint to the frontend viewer.  The upstream connection is shared
-    across multiple viewers of the same sandbox.
+    Security: verifies token validity then sandbox ownership before accepting.
     """
     if not verify_ws_token(token):
         await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    # Sandbox ownership guard (code review critical #1)
+    if not await _verify_ws_sandbox_access(token, sandbox_id):
+        await websocket.close(code=4003, reason="Access denied to sandbox")
         return
 
     await websocket.accept()
@@ -123,7 +221,6 @@ async def screen_stream_endpoint(
             msg_type = data.get("type")
             if msg_type == "websocket.disconnect":
                 break
-            # Handle ping/pong (Starlette sends type "websocket.receive" with "text" or "bytes")
             if msg_type == "websocket.receive" and "text" in data:
                 try:
                     msg = json.loads(data["text"])
@@ -139,6 +236,9 @@ async def screen_stream_endpoint(
         await proxy.remove_viewer(sandbox_id, websocket)
 
 
+# ---- /ws/vnc  interactive VNC -----------------------------------------------
+
+
 @router.websocket("/ws/vnc")
 async def vnc_endpoint(
     websocket: WebSocket,
@@ -148,12 +248,15 @@ async def vnc_endpoint(
     """
     WebSocket endpoint for interactive VNC remote desktop.
 
-    Bidirectionally relays VNC/RFB protocol bytes between a frontend noVNC
-    client and a sandbox container's /ws/vnc endpoint.  Unlike the MJPEG
-    screen stream, each VNC session is stateful and dedicated to one viewer.
+    Security: verifies token validity then sandbox ownership before accepting.
     """
     if not verify_ws_token(token):
         await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    # Sandbox ownership guard (code review critical #1)
+    if not await _verify_ws_sandbox_access(token, sandbox_id):
+        await websocket.close(code=4003, reason="Access denied to sandbox")
         return
 
     await websocket.accept(subprotocol="binary")

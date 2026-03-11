@@ -1,8 +1,15 @@
 """
 AICT Backend — FastAPI application entry point.
+
+v3 security hardening:
+- CORS: allow_origins read from ALLOWED_ORIGINS env var (default localhost only)
+- Global exception handler: does NOT leak exception type or message to clients
+- Migration failure: hard-fail (raises) instead of soft-fail so the container
+  restarts rather than serving a broken schema (code review high #1)
 """
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from collections.abc import Awaitable
 
@@ -35,7 +42,8 @@ _background_tasks: list[asyncio.Task] = []
 async def _run_startup_step(name: str, step: Awaitable[None]) -> None:
     """
     Run an optional startup step with timeout and soft-fail behavior.
-    Use only for non-critical steps (migrations, repo provisioning).
+    Use only for truly non-critical steps (repo provisioning).
+    Migrations are NOT run through this path — they use the hard-fail path.
     """
     try:
         await asyncio.wait_for(step, timeout=settings.startup_step_timeout_seconds)
@@ -52,13 +60,11 @@ async def _run_startup_step(name: str, step: Awaitable[None]) -> None:
 async def _provision_repositories_on_startup() -> None:
     if not settings.provision_repos_on_startup:
         return
-
     try:
         async with AsyncSessionLocal() as session:
             service = RepoProvisioningService()
             await service.provision_all_projects(session)
     except Exception as exc:
-        # Startup should stay available even if provisioning is skipped.
         logger.warning("Repository provisioning skipped: %s", exc)
 
 
@@ -71,9 +77,7 @@ async def _start_worker_manager() -> None:
     Start WorkerManager with retry logic. Raises on all failures so that
     Cloud Run restarts the container rather than serving a broken backend.
 
-    This is intentionally NOT wrapped in _run_startup_step because agent
-    workers are critical — a backend with no workers silently drops every
-    user message.
+    Intentionally NOT wrapped in _run_startup_step — agent workers are critical.
     """
     from backend.workers.worker_manager import reset_worker_manager
 
@@ -110,7 +114,6 @@ async def _start_worker_manager() -> None:
 
         if attempt < _WORKER_STARTUP_RETRIES:
             logger.info("Retrying WorkerManager startup in %ds...", _WORKER_STARTUP_RETRY_DELAY_S)
-            # Stop any partial state before retry to avoid duplicate workers
             try:
                 await manager.stop()
             except Exception:
@@ -125,15 +128,7 @@ async def _start_worker_manager() -> None:
 
 
 async def _run_reconciler_forever() -> None:
-    """
-    Keep the reconciler running indefinitely.
-
-    The reconciler heals orphan workers, stuck agents, orphaned sessions, and
-    stuck messages.  It starts after the WorkerManager is fully ready so that
-    it does not race with initial worker registration.
-    """
     from backend.workers.reconciler import run_reconciler_forever
-
     while True:
         try:
             await run_reconciler_forever()
@@ -145,15 +140,7 @@ async def _run_reconciler_forever() -> None:
 
 
 async def _run_config_listener_forever() -> None:
-    """Keep the ConfigListener running indefinitely.
-
-    ConfigListener holds a dedicated asyncpg LISTEN connection and marks agent
-    config dirty when the DB fires pg_notify on 'agent_config_changed'.
-    If it crashes or disconnects, run_forever() already handles reconnection;
-    this outer wrapper restarts the entire listener on unexpected exits.
-    """
     from backend.agents.config_listener import ConfigListener, _asyncpg_dsn
-
     wm = get_worker_manager()
     dsn = _asyncpg_dsn(settings.database_url)
     listener = ConfigListener(dsn=dsn, worker_manager=wm)
@@ -168,16 +155,7 @@ async def _run_config_listener_forever() -> None:
 
 
 async def _run_broadcaster_forever() -> None:
-    """
-    Keep the backend-log broadcaster running indefinitely.
-
-    Binds the stream to the current event loop so the logging handler (which
-    runs on arbitrary threads) can enqueue items safely.  The inner
-    run_broadcaster() logs per-item errors to stderr; wrapping it here ensures
-    the coroutine is restarted on unexpected exits.
-    """
     ws_backend_log_stream.bind_loop(asyncio.get_running_loop())
-
     while True:
         try:
             await ws_backend_log_stream.run_broadcaster()
@@ -189,18 +167,29 @@ async def _run_broadcaster_forever() -> None:
 
 
 async def _run_startup_migrations() -> None:
-    """Run database migrations before starting background workers."""
+    """
+    Run database migrations.
+
+    v3 change: migration failure is a HARD FAIL — we raise so the container
+    restarts rather than booting against an unmigrated schema (code review high #1).
+    The original soft-fail masked schema drift bugs as runtime errors.
+    """
     if not settings.auto_run_migrations_on_startup:
+        logger.info("Auto migrations disabled (AUTO_RUN_MIGRATIONS_ON_STARTUP=false)")
         return
-    await asyncio.to_thread(run_startup_migrations)
-    logger.info("Database migrations are up to date")
+    try:
+        await asyncio.to_thread(run_startup_migrations)
+        logger.info("Database migrations are up to date")
+    except Exception as exc:
+        logger.critical(
+            "Database migration FAILED — aborting startup to prevent schema drift: %s", exc
+        )
+        raise RuntimeError(f"Startup aborted: migration failed: {exc}") from exc
 
 
 async def _stop_background_tasks() -> None:
-    """Stop all background tasks gracefully."""
     manager = get_worker_manager()
     await manager.stop()
-
     for task in _background_tasks:
         if not task.done():
             task.cancel()
@@ -208,18 +197,19 @@ async def _stop_background_tasks() -> None:
                 await task
             except asyncio.CancelledError:
                 pass
-    
     _background_tasks.clear()
     logger.info("Background tasks stopped")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Optional soft-fail steps first (non-critical)
-    await _run_startup_step("run_startup_migrations", _run_startup_migrations())
+    # Migrations: hard-fail so startup aborts on schema drift
+    await _run_startup_migrations()
+
+    # Repo provisioning: still soft-fail (non-critical)
     await _run_startup_step("provision_repositories_on_startup", _provision_repositories_on_startup())
 
-    # Critical: workers must start or the container should crash-restart
+    # Workers: hard-fail (already raises after retries)
     await _start_worker_manager()
 
     wm = get_worker_manager()
@@ -232,22 +222,36 @@ async def lifespan(app: FastAPI):
     _background_tasks.append(asyncio.create_task(_run_reconciler_forever()))
     _background_tasks.append(asyncio.create_task(_run_config_listener_forever()))
     yield
-    # Shutdown
     await _stop_background_tasks()
 
 
-app = FastAPI(title="AICT Backend", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="AICT Backend", version="0.3.0", lifespan=lifespan)
 
-# CORS — allow all in development; tighten for production
+# ---- CORS -------------------------------------------------------------------
+# v3 hardening: restrict origins to configured list (code review medium #3).
+# Set ALLOWED_ORIGINS env var to a comma-separated list for production.
+# Development default remains localhost variants.
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "")
+if _raw_origins.strip():
+    _allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+else:
+    _allowed_origins = [
+        "http://localhost",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:8000",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Exception handlers
+# ---- Exception handlers -----------------------------------------------------
+
 app.add_exception_handler(AICTException, aict_exception_handler)
 
 
@@ -255,30 +259,23 @@ app.add_exception_handler(AICTException, aict_exception_handler)
 async def global_exception_handler(request: Request, exc: Exception):
     """
     Global exception handler for unhandled errors.
-    
-    Logs the full exception and returns a structured JSON error response
-    instead of an HTML 500 error page.
+
+    v3 hardening: does NOT include exception type or message in the response
+    body (code review medium #2). Full details still logged server-side.
     """
     logger.exception("Unhandled exception on %s %s: %s", request.method, request.url.path, exc)
-    
-    error_type = type(exc).__name__
-    error_msg = str(exc)
-    
-    # Truncate very long error messages
-    if len(error_msg) > 500:
-        error_msg = error_msg[:500] + "..."
-    
     return JSONResponse(
         status_code=500,
         content={
-            "detail": f"Internal server error: {error_type}",
-            "message": error_msg,
+            "detail": "An internal error occurred. Please try again or contact support.",
             "path": request.url.path,
-        }
+        },
     )
 
 
-# Test login (development only — mounted at root so path stays obfuscated)
+# ---- Routers ----------------------------------------------------------------
+
+# Test login (dev only — path is obfuscated to reduce accidental exposure)
 app.include_router(test_login_router)
 
 # Public API
@@ -287,5 +284,10 @@ app.include_router(api_router, prefix="/api/v1")
 # Internal API (agent tools)
 app.include_router(internal_router, prefix="/internal/agent")
 
-# WebSocket endpoint
+# WebSocket
 app.include_router(ws_router)
+
+# Health / metrics (v3)
+from backend.api.v1 import health, metrics as metrics_router  # noqa: E402
+app.include_router(health.router)
+app.include_router(metrics_router.router)

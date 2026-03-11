@@ -1,5 +1,6 @@
 """Repository REST API endpoints."""
 
+import asyncio
 import shutil
 import subprocess
 import uuid as uuid_module
@@ -113,7 +114,8 @@ async def create_repository(
     if current_user.github_token and "github.com" in code_repo_url:
         clone_url = code_repo_url.replace("https://", f"https://{current_user.github_token}@")
 
-    try:
+    def _do_clone_create() -> None:
+        """Blocking git clone — run in thread pool to avoid blocking the event loop."""
         subprocess.run(
             ["git", "clone", "--depth", "1", clone_url, str(code_path)],
             check=True,
@@ -121,9 +123,12 @@ async def create_repository(
             text=True,
             timeout=120,
         )
+
+    try:
+        await asyncio.to_thread(_do_clone_create)
     except subprocess.CalledProcessError as exc:
-        shutil.rmtree(spec_path, ignore_errors=True)
-        shutil.rmtree(code_path, ignore_errors=True)
+        await asyncio.to_thread(shutil.rmtree, spec_path, True)
+        await asyncio.to_thread(shutil.rmtree, code_path, True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to clone repository: {(exc.stderr or exc.stdout or 'unknown error').strip()}",
@@ -189,7 +194,8 @@ async def import_repository(
     if current_user.github_token and "github.com" in clone_url:
         clone_url = clone_url.replace("https://", f"https://{current_user.github_token}@")
 
-    try:
+    def _do_clone_import() -> None:
+        """Blocking git clone — run in thread pool to avoid blocking the event loop."""
         subprocess.run(
             ["git", "clone", "--depth", "1", clone_url, str(code_path)],
             check=True,
@@ -197,15 +203,18 @@ async def import_repository(
             text=True,
             timeout=120,
         )
+
+    try:
+        await asyncio.to_thread(_do_clone_import)
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()
-        shutil.rmtree(spec_path, ignore_errors=True)
+        await asyncio.to_thread(shutil.rmtree, spec_path, True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to clone repository: {stderr or 'unknown error'}",
         ) from exc
     except subprocess.TimeoutExpired as exc:
-        shutil.rmtree(spec_path, ignore_errors=True)
+        await asyncio.to_thread(shutil.rmtree, spec_path, True)
         raise HTTPException(
             status_code=status.HTTP_408_REQUEST_TIMEOUT,
             detail="Repository clone timed out",

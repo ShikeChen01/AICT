@@ -129,16 +129,26 @@ async def shutdown_graph_runtime() -> None:
                 _graph_checkpointer_cm = None
 
 def sandbox_should_persist(agent_role: str) -> bool:
-    """Manager keeps persistent sandboxes; engineers are task-ephemeral."""
-    if agent_role == "manager":
+    """
+    Determine sandbox persistence by role.
+
+    Leadership roles (manager, cto) keep persistent sandboxes so their
+    context survives across tasks.  Execution roles (engineer, worker,
+    researcher, reviewer) get ephemeral sandboxes that are reclaimed when
+    the task ends — aligns with the v3 ClusterSpec topology role set.
+    """
+    _PERSISTENT_ROLES: frozenset[str] = frozenset({"manager", "cto"})
+    _EPHEMERAL_ROLES: frozenset[str] = frozenset({"engineer", "worker", "researcher", "reviewer"})
+    if agent_role in _PERSISTENT_ROLES:
         return True
-    if agent_role == "engineer":
+    if agent_role in _EPHEMERAL_ROLES:
         return False
     raise InvalidAgentRole(agent_role)
 
 
 def _persistent_for_agent(agent: Agent) -> bool:
-    if agent.role in {"manager", "engineer"}:
+    _ALL_TYPED_ROLES = {"manager", "cto", "engineer", "worker", "researcher", "reviewer"}
+    if agent.role in _ALL_TYPED_ROLES:
         return sandbox_should_persist(agent.role)
     return bool(agent.sandbox_persist)
 

@@ -25,6 +25,8 @@ Each ADR follows the [Michael Nygard template](https://cognitect.com/blog/2011/1
 | [009](009-ephemeral-vs-persistent-sandboxes.md) | Ephemeral vs. persistent sandboxes | Accepted |
 | [010](010-frontend-react-context-only.md) | Frontend: React context only | Accepted |
 | [011](011-tenant-aware-sandbox-scheduling.md) | Tenant-aware sandbox scheduling | Proposed |
+| [012](012-gke-sandbox-orchestration.md) | GKE Autopilot sandbox orchestration | Accepted |
+| [013](013-v3-declarative-cluster-control.md) | v3 Declarative Agent Cluster Control | Accepted |
 
 ## Adding a New ADR
 
@@ -32,3 +34,7 @@ Each ADR follows the [Michael Nygard template](https://cognitect.com/blog/2011/1
 2. Use the template above (Status, Context, Decision, Consequences)
 3. Add an entry to this index
 4. Update the ADR table in [arc42-lite.md](../arc42-lite.md) section 9
+
+## Notes on ADR 001–010
+
+ADRs 001–010 are referenced in the index but not present in this directory — they document decisions made prior to the current repository structure and may exist in historical docs. This is tracked as a documentation gap in docs/v3/repository_code_review.md.

@@ -136,9 +136,12 @@ class TestCtoRouterLogic:
 
 
 # --- Workflow structure tests ---
-# NOTE: These tests require lazy imports due to circular import issues in the codebase.
-# The circular import chain is: workflow -> nodes -> tools -> services -> orchestrator -> workflow
-# These tests verify the graph structure works at runtime (after all modules are loaded).
+# NOTE (v3 tracking): These tests are skipped due to a known circular import chain:
+# workflow -> nodes -> tools -> services -> orchestrator -> workflow
+# Fixing this requires refactoring the import chain (v3 tech-debt item: break circular deps).
+# They are intentionally left as skip (not xfail) because they may legitimately pass at
+# runtime even though they fail in pytest isolation. See docs/v3/repository_code_review.md.
+# v3 ADR action item: resolve circular imports in Phase 2 tool-registry refactor.
 
 
 @pytest.mark.skip(reason="Circular import prevents isolated testing; works at runtime")

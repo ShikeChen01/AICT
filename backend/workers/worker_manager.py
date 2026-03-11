@@ -47,6 +47,21 @@ class WorkerManager:
         self._track_worker(worker, task)
         logger.info("Spawned AgentWorker for agent %s", agent_id)
 
+        # v3: register cluster membership in MessageRouter for topology-aware routing
+        try:
+            async with AsyncSessionLocal() as session:
+                from backend.db.models import Agent
+                result = await session.execute(
+                    select(Agent).where(Agent.id == agent_id)
+                )
+                agent = result.scalar_one_or_none()
+                if agent and agent.memory and isinstance(agent.memory, dict):
+                    cluster_name = agent.memory.get("cluster_name")
+                    if cluster_name:
+                        get_message_router().register_cluster_member(cluster_name, agent_id)
+        except Exception as exc:
+            logger.debug("WorkerManager: cluster registration skipped for agent %s: %s", agent_id, exc)
+
     def _on_worker_done(self, task: asyncio.Task) -> None:
         metadata = self._task_meta.pop(task, None)
         if task in self._tasks:
