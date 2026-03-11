@@ -84,6 +84,7 @@ jobs:
             --quiet
 
       - name: Build and push with Cloud Build
+        id: build
         run: |
           IMAGE_SHA="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:${{ github.sha }}"
           IMAGE_LATEST="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:latest"
@@ -94,9 +95,10 @@ jobs:
           # Keep latest as a convenience alias, but deploy from the immutable SHA tag.
           gcloud artifacts docker tags add "$IMAGE_SHA" "$IMAGE_LATEST" \
             --quiet 2>/dev/null || true
+          echo "image=$IMAGE_SHA" >> "$GITHUB_OUTPUT"
 
     outputs:
-      image: ${{ env.GCLOUD_ARTIFACT_REGISTRY_URL }}/backend:${{ github.sha }}
+      image: ${{ steps.build.outputs.image }}
 
   # ============================================================================
   # Backend: Run database migrations (if needed)
