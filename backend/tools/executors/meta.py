@@ -16,6 +16,11 @@ async def run_sleep(ctx: RunContext, tool_input: dict) -> str:
     return f"Slept for {duration} seconds."
 
 
+async def run_think(ctx: RunContext, tool_input: dict) -> str:
+    """No-op tool for deliberate self-prompting within the loop."""
+    return ""
+
+
 async def run_get_project_metadata(ctx: RunContext, _input: dict) -> str:
     from sqlalchemy import func
 

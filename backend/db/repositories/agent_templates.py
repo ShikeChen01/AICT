@@ -26,7 +26,7 @@ _THINKING_STAGE_CONTENT = (
     "3. Break it down into a concrete, step-by-step plan.\n"
     "4. Save your detailed plan to memory using update_memory (under 'Active Task').\n"
     "5. When your plan is complete and saved, call thinking_done to begin execution.\n\n"
-    "Available tools in this phase: update_memory, read_messages, read_history, thinking_done.\n"
+    "Available tools in this phase: think, update_memory, read_history, list_sessions, thinking_done.\n"
     "Do NOT call any other tools. Do NOT start implementing."
 )
 

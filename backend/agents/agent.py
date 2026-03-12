@@ -23,7 +23,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.agents.helpers import (
     MAX_ITERATIONS,
-    MAX_LOOPBACKS,
     MID_LOOP_MSG_CHECK_INTERVAL,
     assignment_message_for_agent,
     attach_images_to_prompt,
@@ -539,7 +538,7 @@ class Agent:
             self._callbacks.emit_text(content)
         pa.append_assistant(content or "", tool_calls)
 
-        # No tool calls: text-only loopback
+        # No tool calls: treat a text response as a valid completion.
         if not tool_calls:
             return await self._handle_loopback(session)
 
@@ -622,35 +621,14 @@ class Agent:
     # ── Loopback handling ──
 
     async def _handle_loopback(self, session: SessionState) -> str | None:
-        """Handle text-only response (no tool calls). Returns end_reason or None."""
-        session.loopbacks += 1
-        if session.loopbacks >= MAX_LOOPBACKS:
-            logger.warning(
-                "Agent %s hit max_loopbacks (%d) in session %s",
-                self._record.id, MAX_LOOPBACKS, session.session_id,
-            )
-            await self._services.session_service.end_session_force(
-                session.session_id, "max_loopbacks"
-            )
-            await send_fallback_message(
-                self._services.message_service,
-                self._record,
-                self._project.id,
-                "I was unable to produce a valid response after several attempts. "
-                "Please try rephrasing your request.",
-                self._callbacks.emit_agent_message,
-            )
-            return "max_loopbacks"
-
-        loopback_content = next(
-            (b.content for b in self._block_configs if b.block_key == "loopback" and b.enabled),
-            "You responded without calling any tools. This counts as a failed attempt. "
-            "Your next response MUST include at least one tool call. "
-            "If your work is complete, call END. If there is more to do, call the appropriate tool(s). "
-            "Do NOT reply with only text. Act now — call a tool in this response.",
+        """Handle assistant responses without tool calls as normal completion."""
+        session.loopbacks = 0
+        await self._services.session_service.end_session(
+            session.session_id,
+            end_reason="normal_end",
+            status="completed",
         )
-        self._prompt.append_loopback(loopback_content)
-        return None
+        return "normal_end"
 
     # ── Ephemeral tool result expiry ──
 
