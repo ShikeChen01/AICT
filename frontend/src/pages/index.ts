@@ -1,8 +1,10 @@
 export { AgentBuildPage } from './AgentBuild';
+export { AgentsPage } from './Agents';
 export { CoPilotPage } from './CoPilot';
 export { DashboardPage } from './Dashboard';
 export { MonitorPage } from './Monitor';
 export { ProjectsPage } from './Projects';
+export { SandboxPage } from './Sandbox';
 export { SettingsPage } from './Settings';
 export { LoginPage } from './Login';
 export { RegisterPage } from './Register';

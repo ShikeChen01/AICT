@@ -9,9 +9,7 @@ import {
   LayoutDashboard,
   Cpu,
   LayoutGrid,
-  BarChart3,
   Monitor,
-  Tv2,
   Settings,
   Sun,
   Moon,
@@ -34,14 +32,19 @@ export function TopNav() {
   const navItems: NavItem[] = projectId
     ? [
         {
-          label: 'Monitor',
-          path: `/project/${projectId}/monitor`,
+          label: 'Dashboard',
+          path: `/project/${projectId}/dashboard`,
+          icon: <LayoutDashboard className="h-4 w-4" aria-hidden="true" />,
+        },
+        {
+          label: 'Sandbox',
+          path: `/project/${projectId}/sandbox`,
           icon: <Monitor className="h-4 w-4" aria-hidden="true" />,
         },
         {
-          label: 'Co-Pilot',
-          path: `/project/${projectId}/copilot`,
-          icon: <Tv2 className="h-4 w-4" aria-hidden="true" />,
+          label: 'Agents',
+          path: `/project/${projectId}/agents`,
+          icon: <Cpu className="h-4 w-4" aria-hidden="true" />,
         },
         {
           label: 'Workspace',
@@ -49,24 +52,9 @@ export function TopNav() {
           icon: <MessageSquare className="h-4 w-4" aria-hidden="true" />,
         },
         {
-          label: 'Dashboard',
-          path: `/project/${projectId}/dashboard`,
-          icon: <LayoutDashboard className="h-4 w-4" aria-hidden="true" />,
-        },
-        {
-          label: 'Agent Build',
-          path: `/project/${projectId}/agent-build`,
-          icon: <Cpu className="h-4 w-4" aria-hidden="true" />,
-        },
-        {
           label: 'Kanban',
           path: `/project/${projectId}/kanban`,
           icon: <LayoutGrid className="h-4 w-4" aria-hidden="true" />,
-        },
-        {
-          label: 'Logs',
-          path: `/project/${projectId}/logs`,
-          icon: <BarChart3 className="h-4 w-4" aria-hidden="true" />,
         },
         {
           label: 'Settings',
