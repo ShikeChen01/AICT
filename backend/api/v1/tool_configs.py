@@ -41,6 +41,8 @@ class ToolConfigResponse(BaseModel):
     enabled: bool
     position: int
     estimated_tokens: int = 0
+    source: str = "native"
+    mcp_server_id: UUID | None = None
 
     model_config = {"from_attributes": True}
 
@@ -104,6 +106,8 @@ def _enrich_with_tokens(tc) -> dict:
         "enabled": tc.enabled,
         "position": tc.position,
         "estimated_tokens": tokens,
+        "source": getattr(tc, "source", "native") or "native",
+        "mcp_server_id": getattr(tc, "mcp_server_id", None),
     }
 
 

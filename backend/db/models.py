@@ -446,6 +446,37 @@ class PromptBlockConfig(Base):
     )
 
 
+class McpServerConfig(Base):
+    """Per-agent MCP server connection.
+
+    Each row represents one remote MCP server that an agent can reach.
+    Tools exposed by the server are discovered at runtime via tools/list
+    and injected into the agent's tool registry as first-class tools.
+    Individual MCP tools are toggled via ToolConfig rows (source='mcp').
+    """
+
+    __tablename__ = "mcp_server_configs"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    agent_id = Column(
+        Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+    )
+    name = Column(String(120), nullable=False)           # human label, e.g. "GitHub"
+    url = Column(Text, nullable=False)                   # SSE endpoint URL
+    api_key = Column(LargeBinary, nullable=True)         # Fernet-encrypted bearer token
+    headers = Column(JSON, nullable=True)                # extra HTTP headers (encrypted values)
+    enabled = Column(Boolean, default=True, nullable=False)
+    status = Column(String(30), default="disconnected", nullable=False)  # connected | disconnected | error
+    status_detail = Column(Text, nullable=True)          # last error message if status=error
+    tool_count = Column(Integer, default=0, nullable=False)  # cached count from last discovery
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_mcp_server_configs_agent", "agent_id"),
+    )
+
+
 class ToolConfig(Base):
     """Per-agent or per-template tool configuration.
 
@@ -453,6 +484,9 @@ class ToolConfig(Base):
     Exactly one of template_id or agent_id must be set.
     Users can edit: description, detailed_description, enabled, position.
     Users cannot edit: tool_name, input_schema, allowed_roles (structural).
+
+    source: 'native' (default, from tool_descriptions.json) or 'mcp' (discovered from MCP server).
+    mcp_server_id: if source='mcp', FK to the McpServerConfig that provides this tool.
     """
 
     __tablename__ = "tool_configs"
@@ -471,12 +505,17 @@ class ToolConfig(Base):
     allowed_roles = Column(JSON, nullable=False, default=list)
     enabled = Column(Boolean, default=True, nullable=False)
     position = Column(Integer, nullable=False, default=0)
+    source = Column(String(20), default="native", nullable=False)  # 'native' | 'mcp'
+    mcp_server_id = Column(
+        Uuid, ForeignKey("mcp_server_configs.id", ondelete="CASCADE"), nullable=True
+    )
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
     __table_args__ = (
         Index("ix_tool_configs_agent", "agent_id", "position"),
         Index("ix_tool_configs_template", "template_id", "position"),
+        Index("ix_tool_configs_mcp_server", "mcp_server_id"),
     )
 
 
