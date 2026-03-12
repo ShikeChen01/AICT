@@ -105,8 +105,8 @@ if [ ! -f "${SSL_DIR}/server.crt" ]; then
     # Postgres requires key to be readable only by owner
     chmod 600 "${SSL_DIR}/server.key"
     chmod 644 "${SSL_DIR}/server.crt"
-    # Postgres runs as uid 70 (postgres user in the Alpine image)
-    chown 70:70 "${SSL_DIR}/server.key" "${SSL_DIR}/server.crt"
+    # pgvector/pgvector:pg16 (Debian-based) runs postgres as uid 999
+    chown 999:999 "${SSL_DIR}/server.key" "${SSL_DIR}/server.crt"
     log "SSL certificate generated (valid 10 years)."
 else
     log "SSL certificate already exists."
@@ -158,6 +158,18 @@ done
 if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
     log "ERROR: Postgres did not become ready in time."
     docker logs aict-postgres --tail 50
+    exit 1
+fi
+
+# Ensure pgvector is available in the target database. This handles both
+# first-time setup and existing databases that were started before the
+# extension was explicitly enabled.
+log "Ensuring pgvector extension is enabled..."
+if ! docker exec aict-postgres psql -v ON_ERROR_STOP=1 -U aict -d aict \
+    -c "CREATE EXTENSION IF NOT EXISTS vector;" \
+    -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';"; then
+    log "ERROR: Failed to enable pgvector."
+    log "Make sure the container image provides the extension (expected: pgvector/pgvector:pg16)."
     exit 1
 fi
 

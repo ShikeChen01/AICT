@@ -289,17 +289,24 @@ def migrate_agent_sandbox_columns(conn) -> None:
     if not sandbox_id_present:
         return
 
+    # sandbox_configs.os_image was added in a later migration and may not exist
+    # on databases that were never migrated past the point it was added.
+    sc_has_os_image = has_column(conn, "sandbox_configs", "os_image")
+    os_image_expr = "sc.os_image" if sc_has_os_image else "'ubuntu-22.04'"
+    sc_has_setup_script = has_column(conn, "sandbox_configs", "setup_script")
+    setup_script_expr = "sc.setup_script" if sc_has_setup_script else "NULL"
+
     rows = conn.execute(
         text(
-            """
+            f"""
             SELECT
                 a.id AS agent_id,
                 a.project_id,
                 a.sandbox_config_id,
                 a.sandbox_id,
                 COALESCE(a.sandbox_persist, false) AS sandbox_persist,
-                sc.os_image,
-                sc.setup_script
+                {os_image_expr} AS os_image,
+                {setup_script_expr} AS setup_script
             FROM agents a
             LEFT JOIN sandbox_configs sc ON sc.id = a.sandbox_config_id
             WHERE a.sandbox_id IS NOT NULL
