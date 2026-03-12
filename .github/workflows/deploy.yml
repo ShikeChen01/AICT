@@ -104,7 +104,8 @@ jobs:
   # Backend: Run database migrations (if needed)
   # Uses safe_migrate to gracefully handle pgvector availability:
   # - If pgvector is available: migrates all the way to head
-  # - If pgvector is not available: stops at revision 024 (safe fallback)
+  # - If pgvector is not available: migrates the non-pgvector branch through
+  #   the latest backend schema needed by the app
   # ============================================================================
   migrate:
     name: Run Migrations
@@ -373,6 +374,17 @@ jobs:
         run: |
           URL="${{ steps.resolve.outputs.url }}"
           TOKEN="${{ secrets.API_TOKEN }}"
+          EMAIL="${{ secrets.TEST_LOGIN_EMAIL }}"
+          PASSWORD="${{ secrets.TEST_LOGIN_PASSWORD }}"
+
+          if [ -n "$EMAIL" ] && [ -n "$PASSWORD" ]; then
+            LOGIN_RESP=$(curl -sf "$URL/testfads89213xlogin" \
+              -H "Content-Type: application/json" \
+              -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" \
+              --max-time 10)
+            TOKEN=$(echo "$LOGIN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+            echo "Using token from test login"
+          fi
 
           REPOS=$(curl -sf "$URL/api/v1/repositories" \
             -H "Authorization: Bearer $TOKEN" \
@@ -382,6 +394,18 @@ jobs:
 
           if [ "$COUNT" = "0" ]; then
             echo "Warning: no repositories returned (may be expected for fresh deployment)"
+          else
+            PROJECT_ID=$(echo "$REPOS" | python3 -c "import sys,json; repos=json.load(sys.stdin); print(repos[0]['id'])")
+            curl -sf "$URL/api/v1/agents?project_id=$PROJECT_ID" \
+              -H "Authorization: Bearer $TOKEN" \
+              --max-time 10 >/dev/null
+            curl -sf "$URL/api/v1/agents/status?project_id=$PROJECT_ID" \
+              -H "Authorization: Bearer $TOKEN" \
+              --max-time 10 >/dev/null
+            curl -sf "$URL/api/v1/sandboxes?project_id=$PROJECT_ID" \
+              -H "Authorization: Bearer $TOKEN" \
+              --max-time 10 >/dev/null
+            echo "Dashboard-critical API checks passed"
           fi
 
           echo "Smoke test passed"

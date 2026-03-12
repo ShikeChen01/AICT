@@ -1,10 +1,9 @@
 """
 Run Alembic migrations with a pgvector-aware target revision.
 
-If the PostgreSQL server does not expose the `vector` extension yet, stop at
-revision 024 so the Knowledge Base schema can land without applying the
-pgvector-only upgrade in revision 025. Once the server is upgraded to a
-pgvector-capable image, rerunning this script will continue to `head`.
+If the PostgreSQL server does not expose the `vector` extension yet, migrate to
+the latest non-pgvector schema revision. The pgvector migration remains on its
+own branch and will be applied later once the database image supports it.
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
 
-SAFE_FALLBACK_REVISION = "024_rag_knowledge_base"
+SAFE_FALLBACK_REVISION = "028_sandbox_table"
 
 
 def _build_connect_args() -> dict:
@@ -92,8 +91,8 @@ def main() -> int:
         print("pgvector detected on server; running full migration to head.")
     else:
         print(
-            "pgvector not available on server; applying migrations through "
-            f"{SAFE_FALLBACK_REVISION} only."
+            "pgvector not available on server; applying non-pgvector schema "
+            f"through {SAFE_FALLBACK_REVISION}."
         )
 
     return run_alembic_upgrade(target_revision)

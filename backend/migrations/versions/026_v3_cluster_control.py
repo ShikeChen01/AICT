@@ -8,7 +8,7 @@ New tables:
 New columns (none — the os_image column on sandbox_configs was added in a prior session).
 
 Revision ID: 026
-Revises: 025_enable_pgvector_column
+Revises: 024_rag_knowledge_base
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "026"
-down_revision = "025_enable_pgvector_column"
+down_revision = "024_rag_knowledge_base"
 branch_labels = None
 depends_on = None
 

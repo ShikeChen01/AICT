@@ -5,7 +5,7 @@ def test_choose_target_revision_uses_head_when_pgvector_available():
     assert safe_migrate.choose_target_revision(True) == "head"
 
 
-def test_choose_target_revision_stops_at_phase_024_without_pgvector():
+def test_choose_target_revision_uses_non_pgvector_head_without_pgvector():
     assert (
         safe_migrate.choose_target_revision(False)
         == safe_migrate.SAFE_FALLBACK_REVISION
@@ -20,7 +20,7 @@ def test_main_runs_head_when_pgvector_is_available(monkeypatch):
     assert safe_migrate.main() == 0
 
 
-def test_main_stops_at_phase_024_when_pgvector_is_unavailable(monkeypatch):
+def test_main_uses_non_pgvector_head_when_pgvector_is_unavailable(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://example")
     monkeypatch.setattr(safe_migrate, "inspect_pgvector_available", lambda _: False)
 
