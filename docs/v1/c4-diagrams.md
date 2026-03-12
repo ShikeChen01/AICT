@@ -15,7 +15,7 @@ C4Context
     System_Ext(firebase, "Firebase Auth", "Google OAuth identity provider. Issues and verifies ID tokens.")
     System_Ext(github, "GitHub", "Git hosting. Repos are created, cloned, and pushed here.")
     System_Ext(llm, "LLM Providers", "Anthropic Claude, Google Gemini, OpenAI GPT. Provide completions for agent reasoning.")
-    System_Ext(gcp, "Google Cloud Platform", "Cloud Run (compute), Cloud SQL (database), Artifact Registry (images), Cloud Build (CI)")
+    System_Ext(gcp, "Google Cloud Platform", "Cloud Run (compute), self-hosted PostgreSQL on GCE VM, Artifact Registry (images), Cloud Build (CI)")
 
     Rel(user, aict, "Sends messages, observes agent output, manages projects", "HTTPS / WSS")
     Rel(aict, firebase, "Verifies user identity tokens", "HTTPS")
@@ -45,7 +45,7 @@ C4Context
   ┌──────────┐  ┌───────────┐  ┌──────────┐  ┌──────────────┐
   │ Firebase │  │  GitHub   │  │   LLM    │  │    GCP       │
   │   Auth   │  │           │  │ Providers│  │ (Cloud Run,  │
-  │          │  │ Repo CRUD │  │ Claude   │  │  Cloud SQL,  │
+  │          │  │ Repo CRUD │  │ Claude   │  │  GCE VM DB,  │
   │ Verifies │  │ Clone     │  │ Gemini   │  │  Artifact    │
   │ ID tokens│  │ Push / PR │  │ GPT      │  │  Registry)   │
   └──────────┘  └───────────┘  └──────────┘  └──────────────┘
@@ -66,7 +66,7 @@ C4Container
     Container_Boundary(aict, "AICT Platform") {
         Container(spa, "Frontend SPA", "React 19, TypeScript, Vite 7", "Single-page application. Project management, agent chat, kanban board, workflow graph, file browser.")
         Container(backend, "Backend API", "Python 3.11, FastAPI, uvicorn", "REST API, WebSocket endpoint, agent worker runtime, reconciler. Runs as a single Cloud Run container.")
-        ContainerDb(db, "PostgreSQL", "Cloud SQL / PostgreSQL 15+", "Single source of truth for all state: users, projects, agents, tasks, messages, sessions.")
+        ContainerDb(db, "PostgreSQL", "Self-hosted PostgreSQL 16 on GCE VM", "Single source of truth for all state: users, projects, agents, tasks, messages, sessions.")
         Container(sandbox, "Sandbox Pool Manager", "Python, Docker", "Manages a pool of isolated sandbox containers for agent code execution. REST API on port 9090.")
         Container(sandbox_vm, "Sandbox Container", "Ubuntu 22.04, Docker", "Isolated execution environment per agent. Runs shell commands, git operations, code editing.")
     }
@@ -113,7 +113,7 @@ C4Container
 │                                              ▼               ▼                   │
 │  ┌─────────────────────────┐         ┌────────────────────────────────────────┐  │
 │  │   PostgreSQL            │         │   Sandbox Pool Manager                 │  │
-│  │   (Cloud SQL)           │         │   (port 9090)                          │  │
+│  │   (GCE VM, self-hosted) │         │   (port 9090)                          │  │
 │  │                         │         │                                        │  │
 │  │   Tables:               │         │   Manages Docker containers:           │  │
 │  │   - users               │         │   ┌────────┐ ┌────────┐ ┌────────┐   │  │

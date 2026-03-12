@@ -19,7 +19,7 @@ export default defineConfig({
     include: ['@novnc/novnc'],
   },
   server: {
-    port: 3001,
+    port: 3000,
     strictPort: true,
     proxy: {
       '/api': {

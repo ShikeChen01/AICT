@@ -221,11 +221,11 @@ For VNC from the browser (frontend → sandbox), we need an Ingress or the exist
 - **Existing:** `us-central1-docker.pkg.dev/aict-487016/aict-dev`
 - **New images to push:** sandbox-ubuntu-22.04, sandbox-ubuntu-24.04, sandbox-debian-12, sandbox-windows-2022, sandbox-orchestrator
 
-### Cloud SQL PostgreSQL
+### Database Connectivity
 
-- **New instance** (previous was deleted): `aict-db-v2`
-- **Tier:** db-f1-micro (dev) or db-custom-1-3840 (prod)
-- **Same VPC** for private IP access from both Cloud Run and GKE
+- **Current database:** self-hosted PostgreSQL on the GCE Postgres VM
+- **Network path:** same VPC for private IP access from both Cloud Run and GKE
+- **Constraint:** sandbox orchestration migration should not require a separate Cloud SQL adoption
 
 ### Networking
 
@@ -236,7 +236,7 @@ For VNC from the browser (frontend → sandbox), we need an Ingress or the exist
 
 ## Migration Path
 
-1. Create GKE Autopilot cluster + Cloud SQL instance (infra script)
+1. Create GKE Autopilot cluster (infra script)
 2. Build and push sandbox images to Artifact Registry
 3. Deploy sandbox-orchestrator to GKE
 4. Update backend env vars to point at GKE orchestrator instead of VM pool manager

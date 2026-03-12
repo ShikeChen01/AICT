@@ -1,5 +1,5 @@
 # Start local PostgreSQL for development.
-# Optional: use this when testing fully locally (not Cloud SQL).
+# Optional: use this when testing fully locally instead of the shared dev DB.
 
 $ContainerName = "aict-postgres-local"
 $Image = "postgres:16"

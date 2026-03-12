@@ -96,7 +96,7 @@ Key Cloud Run flags:
 - `--min-instances 1` — Keeps one container warm to avoid cold-start delays (agents must be running)
 - `--cpu-boost` — CPU boost at startup helps the heavy asyncio startup (WorkerManager, agent spawning) complete faster
 
-The deploy script constructs `DATABASE_URL` from the `POSTGRES_VM_*` env vars (host, port, user, password, db) and writes it to a temporary `tmp_env_vars.yaml` file, deleted in a `finally` block.
+The deploy scripts construct `DATABASE_URL` from the `POSTGRES_VM_*` env vars (host, port, user, password, db) and write it to a temporary env file, deleted in a `finally` block. The GitHub Actions deploy workflow follows the same VM-backed pattern instead of relying on a separate prebuilt `DATABASE_URL` secret.
 
 ---
 

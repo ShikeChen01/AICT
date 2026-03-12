@@ -1,5 +1,5 @@
 # Run backend locally.
-# Uses .env.development when ENV=development (connects to Cloud SQL dev DB).
+# Uses .env.development when ENV=development (typically the shared dev VM DB).
 
 param(
     [string]$Host = "0.0.0.0",

@@ -101,10 +101,7 @@ jobs:
       image: ${{ steps.build.outputs.image }}
 
   # ============================================================================
-  # Backend: Run database migrations (if needed)
-  # Uses safe_migrate to gracefully handle pgvector availability:
-  # - If pgvector is available: migrates all the way to head
-  # - If pgvector is not available: stops at revision 024 (safe fallback)
+  # Backend: Run database migrations against self-hosted Postgres VM
   # ============================================================================
   migrate:
     name: Run Migrations
@@ -134,7 +131,26 @@ jobs:
         run: |
           JOB_NAME="aict-migrate-dev"
           IMAGE="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:${{ github.sha }}"
-          MIGRATE_CMD="python -m backend.scripts.safe_migrate"
+          MIGRATE_CMD="python -m backend.scripts.upgrade_db"
+          DB_HOST="${{ secrets.POSTGRES_VM_HOST }}"
+          DB_PORT="${{ secrets.POSTGRES_VM_PORT }}"
+          DB_USER="${{ secrets.POSTGRES_VM_USER }}"
+          DB_PASSWORD="${{ secrets.POSTGRES_VM_PASSWORD }}"
+          DB_NAME="${{ secrets.POSTGRES_VM_DB }}"
+          DB_SSL_MODE="${{ secrets.DB_SSL_MODE }}"
+          VPC_CONNECTOR_NAME="${{ secrets.VPC_CONNECTOR_NAME }}"
+
+          DB_PORT="${DB_PORT:-5432}"
+          DB_USER="${DB_USER:-aict}"
+          DB_NAME="${DB_NAME:-aict}"
+
+          if [ -z "$DB_HOST" ] || [ -z "$DB_PASSWORD" ] || [ -z "$VPC_CONNECTOR_NAME" ]; then
+            echo "Missing required self-hosted Postgres migration secrets"
+            exit 1
+          fi
+
+          ENCODED_DB_PASSWORD="$(DB_PASSWORD="$DB_PASSWORD" python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["DB_PASSWORD"], safe=""))')"
+          DATABASE_URL="postgresql+asyncpg://${DB_USER}:${ENCODED_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
 
           if [ -z "$IMAGE" ]; then
             echo "Resolved migration image is empty"
@@ -154,10 +170,10 @@ jobs:
               --command "/bin/sh" \
               --args="-c,$MIGRATE_CMD" \
               --set-env-vars="ENV=development,PYTHONPATH=/app" \
-              --set-env-vars="DATABASE_URL=${{ secrets.DATABASE_URL }}" \
-              --set-env-vars="DB_SSL_MODE=${{ secrets.DB_SSL_MODE }}" \
+              --set-env-vars="DATABASE_URL=$DATABASE_URL" \
+              --set-env-vars="DB_SSL_MODE=$DB_SSL_MODE" \
               --set-env-vars="API_TOKEN=${{ secrets.API_TOKEN }}" \
-              --vpc-connector "${{ secrets.VPC_CONNECTOR_NAME }}" \
+              --vpc-connector "$VPC_CONNECTOR_NAME" \
               --vpc-egress private-ranges-only \
               --max-retries 0 \
               --task-timeout 600s
@@ -170,10 +186,10 @@ jobs:
               --command "/bin/sh" \
               --args="-c,$MIGRATE_CMD" \
               --set-env-vars="ENV=development,PYTHONPATH=/app" \
-              --set-env-vars="DATABASE_URL=${{ secrets.DATABASE_URL }}" \
-              --set-env-vars="DB_SSL_MODE=${{ secrets.DB_SSL_MODE }}" \
+              --set-env-vars="DATABASE_URL=$DATABASE_URL" \
+              --set-env-vars="DB_SSL_MODE=$DB_SSL_MODE" \
               --set-env-vars="API_TOKEN=${{ secrets.API_TOKEN }}" \
-              --vpc-connector "${{ secrets.VPC_CONNECTOR_NAME }}" \
+              --vpc-connector "$VPC_CONNECTOR_NAME" \
               --vpc-egress private-ranges-only \
               --max-retries 0 \
               --task-timeout 600s
@@ -216,6 +232,26 @@ jobs:
       - name: Deploy to Cloud Run
         run: |
           IMAGE="${GCLOUD_ARTIFACT_REGISTRY_URL}/backend:${{ github.sha }}"
+          DB_HOST="${{ secrets.POSTGRES_VM_HOST }}"
+          DB_PORT="${{ secrets.POSTGRES_VM_PORT }}"
+          DB_USER="${{ secrets.POSTGRES_VM_USER }}"
+          DB_PASSWORD="${{ secrets.POSTGRES_VM_PASSWORD }}"
+          DB_NAME="${{ secrets.POSTGRES_VM_DB }}"
+          DB_SSL_MODE="${{ secrets.DB_SSL_MODE }}"
+          VPC_CONNECTOR_NAME="${{ secrets.VPC_CONNECTOR_NAME }}"
+
+          DB_PORT="${DB_PORT:-5432}"
+          DB_USER="${DB_USER:-aict}"
+          DB_NAME="${DB_NAME:-aict}"
+
+          if [ -z "$DB_HOST" ] || [ -z "$DB_PASSWORD" ] || [ -z "$VPC_CONNECTOR_NAME" ]; then
+            echo "Missing required self-hosted Postgres deploy secrets"
+            exit 1
+          fi
+
+          ENCODED_DB_PASSWORD="$(DB_PASSWORD="$DB_PASSWORD" python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["DB_PASSWORD"], safe=""))')"
+          DATABASE_URL="postgresql+asyncpg://${DB_USER}:${ENCODED_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+
           if [ -z "$IMAGE" ]; then
             echo "Resolved deploy image is empty"
             exit 1
@@ -226,11 +262,11 @@ jobs:
             --region "$GCLOUD_REGION" \
             --platform managed \
             --allow-unauthenticated \
-            --vpc-connector "${{ secrets.VPC_CONNECTOR_NAME }}" \
+            --vpc-connector "$VPC_CONNECTOR_NAME" \
             --vpc-egress private-ranges-only \
             --set-env-vars="ENV=development" \
-            --set-env-vars="DATABASE_URL=${{ secrets.DATABASE_URL }}" \
-            --set-env-vars="DB_SSL_MODE=${{ secrets.DB_SSL_MODE }}" \
+            --set-env-vars="DATABASE_URL=$DATABASE_URL" \
+            --set-env-vars="DB_SSL_MODE=$DB_SSL_MODE" \
             --set-env-vars="API_TOKEN=${{ secrets.API_TOKEN }}" \
             --set-env-vars="FIREBASE_CREDENTIALS_PATH=${{ secrets.FIREBASE_CREDENTIALS_PATH }}" \
             --set-env-vars="FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" \

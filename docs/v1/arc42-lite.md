@@ -48,7 +48,7 @@ AICT provides the infrastructure and primitives for multi-agent orchestration. I
 | Constraint | Rationale |
 |-----------|-----------|
 | Small team developer project | Architecture must be maintainable by a small team of developers. Avoid over-engineering. |
-| GCP deployment target | Cloud Run for compute, Cloud SQL for database. Infrastructure-as-code not yet required. |
+| GCP deployment target | Cloud Run for compute, self-hosted PostgreSQL on a GCE VM for database. Infrastructure-as-code not yet required. |
 | Firebase for auth | Existing dependency. No plans to replace. |
 
 ### Convention Constraints
@@ -121,7 +121,7 @@ See [C4 Diagrams](c4-diagrams.md) for L1 (Context), L2 (Container), and L3 (Comp
 | Build tool | Vite 7 | Fast HMR, TypeScript support, simple config. |
 | Styling | Tailwind CSS 4 | Utility-first, no component library lock-in. |
 | Container runtime | Docker | Standard isolation for sandboxes. Deployable anywhere. |
-| Deployment | Google Cloud Run | Managed scaling, pay-per-use, WebSocket support, Cloud SQL integration. |
+| Deployment | Google Cloud Run | Managed scaling, pay-per-use, WebSocket support, and VPC connectivity to the self-hosted Postgres VM. |
 
 ---
 
