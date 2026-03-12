@@ -200,6 +200,50 @@ class Agent:
     def token_allocations(self) -> dict | None:
         return getattr(self._record, "token_allocations", None)
 
+    # ── MCP tool loading ──
+
+    async def _load_mcp_handlers(self, db: AsyncSession, agent_id: UUID) -> None:
+        """Register bridge executors for any enabled MCP tools on this agent.
+
+        For every ToolConfig row with source='mcp' and enabled=True, we add a
+        closure-wrapped version of run_mcp_tool to self._handlers keyed by the
+        prefixed tool name (e.g. mcp__github__list_issues).
+
+        The closure captures the tool name so the bridge executor can look up
+        the correct McpServerConfig at call time.
+        """
+        from backend.tools.executors.mcp_bridge import run_mcp_tool
+        from backend.db.models import ToolConfig
+
+        result = await db.execute(
+            select(ToolConfig).where(
+                ToolConfig.agent_id == agent_id,
+                ToolConfig.source == "mcp",
+                ToolConfig.enabled.is_(True),
+            )
+        )
+        mcp_tools = list(result.scalars().all())
+
+        def _make_handler(captured_name: str) -> ToolExecutor:
+            """Factory that captures tool_name to avoid loop-variable closure pitfall."""
+            async def handler(ctx: RunContext, tool_input: dict) -> str:
+                ctx._current_mcp_tool_name = captured_name  # type: ignore[attr-defined]
+                try:
+                    return await run_mcp_tool(ctx, tool_input)
+                finally:
+                    if hasattr(ctx, "_current_mcp_tool_name"):
+                        del ctx._current_mcp_tool_name
+            return handler
+
+        for tc in mcp_tools:
+            self._handlers[tc.tool_name] = _make_handler(tc.tool_name)
+
+        if mcp_tools:
+            logger.info(
+                "Agent %s: loaded %d MCP tool handlers",
+                agent_id, len(mcp_tools),
+            )
+
     # ── Config sync (LISTEN/NOTIFY) ──
 
     def mark_config_dirty(self) -> None:
@@ -231,9 +275,10 @@ class Agent:
         block_repo = PromptBlockConfigRepository(db)
         self._block_configs = await block_repo.list_for_agent(self._record.id)
 
-        # Reload tool definitions from DB
+        # Reload tool definitions from DB (includes both native and MCP tools)
         self._tool_defs = await get_tool_defs_for_agent(self._record.id, self._record.role, db)
         self._handlers = get_handlers_for_role(self._record.role)
+        await self._load_mcp_handlers(db, self._record.id)
 
         # Reload budget/rate-limit settings
         ps = await self._services.ps_repo.get_by_project(self._project.id)
@@ -341,6 +386,9 @@ class Agent:
         )
 
         self._handlers = get_handlers_for_role(record.role)
+
+        # Load MCP bridge handlers for any enabled MCP tools on this agent.
+        await self._load_mcp_handlers(db, record.id)
 
         # Require either unread messages or an assigned task
         unread = await message_service.get_unread_for_agent(record.id)

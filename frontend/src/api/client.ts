@@ -610,6 +610,34 @@ export async function getToolConfigMeta(agentId: string): Promise<ToolConfigMeta
   return request<ToolConfigMeta>('GET', `/tool-configs/meta?agent_id=${agentId}`);
 }
 
+// ─── MCP Servers ──────────────────────────────────────────────────────
+
+export async function listMcpServers(agentId: string): Promise<import('../types').McpServer[]> {
+  return request<import('../types').McpServer[]>('GET', `/mcp-servers/agents/${agentId}`);
+}
+
+export async function createMcpServer(
+  agentId: string,
+  data: import('../types').McpServerCreate,
+): Promise<import('../types').McpServer> {
+  return request<import('../types').McpServer>('POST', `/mcp-servers/agents/${agentId}`, data);
+}
+
+export async function updateMcpServer(
+  serverId: string,
+  data: import('../types').McpServerUpdate,
+): Promise<import('../types').McpServer> {
+  return request<import('../types').McpServer>('PUT', `/mcp-servers/${serverId}`, data);
+}
+
+export async function deleteMcpServer(serverId: string): Promise<void> {
+  return request<void>('DELETE', `/mcp-servers/${serverId}`);
+}
+
+export async function syncMcpServer(serverId: string): Promise<import('../types').McpSyncResult> {
+  return request<import('../types').McpSyncResult>('POST', `/mcp-servers/${serverId}/sync`);
+}
+
 // ─── Document Versioning ─────────────────────────────────────────────
 
 export async function editDocument(

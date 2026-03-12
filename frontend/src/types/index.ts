@@ -211,6 +211,8 @@ export interface ToolConfig {
   enabled: boolean;
   position: number;
   estimated_tokens: number;
+  source: 'native' | 'mcp';
+  mcp_server_id: UUID | null;
 }
 
 export interface ToolConfigUpdateItem {
@@ -228,6 +230,47 @@ export interface ToolConfigMeta {
   max_tokens: number;
   budget_pct_used: number;
   context_window_tokens: number;
+}
+
+// ─── MCP Server Configs ────────────────────────────────────────────────
+
+export interface McpServer {
+  id: UUID;
+  agent_id: UUID;
+  name: string;
+  url: string;
+  has_api_key: boolean;
+  headers: Record<string, string> | null;
+  enabled: boolean;
+  status: 'connected' | 'disconnected' | 'error';
+  status_detail: string | null;
+  tool_count: number;
+}
+
+export interface McpServerCreate {
+  name: string;
+  url: string;
+  api_key?: string | null;
+  headers?: Record<string, string> | null;
+}
+
+export interface McpServerUpdate {
+  name?: string;
+  url?: string;
+  api_key?: string | null;
+  headers?: Record<string, string> | null;
+  enabled?: boolean;
+}
+
+export interface McpSyncResult {
+  status: string;
+  tools_discovered: number;
+  tools: Array<{
+    tool_name: string;
+    description: string;
+    input_schema: Record<string, unknown>;
+    enabled: boolean;
+  }>;
 }
 
 export interface AgentTaskQueueItem {
