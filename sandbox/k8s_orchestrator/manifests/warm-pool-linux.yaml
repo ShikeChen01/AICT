@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sandbox-pool-linux
+  namespace: sandboxes
+spec:
+  serviceName: sandbox-pool-linux
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sandbox
+      os-family: linux
+  template:
+    metadata:
+      labels:
+        app: sandbox
+        os-family: linux
+        status: idle
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+        - name: sandbox
+          image: us-central1-docker.pkg.dev/aict-487016/aict-dev/sandbox-ubuntu-22.04:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sandbox-pool-secrets
+                  key: master-token
+            - name: SANDBOX_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: sandbox-pool-secrets
+                  key: jwt-secret
+            - name: SANDBOX_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+        storageClassName: standard-rwo

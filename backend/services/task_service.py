@@ -221,9 +221,9 @@ class TaskService:
     async def _wake_agent_for_assignment(self, agent: Agent) -> None:
         """Ensure assigned agent is awake and has a sandbox ready."""
         prev_status = agent.status
-        prev_sandbox_id = agent.sandbox_id
+        prev_sandbox = agent.sandbox
         await self.orchestrator.wake_agent(self.session, agent)
-        if agent.status != prev_status or agent.sandbox_id != prev_sandbox_id:
+        if agent.status != prev_status or agent.sandbox != prev_sandbox:
             await self.ws_manager.broadcast_agent_status(agent)
 
     async def _send_assignment_message(self, task: Task, agent: Agent) -> None:

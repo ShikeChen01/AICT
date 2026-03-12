@@ -71,7 +71,7 @@ async def run_remove_agent(ctx: RunContext, tool_input: dict) -> str:
 
     display_name = target.display_name
 
-    if target.sandbox_id:
+    if target.sandbox:
         try:
             from backend.services.sandbox_service import SandboxService
             await SandboxService().close_sandbox(ctx.db, target)

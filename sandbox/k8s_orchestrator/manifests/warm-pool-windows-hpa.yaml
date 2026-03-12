@@ -1,0 +1,36 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sandbox-pool-windows-hpa
+  namespace: sandboxes
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: sandbox-pool-windows
+  minReplicas: 1
+  maxReplicas: 10
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+    scaleUp:
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+  metrics:
+    - type: Object
+      object:
+        metric:
+          name: sandbox_idle_ratio_windows
+        describedObject:
+          apiVersion: v1
+          kind: Namespace
+          name: sandboxes
+        target:
+          type: Value
+          value: "0.3"

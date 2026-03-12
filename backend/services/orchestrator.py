@@ -150,7 +150,8 @@ def _persistent_for_agent(agent: Agent) -> bool:
     _ALL_TYPED_ROLES = {"manager", "cto", "engineer", "worker", "researcher", "reviewer"}
     if agent.role in _ALL_TYPED_ROLES:
         return sandbox_should_persist(agent.role)
-    return bool(agent.sandbox_persist)
+    # Default to False for unknown roles
+    return False
 
 
 class OrchestratorService:
@@ -171,7 +172,7 @@ class OrchestratorService:
         )
 
     async def close_if_ephemeral(self, session: AsyncSession, agent: Agent) -> None:
-        if not sandbox_should_persist(agent.role) and agent.sandbox_id:
+        if not sandbox_should_persist(agent.role) and agent.sandbox:
             await self.sandbox_service.close_sandbox(session, agent)
 
     async def wake_agent(self, session: AsyncSession, agent: Agent) -> SandboxMetadata:

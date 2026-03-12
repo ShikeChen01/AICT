@@ -1,0 +1,36 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sandbox-pool-linux-hpa
+  namespace: sandboxes
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: sandbox-pool-linux
+  minReplicas: 2
+  maxReplicas: 20
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleUp:
+      policies:
+        - type: Pods
+          value: 3
+          periodSeconds: 30
+  metrics:
+    - type: Object
+      object:
+        metric:
+          name: sandbox_idle_ratio_linux
+        describedObject:
+          apiVersion: v1
+          kind: Namespace
+          name: sandboxes
+        target:
+          type: Value
+          value: "0.3"

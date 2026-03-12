@@ -151,7 +151,6 @@ async def create_repository(
         display_name="Manager",
         model=settings.manager_model_default,
         status="sleeping",
-        sandbox_persist=True,
     )
     cto = Agent(
         project_id=repository_id,
@@ -159,7 +158,6 @@ async def create_repository(
         display_name="CTO",
         model=settings.cto_model_default,
         status="sleeping",
-        sandbox_persist=True,
     )
     db.add(manager)
     db.add(cto)
@@ -237,7 +235,6 @@ async def import_repository(
         display_name="Manager",
         model=settings.manager_model_default,
         status="sleeping",
-        sandbox_persist=True,
     )
     cto = Agent(
         project_id=repository_id,
@@ -245,7 +242,6 @@ async def import_repository(
         display_name="CTO",
         model=settings.cto_model_default,
         status="sleeping",
-        sandbox_persist=True,
     )
     db.add(manager)
     db.add(cto)

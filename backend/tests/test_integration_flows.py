@@ -18,13 +18,13 @@ async def test_task_assignment_wakes_engineer_and_prepares_sandbox(
     task = await task_service.create(sample_project.id, TaskCreate(title="Assignment wake test"))
 
     assert sample_engineer.status == "sleeping"
-    assert sample_engineer.sandbox_id is None
+    assert sample_engineer.sandbox is None
 
     await task_service.assign(task.id, sample_engineer.id)
     await session.refresh(sample_engineer)
 
     assert sample_engineer.status == "active"
-    assert sample_engineer.sandbox_id is not None
+    assert sample_engineer.sandbox is not None
     assert sample_engineer.current_task_id == task.id
 
 

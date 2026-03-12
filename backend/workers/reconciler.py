@@ -13,8 +13,8 @@ Drift categories:
   5. Cluster drift     -- Agents whose model/role no longer matches their ClusterSpec
   6. Dead-letter retry -- Messages in dead_letter_messages older than retry window
   7. Budget breach     -- Agents exceeding daily cost cap (suspends them)
-  8. Zombie sandboxes  -- Agents with sandbox_id but status=sleeping for >IDLE_THRESHOLD
-                          (records sandbox as reclaimable)
+  8. Sandbox reconciliation -- Health checks, orphan detection, stale idle cleanup
+                            (queries Sandbox table: zombies, orphans, pool optimization)
 """
 
 from __future__ import annotations
@@ -25,8 +25,9 @@ from uuid import UUID
 
 from sqlalchemy import select, update, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from backend.db.models import Agent, AgentSession, ChannelMessage, LLMUsageEvent
+from backend.db.models import Agent, AgentSession, ChannelMessage, LLMUsageEvent, Sandbox
 from backend.db.session import AsyncSessionLocal
 from backend.logging.my_logger import get_logger
 from backend.workers.message_router import get_message_router
@@ -103,13 +104,12 @@ async def _reconcile_once() -> None:
     except Exception as exc:
         logger.warning("Reconciler: budget-breach check failed: %s", exc)
 
-    # 8. Zombie sandboxes (v3)
+    # 8. Sandbox reconciliation (v3): zombies, orphans, stale idle
     try:
         async with AsyncSessionLocal() as db:
-            await _mark_zombie_sandboxes(db, now)
-            await db.commit()
+            await _reconcile_sandboxes(db, now)
     except Exception as exc:
-        logger.warning("Reconciler: zombie-sandbox check failed: %s", exc)
+        logger.warning("Reconciler: sandbox-reconciliation check failed: %s", exc)
 
 
 # ── Drift category 1–4 (original) ────────────────────────────────────────────
@@ -381,65 +381,84 @@ async def _check_budget_breaches(db: AsyncSession, now: datetime) -> None:
         logger.debug("Reconciler: budget-breach check skipped: %s", exc)
 
 
-# ── Drift category 8: Zombie sandboxes (v3) ──────────────────────────────────
+# ── Drift category 8: Sandbox reconciliation (v3) ───────────────────────────
 
 
-async def _mark_zombie_sandboxes(db: AsyncSession, now: datetime) -> None:
-    """
-    Detect sandbox IDs held by sleeping agents that have been idle too long.
+async def _reconcile_sandboxes(db: AsyncSession, now: datetime) -> None:
+    """Sandbox health: zombie detection, orphan cleanup, warm pool deficit.
 
-    A "zombie sandbox" is an agent that has a sandbox_id assigned but has been
-    sleeping for > ZOMBIE_SANDBOX_IDLE_SECONDS. These represent compute resources
-    that could be reclaimed. We log them and record in the sandbox_usage_events
-    table if it exists.
+    Three passes:
+    1. Zombie sandboxes: assigned but no health check in 10 minutes.
+    2. Orphaned sandboxes: agent_id points to non-existent agent.
+    3. Stale idle sandboxes: idle (ready, unassigned) for >30 min, destroy to free.
     """
     try:
-        cutoff = now - timedelta(seconds=ZOMBIE_SANDBOX_IDLE_SECONDS)
+        from backend.services.sandbox_service import SandboxService
 
-        result = await db.execute(
-            select(Agent).where(
-                Agent.status == "sleeping",
-                Agent.sandbox_id.isnot(None),
-                Agent.updated_at < cutoff,
-            ).limit(50)
+        svc = SandboxService()
+
+        # 1. Zombie sandboxes: assigned but no health check in 10 minutes
+        zombies = await db.execute(
+            select(Sandbox).where(
+                Sandbox.status == "assigned",
+                Sandbox.last_health_at < now - timedelta(minutes=10),
+                Sandbox.last_health_at.isnot(None),
+            )
         )
-        zombies = list(result.scalars().all())
+        zombie_list = list(zombies.scalars().all())
 
-        if zombies:
-            logger.info(
-                "Reconciler: %d zombie sandbox(es) detected (sleeping >%ds with sandbox claimed): %s",
-                len(zombies),
-                ZOMBIE_SANDBOX_IDLE_SECONDS,
-                [str(a.id) for a in zombies],
+        for sandbox in zombie_list:
+            logger.warning(
+                "[reconciler] Zombie sandbox %s (agent=%s), last health %s",
+                sandbox.id, sandbox.agent_id, sandbox.last_health_at
             )
+            # Try health check
+            try:
+                await svc.sandbox_health(sandbox)
+                sandbox.last_health_at = now
+            except Exception:
+                sandbox.status = "unhealthy"
+                logger.warning("[reconciler] Sandbox %s marked unhealthy", sandbox.id)
 
-        # If sandbox_usage_events table exists, record reclaim candidates
-        try:
-            table_check = await db.execute(
-                text("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'sandbox_usage_events'")
+        # 2. Orphaned sandboxes: agent_id points to non-existent agent
+        orphans = await db.execute(
+            select(Sandbox).where(Sandbox.agent_id.isnot(None)).outerjoin(
+                Agent, Sandbox.agent_id == Agent.id
+            ).where(Agent.id.is_(None))
+        )
+        orphan_list = list(orphans.scalars().all())
+
+        for sandbox in orphan_list:
+            logger.warning(
+                "[reconciler] Orphaned sandbox %s (agent %s deleted)", sandbox.id, sandbox.agent_id
             )
-            if table_check.scalar_one() > 0:
-                for agent in zombies:
-                    # Mark sandbox as reclaimable (upsert-style: skip if already recorded)
-                    await db.execute(
-                        text(
-                            "INSERT INTO sandbox_usage_events "
-                            "(id, agent_id, project_id, sandbox_id, event_type, created_at) "
-                            "VALUES (gen_random_uuid(), :agent_id, :project_id, :sandbox_id, 'reclaim_candidate', :now) "
-                            "ON CONFLICT DO NOTHING"
-                        ),
-                        {
-                            "agent_id": str(agent.id),
-                            "project_id": str(agent.project_id),
-                            "sandbox_id": agent.sandbox_id,
-                            "now": now,
-                        },
-                    )
-        except Exception:
-            pass  # Table not yet migrated — skip silently
+            try:
+                await svc.release(db, sandbox)
+            except Exception as e:
+                logger.error("[reconciler] Failed to release orphan sandbox %s: %s", sandbox.id, e)
+
+        # 3. Stale idle sandboxes: idle for >30 min, destroy to free resources
+        stale = await db.execute(
+            select(Sandbox).where(
+                Sandbox.status == "ready",
+                Sandbox.agent_id.is_(None),
+                Sandbox.released_at < now - timedelta(minutes=30),
+                Sandbox.released_at.isnot(None),
+            )
+        )
+        stale_list = list(stale.scalars().all())
+
+        for sandbox in stale_list:
+            logger.info("[reconciler] Destroying stale idle sandbox %s", sandbox.id)
+            try:
+                await svc.destroy(db, sandbox)
+            except Exception as e:
+                logger.error("[reconciler] Failed to destroy stale sandbox %s: %s", sandbox.id, e)
+
+        await db.commit()
 
     except Exception as exc:
-        logger.debug("Reconciler: zombie-sandbox check skipped: %s", exc)
+        logger.debug("Reconciler: sandbox reconciliation skipped: %s", exc)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

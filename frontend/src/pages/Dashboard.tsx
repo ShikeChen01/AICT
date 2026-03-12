@@ -42,21 +42,10 @@ import type {
   AgentStatusWithQueue,
   ProjectUsageResponse,
   ProjectSettings,
+  Sandbox,
 } from '../types';
 import { AppLayout } from '../components/Layout';
 import { useScreenStream } from '../hooks/useScreenStream';
-
-// ── Types ──────────────────────────────────────────────────────────────────
-
-interface SandboxInfo {
-  sandbox_id: string;
-  agent_id: string;
-  agent_name: string;
-  agent_role: string;
-  status: string;
-  persistent: boolean;
-  os_image: string;
-}
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -148,45 +137,29 @@ function DashboardContent({ projectId, projectName }: DashboardContentProps) {
   const [statuses, setStatuses] = useState<AgentStatusWithQueue[]>([]);
   const [usage, setUsage] = useState<ProjectUsageResponse | null>(null);
   const [settings, setSettings] = useState<ProjectSettings | null>(null);
-  const [sandboxes, setSandboxes] = useState<SandboxInfo[]>([]);
+  const [sandboxes, setSandboxes] = useState<Sandbox[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stoppingAll, setStoppingAll] = useState(false);
-  const refreshInterval = useRef<ReturnType<typeof setInterval>>();
+  const cacheRef = useRef<{ data: Sandbox[]; timestamp: number } | null>(null);
+  const refreshInterval = useRef<number | undefined>(undefined);
 
   const fetchData = useCallback(async () => {
     try {
       const [agentList, statusList, usageData, settingsData, sandboxList] = await Promise.all([
         getAgents(projectId),
         getAgentStatuses(projectId).catch(() => [] as AgentStatusWithQueue[]),
-        getProjectUsage(projectId).catch(() => null),
-        getProjectSettings(projectId).catch(() => null),
-        listSandboxes(projectId).catch(() => []),
-      ]);
+        getProjectUsage(projectId).catch(() => null as ProjectUsageResponse | null),
+        getProjectSettings(projectId).catch(() => null as ProjectSettings | null),
+        listSandboxes(projectId).catch(() => [] as Sandbox[]),
+      ] as const);
 
       setAgents(agentList);
       setStatuses(statusList);
       setUsage(usageData);
       setSettings(settingsData);
-
-      // Map sandboxes to include agent info
-      const agentMap = new Map(agentList.map(a => [a.id, a]));
-      const sbInfos: SandboxInfo[] = (sandboxList as Array<{
-        sandbox_id: string; agent_id: string; status: string;
-        persistent: boolean; os_image: string;
-      }>).map(sb => {
-        const agent = agentMap.get(sb.agent_id);
-        return {
-          sandbox_id: sb.sandbox_id,
-          agent_id: sb.agent_id,
-          agent_name: agent?.display_name ?? 'Unknown',
-          agent_role: agent?.role ?? 'engineer',
-          status: sb.status,
-          persistent: sb.persistent,
-          os_image: sb.os_image,
-        };
-      });
-      setSandboxes(sbInfos);
+      setSandboxes(sandboxList);
+      cacheRef.current = { data: sandboxList, timestamp: Date.now() };
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load dashboard');
@@ -232,12 +205,12 @@ function DashboardContent({ projectId, projectName }: DashboardContentProps) {
 
   const statusMap = new Map(statuses.map(s => [s.id, s]));
   const activeAgents = agents.filter(a => a.status === 'active' || a.status === 'busy');
-  const totalCostToday = usage?.today?.total_estimated_cost_usd ?? 0;
+  const totalCostToday = usage?.today.estimated_cost_usd ?? 0;
   const dailyBudget = settings?.daily_cost_budget_usd ?? 0;
   const budgetPct = dailyBudget > 0 ? Math.min(100, (totalCostToday / dailyBudget) * 100) : 0;
-  const totalTokensToday = usage?.today?.total_input_tokens ?? 0;
-  const totalOutputToday = usage?.today?.total_output_tokens ?? 0;
-  const callsLastHour = usage?.last_hour?.total_calls ?? 0;
+  const totalTokensToday = usage?.today.total_input_tokens ?? 0;
+  const totalOutputToday = usage?.today.total_output_tokens ?? 0;
+  const callsLastHour = usage?.last_hour.total_calls ?? 0;
 
   return (
     <div className="space-y-6">
@@ -355,7 +328,7 @@ function DashboardContent({ projectId, projectName }: DashboardContentProps) {
                       {queueSize > 0 && (
                         <span className="text-[var(--color-warning)] font-medium">{queueSize} queued</span>
                       )}
-                      {agent.sandbox_id && (
+                      {sandboxes.some(sb => sb.agent_id === agent.id) && (
                         <span className="text-[var(--color-success)] flex items-center gap-1">
                           <Monitor className="w-3 h-3" /> sandbox
                         </span>
@@ -393,7 +366,7 @@ function DashboardContent({ projectId, projectName }: DashboardContentProps) {
             <div className="grid grid-cols-2 gap-2">
               {sandboxes.slice(0, 4).map(sb => (
                 <SandboxThumbnail
-                  key={sb.sandbox_id}
+                  key={sb.id}
                   sandbox={sb}
                   onClick={() => navigate(`/project/${projectId}/sandbox`)}
                 />
@@ -492,9 +465,9 @@ function StatCard({ icon, label, value, sub, accent, progress }: StatCardProps) 
 
 // ── Sandbox Thumbnail ──────────────────────────────────────────────────────
 
-function SandboxThumbnail({ sandbox, onClick }: { sandbox: SandboxInfo; onClick: () => void }) {
-  const { frameUrl, isConnected } = useScreenStream(sandbox.sandbox_id);
-  const roleColor = ROLE_COLORS[sandbox.agent_role] ?? '#64748b';
+function SandboxThumbnail({ sandbox, onClick }: { sandbox: Sandbox; onClick: () => void }) {
+  const { frameUrl, isConnected } = useScreenStream(sandbox.orchestrator_sandbox_id);
+  const roleColor = ROLE_COLORS[sandbox.agent_role ?? 'engineer'] ?? '#64748b';
 
   return (
     <button
@@ -503,7 +476,7 @@ function SandboxThumbnail({ sandbox, onClick }: { sandbox: SandboxInfo; onClick:
       className="relative rounded-lg border border-[var(--border-color)] bg-black/80 overflow-hidden aspect-video hover:border-[var(--color-primary)]/50 transition-all group"
     >
       {frameUrl ? (
-        <img src={frameUrl} alt={`${sandbox.agent_name} sandbox`} className="w-full h-full object-cover" />
+        <img src={frameUrl} alt={`${sandbox.agent_name ?? 'Unknown'} sandbox`} className="w-full h-full object-cover" />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
           <Monitor className="w-6 h-6 text-[var(--text-faint)]" />
@@ -514,9 +487,9 @@ function SandboxThumbnail({ sandbox, onClick }: { sandbox: SandboxInfo; onClick:
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1.5">
         <div className="flex items-center gap-1.5">
           <div className="w-4 h-4 rounded flex items-center justify-center text-[8px] font-bold text-white" style={{ backgroundColor: roleColor }}>
-            {sandbox.agent_name.charAt(0).toUpperCase()}
+            {(sandbox.agent_name ?? 'U').charAt(0).toUpperCase()}
           </div>
-          <span className="text-[11px] font-medium text-white truncate">{sandbox.agent_name}</span>
+          <span className="text-[11px] font-medium text-white truncate">{sandbox.agent_name ?? 'Unknown'}</span>
           <div className={`w-1.5 h-1.5 rounded-full ml-auto shrink-0 ${isConnected ? 'bg-green-400' : 'bg-gray-500'}`} />
         </div>
       </div>

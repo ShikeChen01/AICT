@@ -128,6 +128,87 @@ class SandboxConfig(Base):
     )
 
 
+# ── Sandbox (HPA Implementation) ────────────────────────────────────────
+
+
+class Sandbox(Base):
+    """Runtime sandbox instance. One per agent execution.
+
+    Tracks the lifecycle of a sandbox container from provisioning to release.
+    Can be assigned to an agent or left unassigned for the pool.
+    Persistent sandboxes can be reused across multiple agent runs.
+    """
+
+    __tablename__ = "sandbox"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id = Column(Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False)
+    agent_id = Column(Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
+    sandbox_config_id = Column(Uuid, ForeignKey("sandbox_configs.id", ondelete="SET NULL"), nullable=True)
+
+    orchestrator_sandbox_id = Column(String(255), nullable=False, unique=True)
+    os_image = Column(String(100), nullable=False, default="ubuntu-22.04")
+    setup_script = Column(Text, nullable=True)
+    persistent = Column(Boolean, nullable=False, default=False)
+
+    status = Column(String(50), nullable=False, default="provisioning")
+    host = Column(String(255), nullable=True)
+    port = Column(Integer, default=8080)
+    auth_token = Column(String(512), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    assigned_at = Column(DateTime(timezone=True), nullable=True)
+    last_health_at = Column(DateTime(timezone=True), nullable=True)
+    released_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    project = relationship("Repository")
+    agent = relationship("Agent", back_populates="sandbox")
+    config = relationship("SandboxConfig")
+    snapshots = relationship("SandboxSnapshot", back_populates="sandbox", cascade="all, delete-orphan")
+
+
+class SandboxSnapshot(Base):
+    """Snapshot of a sandbox state for rollback/restore.
+
+    Stores a Kubernetes snapshot reference and metadata for a point-in-time
+    capture of a sandbox.  Used to restore a sandbox to a previous state.
+    """
+
+    __tablename__ = "sandbox_snapshot"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    sandbox_id = Column(Uuid, ForeignKey("sandbox.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False)
+    agent_id = Column(Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
+    k8s_snapshot_name = Column(String(255), nullable=False)
+    os_image = Column(String(100), nullable=False)
+    label = Column(String(255), nullable=True)
+    size_bytes = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    sandbox = relationship("Sandbox", back_populates="snapshots")
+
+
+class SandboxUsageEvent(Base):
+    """Cost tracking and pod utilization events for a sandbox.
+
+    Records pod seconds consumed and estimated USD cost for sandbox operations.
+    Used for cost attribution and budget enforcement.
+    """
+
+    __tablename__ = "sandbox_usage_event"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    sandbox_id = Column(Uuid, ForeignKey("sandbox.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False)
+    agent_id = Column(Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
+    event_type = Column(String(50), nullable=False)
+    pod_seconds = Column(Float, nullable=False, default=0)
+    cost_usd = Column(Float, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
 # ── Repositories ────────────────────────────────────────────────────
 
 
@@ -421,8 +502,6 @@ class Agent(Base):
         ForeignKey("tasks.id", use_alter=True, name="fk_agent_current_task"),
         nullable=True,
     )
-    sandbox_id = Column(String(255), nullable=True)
-    sandbox_persist = Column(Boolean, default=False, nullable=False)
     sandbox_config_id = Column(
         Uuid, ForeignKey("sandbox_configs.id", ondelete="SET NULL"), nullable=True
     )
@@ -436,6 +515,7 @@ class Agent(Base):
     project = relationship("Repository", back_populates="agents")
     template = relationship("AgentTemplate", back_populates="agents", foreign_keys=[template_id])
     sandbox_config = relationship("SandboxConfig", back_populates="agents")
+    sandbox = relationship("Sandbox", back_populates="agent", uselist=False)
     current_task = relationship("Task", foreign_keys=[current_task_id])
     agent_sessions = relationship(
         "AgentSession", back_populates="agent", cascade="all, delete-orphan"

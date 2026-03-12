@@ -27,13 +27,15 @@ def _get_sandbox_service():
 async def run_execute_command(ctx: RunContext, tool_input: dict) -> str:
     command = str(tool_input["command"])
     timeout = int(tool_input.get("timeout", 120))
-    prev_sandbox_id = ctx.agent.sandbox_id
+    prev_sandbox = ctx.agent.sandbox
     svc = _get_sandbox_service()
-    result = await svc.execute_command(ctx.db, ctx.agent, command, timeout=timeout)
+    result = await svc.execute_command_legacy(ctx.db, ctx.agent, command, timeout=timeout)
     # If sandbox was just created (first execute_command), commit and broadcast
-    if ctx.agent.sandbox_id != prev_sandbox_id:
+    if ctx.agent.sandbox != prev_sandbox and ctx.agent.sandbox is not None:
         await _flush_and_broadcast_sandbox(ctx)
-    parts: list[str] = [f"Sandbox: {ctx.agent.sandbox_id}"]
+
+    sandbox_id = ctx.agent.sandbox.id if ctx.agent.sandbox else "unknown"
+    parts: list[str] = [f"Sandbox: {sandbox_id}"]
     if result.truncated:
         parts.append("[output truncated]")
     if result.exit_code is None and not result.stdout.strip():
@@ -72,14 +74,14 @@ async def _flush_and_broadcast_sandbox(ctx: RunContext) -> None:
 async def run_sandbox_start_session(ctx: RunContext, tool_input: dict) -> str:
     svc = _get_sandbox_service()
     meta = await svc.ensure_running_sandbox(ctx.db, ctx.agent)
-    # Commit immediately so sandbox_id is visible to other DB sessions (API endpoints)
-    # and broadcast agent_status so the frontend refreshes and picks up the new sandbox_id.
+    # Commit immediately so sandbox relationship is visible to other DB sessions (API endpoints)
+    # and broadcast agent_status so the frontend refreshes and picks up the new sandbox.
     await _flush_and_broadcast_sandbox(ctx)
     return meta.message or f"Sandbox ready: {meta.sandbox_id}"
 
 
 async def run_sandbox_end_session(ctx: RunContext, tool_input: dict) -> str:
-    if not ctx.agent.sandbox_id:
+    if not ctx.agent.sandbox:
         return "No active sandbox to end."
     svc = _get_sandbox_service()
     await svc.close_sandbox(ctx.db, ctx.agent)
@@ -88,7 +90,7 @@ async def run_sandbox_end_session(ctx: RunContext, tool_input: dict) -> str:
 
 
 async def run_sandbox_health(ctx: RunContext, tool_input: dict) -> str:
-    if not ctx.agent.sandbox_id:
+    if not ctx.agent.sandbox:
         raise ToolExecutionError(
             "No active sandbox — call sandbox_start_session first.",
             error_code=ToolExecutionError.SANDBOX_UNAVAILABLE,
@@ -96,10 +98,7 @@ async def run_sandbox_health(ctx: RunContext, tool_input: dict) -> str:
         )
     svc = _get_sandbox_service()
     try:
-        # Pass the DB session so sandbox_health can re-register the connection
-        # in the multiplexer if it was lost (e.g. after backend process restart)
-        # and retry on ConnectError.
-        data = await svc.sandbox_health(ctx.agent, session=ctx.db)
+        data = await svc.sandbox_health(ctx.agent.sandbox)
         return (
             f"status={data.get('status')} "
             f"uptime={data.get('uptime_seconds')}s "
@@ -116,11 +115,11 @@ async def run_sandbox_health(ctx: RunContext, tool_input: dict) -> str:
 async def run_sandbox_screenshot(ctx: RunContext, tool_input: dict) -> str | ScreenshotResult:
     """Capture a screenshot; returns ScreenshotResult so the loop can inject the
     image into the LLM conversation as a vision image_part."""
-    if not ctx.agent.sandbox_id:
+    if not ctx.agent.sandbox:
         await run_sandbox_start_session(ctx, {})
     svc = _get_sandbox_service()
     try:
-        img_bytes = await svc.take_screenshot(ctx.agent)
+        img_bytes = await svc.take_screenshot(ctx.agent.sandbox)
         return ScreenshotResult(image_bytes=img_bytes, media_type="image/jpeg")
     except Exception as exc:
         raise ToolExecutionError(
@@ -133,9 +132,14 @@ async def run_sandbox_screenshot(ctx: RunContext, tool_input: dict) -> str | Scr
 async def run_sandbox_mouse_move(ctx: RunContext, tool_input: dict) -> str:
     x = int(tool_input["x"])
     y = int(tool_input["y"])
+    if not ctx.agent.sandbox:
+        raise ToolExecutionError(
+            "No active sandbox — call sandbox_start_session first.",
+            error_code=ToolExecutionError.SANDBOX_UNAVAILABLE,
+        )
     svc = _get_sandbox_service()
     try:
-        await svc.mouse_move(ctx.agent, x, y)
+        await svc.mouse_move(ctx.agent.sandbox, x, y)
         return f"Mouse moved to ({x}, {y})"
     except Exception as exc:
         raise ToolExecutionError(
@@ -149,9 +153,14 @@ async def run_sandbox_mouse_click(ctx: RunContext, tool_input: dict) -> str:
     y = tool_input.get("y")
     button = int(tool_input.get("button", 1))
     click_type = tool_input.get("click_type", "single")
+    if not ctx.agent.sandbox:
+        raise ToolExecutionError(
+            "No active sandbox — call sandbox_start_session first.",
+            error_code=ToolExecutionError.SANDBOX_UNAVAILABLE,
+        )
     svc = _get_sandbox_service()
     try:
-        result = await svc.mouse_click(ctx.agent, x=x, y=y, button=button, click_type=click_type)
+        result = await svc.mouse_click(ctx.agent.sandbox, x=x, y=y, button=button, click_type=click_type)
         pos = result or {}
         return f"Mouse clicked at ({pos.get('x', x)}, {pos.get('y', y)}) button={button} type={click_type}"
     except Exception as exc:
@@ -166,9 +175,14 @@ async def run_sandbox_mouse_scroll(ctx: RunContext, tool_input: dict) -> str:
     y = tool_input.get("y")
     direction = tool_input.get("direction", "down")
     clicks = int(tool_input.get("clicks", 3))
+    if not ctx.agent.sandbox:
+        raise ToolExecutionError(
+            "No active sandbox — call sandbox_start_session first.",
+            error_code=ToolExecutionError.SANDBOX_UNAVAILABLE,
+        )
     svc = _get_sandbox_service()
     try:
-        await svc.mouse_scroll(ctx.agent, x=x, y=y, direction=direction, clicks=clicks)
+        await svc.mouse_scroll(ctx.agent.sandbox, x=x, y=y, direction=direction, clicks=clicks)
         return f"Scrolled {direction} {clicks} click(s) at ({x}, {y})"
     except Exception as exc:
         raise ToolExecutionError(
@@ -178,9 +192,14 @@ async def run_sandbox_mouse_scroll(ctx: RunContext, tool_input: dict) -> str:
 
 
 async def run_sandbox_mouse_location(ctx: RunContext, tool_input: dict) -> str:
+    if not ctx.agent.sandbox:
+        raise ToolExecutionError(
+            "No active sandbox — call sandbox_start_session first.",
+            error_code=ToolExecutionError.SANDBOX_UNAVAILABLE,
+        )
     svc = _get_sandbox_service()
     try:
-        loc = await svc.mouse_location(ctx.agent)
+        loc = await svc.mouse_location(ctx.agent.sandbox)
         return f"Mouse at x={loc.get('x')}, y={loc.get('y')}"
     except Exception as exc:
         raise ToolExecutionError(
@@ -198,9 +217,14 @@ async def run_sandbox_keyboard_press(ctx: RunContext, tool_input: dict) -> str:
             error_code=ToolExecutionError.INVALID_INPUT,
             hint="Use 'keys' for special combos (e.g. 'ctrl+c') or 'text' to type characters.",
         )
+    if not ctx.agent.sandbox:
+        raise ToolExecutionError(
+            "No active sandbox — call sandbox_start_session first.",
+            error_code=ToolExecutionError.SANDBOX_UNAVAILABLE,
+        )
     svc = _get_sandbox_service()
     try:
-        await svc.keyboard_press(ctx.agent, keys=keys, text=text)
+        await svc.keyboard_press(ctx.agent.sandbox, keys=keys, text=text)
         return f"Keyboard input sent: keys={keys!r} text={text!r}"
     except Exception as exc:
         raise ToolExecutionError(
@@ -210,9 +234,14 @@ async def run_sandbox_keyboard_press(ctx: RunContext, tool_input: dict) -> str:
 
 
 async def run_sandbox_record_screen(ctx: RunContext, tool_input: dict) -> str:
+    if not ctx.agent.sandbox:
+        raise ToolExecutionError(
+            "No active sandbox — call sandbox_start_session first.",
+            error_code=ToolExecutionError.SANDBOX_UNAVAILABLE,
+        )
     svc = _get_sandbox_service()
     try:
-        data = await svc.start_recording(ctx.agent)
+        data = await svc.start_recording(ctx.agent.sandbox)
         return f"Recording started. Status: {data.get('status')}"
     except Exception as exc:
         raise ToolExecutionError(
@@ -222,9 +251,14 @@ async def run_sandbox_record_screen(ctx: RunContext, tool_input: dict) -> str:
 
 
 async def run_sandbox_end_record_screen(ctx: RunContext, tool_input: dict) -> str:
+    if not ctx.agent.sandbox:
+        raise ToolExecutionError(
+            "No active sandbox — call sandbox_start_session first.",
+            error_code=ToolExecutionError.SANDBOX_UNAVAILABLE,
+        )
     svc = _get_sandbox_service()
     try:
-        video_bytes = await svc.stop_recording(ctx.agent)
+        video_bytes = await svc.stop_recording(ctx.agent.sandbox)
         b64 = base64.b64encode(video_bytes).decode()
         return f"Recording stopped ({len(video_bytes)} bytes). Base64 MP4:\n{b64[:200]}...[truncated for display]"
     except Exception as exc:

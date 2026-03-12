@@ -18,12 +18,9 @@ import {
   Users,
   Blocks,
   Wrench,
-  Plus,
   Trash2,
   StopCircle,
-  Moon,
   Zap,
-  ChevronRight,
   MonitorSmartphone,
 } from 'lucide-react';
 import {
@@ -185,7 +182,6 @@ function AgentsContent({ projectId }: { projectId: string }) {
           ) : (
             <AgentTree
               agents={sortedAgents}
-              statusMap={statusMap}
               selectedId={selectedAgentId}
               onSelect={(id) => { setSelectedAgentId(id); setActiveTab('builder'); }}
               onStop={(id) => stopAgent(id).then(fetchData)}
@@ -244,7 +240,6 @@ function AgentsContent({ projectId }: { projectId: string }) {
 
 interface AgentTreeProps {
   agents: Agent[];
-  statusMap: Map<string, AgentStatusWithQueue>;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onStop: (id: string) => void;
@@ -252,7 +247,7 @@ interface AgentTreeProps {
   onDelete: (id: string) => void;
 }
 
-function AgentTree({ agents, statusMap, selectedId, onSelect, onStop, onWake, onDelete }: AgentTreeProps) {
+function AgentTree({ agents, selectedId, onSelect, onStop, onWake, onDelete }: AgentTreeProps) {
   // Group by role
   const groups: { role: string; agents: Agent[] }[] = [];
   let currentRole = '';
@@ -271,11 +266,10 @@ function AgentTree({ agents, statusMap, selectedId, onSelect, onStop, onWake, on
           <div className="px-3 py-1 text-[10px] font-semibold text-[var(--text-faint)] uppercase tracking-wider">
             {g.role}s
           </div>
-          {g.agents.map((agent, i) => {
+          {g.agents.map((agent) => {
             const isSelected = agent.id === selectedId;
             const roleColor = ROLE_COLORS[agent.role] ?? '#64748b';
             const statusColor = STATUS_COLORS[agent.status] ?? '#64748b';
-            const st = statusMap.get(agent.id);
             const indent = agent.role === 'manager' ? 0 : agent.role === 'cto' ? 1 : 2;
 
             return (

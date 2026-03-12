@@ -28,31 +28,20 @@ import {
   getAgents,
   listSandboxes,
   listSandboxConfigs,
-  toggleSandboxPersistence,
+  claimSandbox,
+  releaseSandbox,
   restartSandbox,
-  resetSandbox,
   destroySandbox,
+  updateSandbox,
   applySandboxConfig,
   assignSandboxConfig,
-  startSandbox,
+  restoreSandboxSnapshot,
+  listSandboxSnapshots,
 } from '../api/client';
-import type { Project, Agent, SandboxConfig } from '../types';
+import type { Project, Agent, SandboxConfig, Sandbox, SandboxSnapshot } from '../types';
 import { AppLayout } from '../components/Layout';
 import { useScreenStream } from '../hooks/useScreenStream';
 import { VncView } from '../components/ScreenStream';
-
-// ── Types ──────────────────────────────────────────────────────────────────
-
-interface SandboxEntry {
-  sandbox_id: string;
-  agent_id: string;
-  agent_name: string;
-  agent_role: string;
-  status: string;
-  persistent: boolean;
-  os_image: string;
-  config_id: string | null;
-}
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -118,7 +107,7 @@ export function SandboxPage() {
 // ── Sandbox Content ────────────────────────────────────────────────────────
 
 function SandboxContent({ projectId }: { projectId: string }) {
-  const [sandboxes, setSandboxes] = useState<SandboxEntry[]>([]);
+  const [sandboxes, setSandboxes] = useState<Sandbox[]>([]);
   const [configs, setConfigs] = useState<SandboxConfig[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -126,43 +115,24 @@ function SandboxContent({ projectId }: { projectId: string }) {
 
   // Expanded VNC state
   const [expandedSandboxId, setExpandedSandboxId] = useState<string | null>(null);
-  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
   const [expandedInteractive, setExpandedInteractive] = useState(true);
 
   // Config modal
-  const [configModalSandbox, setConfigModalSandbox] = useState<SandboxEntry | null>(null);
+  const [configModalSandbox, setConfigModalSandbox] = useState<Sandbox | null>(null);
 
-  const refreshInterval = useRef<ReturnType<typeof setInterval>>();
+  const refreshInterval = useRef<number | undefined>(undefined);
 
   const fetchData = useCallback(async () => {
     try {
       const [agentList, sandboxList, configList] = await Promise.all([
         getAgents(projectId),
-        listSandboxes(projectId).catch(() => []),
-        listSandboxConfigs().catch(() => []),
-      ]);
+        listSandboxes(projectId).catch(() => [] as Sandbox[]),
+        listSandboxConfigs().catch(() => [] as SandboxConfig[]),
+      ] as const);
 
       setAgents(agentList);
       setConfigs(configList);
-
-      const agentMap = new Map(agentList.map(a => [a.id, a]));
-      const entries: SandboxEntry[] = (sandboxList as Array<{
-        sandbox_id: string; agent_id: string; status: string;
-        persistent: boolean; os_image: string; config_id?: string | null;
-      }>).map(sb => {
-        const agent = agentMap.get(sb.agent_id);
-        return {
-          sandbox_id: sb.sandbox_id,
-          agent_id: sb.agent_id,
-          agent_name: agent?.display_name ?? 'Unknown',
-          agent_role: agent?.role ?? 'engineer',
-          status: sb.status,
-          persistent: sb.persistent,
-          os_image: sb.os_image,
-          config_id: sb.config_id ?? agent?.sandbox_config_id ?? null,
-        };
-      });
-      setSandboxes(entries);
+      setSandboxes(sandboxList);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load sandboxes');
@@ -201,7 +171,7 @@ function SandboxContent({ projectId }: { projectId: string }) {
 
   // ── Full VNC Expanded View ───────────────────────────────────
   if (expandedSandboxId) {
-    const sb = sandboxes.find(s => s.sandbox_id === expandedSandboxId);
+    const sb = sandboxes.find(s => s.id === expandedSandboxId);
     return (
       <div className="flex flex-1 flex-col min-h-0 bg-black">
         {/* Top bar */}
@@ -216,7 +186,7 @@ function SandboxContent({ projectId }: { projectId: string }) {
           <div className="flex-1" />
           {sb && (
             <span className="text-sm font-medium text-[var(--text-primary)]">
-              {sb.agent_name} — {sb.os_image}
+              {sb.agent_name ?? 'Unknown'} — {sb.os_image}
             </span>
           )}
           <div className="flex-1" />
@@ -235,9 +205,9 @@ function SandboxContent({ projectId }: { projectId: string }) {
 
         {/* VNC */}
         <div className="flex-1 min-h-0">
-          {expandedSandboxId && (
+          {expandedSandboxId && sb && (
             <VncView
-              sandboxId={expandedSandboxId}
+              sandboxId={sb.orchestrator_sandbox_id}
             />
           )}
         </div>
@@ -272,12 +242,11 @@ function SandboxContent({ projectId }: { projectId: string }) {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {sandboxes.map(sb => (
                 <SandboxCard
-                  key={sb.sandbox_id}
+                  key={sb.id}
                   sandbox={sb}
                   configs={configs}
                   onExpand={() => {
-                    setExpandedSandboxId(sb.sandbox_id);
-                    setExpandedAgentId(sb.agent_id);
+                    setExpandedSandboxId(sb.id);
                   }}
                   onConfigure={() => setConfigModalSandbox(sb)}
                   onRefresh={fetchData}
@@ -304,7 +273,7 @@ function SandboxContent({ projectId }: { projectId: string }) {
 // ── Sandbox Card ───────────────────────────────────────────────────────────
 
 interface SandboxCardProps {
-  sandbox: SandboxEntry;
+  sandbox: Sandbox;
   configs: SandboxConfig[];
   onExpand: () => void;
   onConfigure: () => void;
@@ -312,10 +281,13 @@ interface SandboxCardProps {
 }
 
 function SandboxCard({ sandbox, onExpand, onConfigure, onRefresh }: SandboxCardProps) {
-  const { frameUrl, isConnected } = useScreenStream(sandbox.sandbox_id);
-  const roleColor = ROLE_COLORS[sandbox.agent_role] ?? '#64748b';
+  const { frameUrl, isConnected } = useScreenStream(sandbox.orchestrator_sandbox_id);
+  const roleColor = ROLE_COLORS[sandbox.agent_role ?? 'engineer'] ?? '#64748b';
   const statusClass = STATUS_BG[sandbox.status] ?? STATUS_BG.idle;
   const [acting, setActing] = useState(false);
+  const [showSnapshots, setShowSnapshots] = useState(false);
+  const [snapshots, setSnapshots] = useState<SandboxSnapshot[]>([]);
+  const [loadingSnapshots, setLoadingSnapshots] = useState(false);
 
   const handleAction = async (action: () => Promise<unknown>) => {
     setActing(true);
@@ -323,12 +295,29 @@ function SandboxCard({ sandbox, onExpand, onConfigure, onRefresh }: SandboxCardP
     finally { setActing(false); }
   };
 
+  const handleLoadSnapshots = async () => {
+    if (showSnapshots) {
+      setShowSnapshots(false);
+      return;
+    }
+    setLoadingSnapshots(true);
+    try {
+      const snaps = await listSandboxSnapshots(sandbox.id);
+      setSnapshots(snaps);
+      setShowSnapshots(true);
+    } catch (e) {
+      console.error('Failed to load snapshots:', e);
+    } finally {
+      setLoadingSnapshots(false);
+    }
+  };
+
   return (
     <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] overflow-hidden hover:border-[var(--border-color-hover)] transition-colors group">
       {/* Stream preview */}
       <button type="button" onClick={onExpand} className="relative w-full aspect-video bg-black/90 cursor-pointer">
         {frameUrl ? (
-          <img src={frameUrl} alt={`${sandbox.agent_name} sandbox`} className="w-full h-full object-cover" />
+          <img src={frameUrl} alt={`${sandbox.agent_name ?? 'Unknown'} sandbox`} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             <Monitor className="w-8 h-8 text-[var(--text-faint)]" />
@@ -347,9 +336,9 @@ function SandboxCard({ sandbox, onExpand, onConfigure, onRefresh }: SandboxCardP
         <div className="flex items-center gap-2 mb-1.5">
           <div className="w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold text-white shrink-0"
             style={{ backgroundColor: roleColor }}>
-            {sandbox.agent_name.charAt(0).toUpperCase()}
+            {(sandbox.agent_name ?? 'U').charAt(0).toUpperCase()}
           </div>
-          <span className="text-sm font-medium text-[var(--text-primary)] truncate flex-1">{sandbox.agent_name}</span>
+          <span className="text-sm font-medium text-[var(--text-primary)] truncate flex-1">{sandbox.agent_name ?? 'Unknown'}</span>
           <span className={`text-[10px] font-medium rounded px-1.5 py-0.5 ${statusClass}`}>
             {sandbox.status}
           </span>
@@ -362,7 +351,7 @@ function SandboxCard({ sandbox, onExpand, onConfigure, onRefresh }: SandboxCardP
         </div>
 
         {/* Action buttons */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-wrap">
           <button
             onClick={onConfigure}
             title="Configure"
@@ -371,7 +360,7 @@ function SandboxCard({ sandbox, onExpand, onConfigure, onRefresh }: SandboxCardP
             <Settings2 className="w-3.5 h-3.5" />
           </button>
           <button
-            onClick={() => handleAction(() => restartSandbox(sandbox.agent_id))}
+            onClick={() => handleAction(() => restartSandbox(sandbox.id))}
             disabled={acting}
             title="Restart"
             className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors disabled:opacity-40"
@@ -379,7 +368,12 @@ function SandboxCard({ sandbox, onExpand, onConfigure, onRefresh }: SandboxCardP
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
           <button
-            onClick={() => handleAction(() => resetSandbox(sandbox.agent_id))}
+            onClick={() => handleAction(async () => {
+              await releaseSandbox(sandbox.id);
+              if (sandbox.agent_id) {
+                await claimSandbox(sandbox.agent_id);
+              }
+            })}
             disabled={acting}
             title="Reset (fresh)"
             className="p-1.5 rounded-md text-[var(--color-warning)] hover:bg-[var(--color-warning)]/10 transition-colors disabled:opacity-40"
@@ -387,7 +381,7 @@ function SandboxCard({ sandbox, onExpand, onConfigure, onRefresh }: SandboxCardP
             <Power className="w-3.5 h-3.5" />
           </button>
           <button
-            onClick={() => handleAction(() => destroySandbox(sandbox.agent_id))}
+            onClick={() => handleAction(() => destroySandbox(sandbox.id))}
             disabled={acting}
             title="Destroy"
             className="p-1.5 rounded-md text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 transition-colors disabled:opacity-40"
@@ -396,12 +390,38 @@ function SandboxCard({ sandbox, onExpand, onConfigure, onRefresh }: SandboxCardP
           </button>
           <div className="flex-1" />
           <button
-            onClick={() => handleAction(() => toggleSandboxPersistence(sandbox.agent_id, !sandbox.persistent))}
+            onClick={() => handleAction(() => updateSandbox(sandbox.id, { persistent: !sandbox.persistent }))}
             disabled={acting}
             className="text-[10px] font-medium px-2 py-1 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] transition-colors disabled:opacity-40"
           >
             {sandbox.persistent ? 'Make Ephemeral' : 'Make Persistent'}
           </button>
+        </div>
+
+        {/* Snapshots */}
+        <div className="mt-2 space-y-1">
+          <button
+            onClick={handleLoadSnapshots}
+            disabled={loadingSnapshots}
+            className="text-[10px] font-medium px-2 py-1 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] transition-colors disabled:opacity-40 w-full"
+          >
+            {loadingSnapshots ? 'Loading…' : showSnapshots ? 'Hide Snapshots' : 'Snapshots'}
+          </button>
+          {showSnapshots && snapshots.length > 0 && (
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {snapshots.map(snap => (
+                <button
+                  key={snap.id}
+                  onClick={() => handleAction(() => restoreSandboxSnapshot(sandbox.id, snap.id))}
+                  disabled={acting}
+                  className="w-full text-left text-[9px] px-2 py-0.5 rounded border border-[var(--border-color-subtle)] bg-[var(--surface-muted)] text-[var(--text-muted)] hover:bg-[var(--color-primary)]/20 transition-colors disabled:opacity-40 truncate"
+                  title={snap.label ?? snap.id}
+                >
+                  {snap.label || snap.id.slice(0, 8)}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -426,7 +446,7 @@ function StartSandboxDropdown({ agents, onStarted }: { agents: Agent[]; onStarte
   const handleStart = async (agentId: string) => {
     setStarting(true);
     try {
-      await startSandbox(agentId);
+      await claimSandbox(agentId);
       onStarted();
     } finally {
       setStarting(false);
@@ -466,22 +486,24 @@ function StartSandboxDropdown({ agents, onStarted }: { agents: Agent[]; onStarte
 // ── Config Modal ───────────────────────────────────────────────────────────
 
 interface ConfigModalProps {
-  sandbox: SandboxEntry;
+  sandbox: Sandbox;
   configs: SandboxConfig[];
   onClose: () => void;
   onSaved: () => void;
 }
 
 function ConfigModal({ sandbox, configs, onClose, onSaved }: ConfigModalProps) {
-  const [selectedConfigId, setSelectedConfigId] = useState<string>(sandbox.config_id ?? '');
+  const [selectedConfigId, setSelectedConfigId] = useState<string>(sandbox.sandbox_config_id ?? '');
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await assignSandboxConfig(sandbox.agent_id, selectedConfigId || null);
+      if (sandbox.agent_id) {
+        await assignSandboxConfig(sandbox.agent_id, selectedConfigId || null);
+      }
       if (selectedConfigId) {
-        await applySandboxConfig(sandbox.agent_id);
+        await applySandboxConfig(sandbox.id);
       }
       onSaved();
     } finally {
@@ -497,7 +519,7 @@ function ConfigModal({ sandbox, configs, onClose, onSaved }: ConfigModalProps) {
       >
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-base font-semibold text-[var(--text-primary)]">
-            Configure: {sandbox.agent_name}
+            Configure: {sandbox.agent_name ?? 'Sandbox'}
           </h3>
           <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
             <X className="w-5 h-5" />

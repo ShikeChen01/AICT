@@ -52,6 +52,7 @@ async def list_agents(
     """List all agents for a project (ordered by role: manager, cto, engineer)."""
     if isinstance(current_user, User):
         await require_project_access(db, project_id, current_user.id)
+    from backend.services.orchestrator import sandbox_should_persist
     role_order = case(
         (Agent.role == "manager", 0),
         (Agent.role == "cto", 1),
@@ -63,7 +64,31 @@ async def list_agents(
         .where(Agent.project_id == project_id)
         .order_by(role_order, Agent.display_name)
     )
-    return list(result.scalars().all())
+    agents = list(result.scalars().all())
+
+    # Manually construct responses to avoid accessing non-existent attributes
+    responses = []
+    for agent in agents:
+        responses.append(AgentResponse(
+            id=agent.id,
+            project_id=agent.project_id,
+            template_id=agent.template_id,
+            role=agent.role,
+            display_name=agent.display_name,
+            tier=agent.tier,
+            model=agent.model,
+            provider=agent.provider,
+            thinking_enabled=agent.thinking_enabled,
+            status=agent.status,
+            current_task_id=agent.current_task_id,
+            sandbox_id=str(agent.sandbox.id) if agent.sandbox else None,
+            sandbox_persist=sandbox_should_persist(agent.role) if agent.role else False,
+            sandbox_config_id=agent.sandbox_config_id,
+            memory=agent.memory,
+            created_at=agent.created_at,
+            updated_at=agent.updated_at,
+        ))
+    return responses
 
 
 @router.get("/status", response_model=list[AgentStatusWithQueueResponse])
@@ -124,6 +149,8 @@ async def list_agent_status(
     msg_service = get_message_service(db)
     pending_counts = await msg_service.count_unread_by_targets(agent_ids)
 
+    from backend.services.orchestrator import sandbox_should_persist
+
     return [
         AgentStatusWithQueueResponse(
             id=agent.id,
@@ -133,8 +160,8 @@ async def list_agent_status(
             model=agent.model,
             status=agent.status,
             current_task_id=agent.current_task_id,
-            sandbox_id=agent.sandbox_id,
-            sandbox_persist=bool(agent.sandbox_persist),
+            sandbox_id=str(agent.sandbox.id) if agent.sandbox else None,
+            sandbox_persist=sandbox_should_persist(agent.role) if agent.role else False,
             memory=agent.memory,
             created_at=agent.created_at,
             updated_at=agent.updated_at,
@@ -153,8 +180,27 @@ async def get_agent(
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single agent by ID."""
+    from backend.services.orchestrator import sandbox_should_persist
     agent = await _ensure_agent_access(db, agent_id, current_user.id)
-    return agent
+    return AgentResponse(
+        id=agent.id,
+        project_id=agent.project_id,
+        template_id=agent.template_id,
+        role=agent.role,
+        display_name=agent.display_name,
+        tier=agent.tier,
+        model=agent.model,
+        provider=agent.provider,
+        thinking_enabled=agent.thinking_enabled,
+        status=agent.status,
+        current_task_id=agent.current_task_id,
+        sandbox_id=str(agent.sandbox.id) if agent.sandbox else None,
+        sandbox_persist=sandbox_should_persist(agent.role) if agent.role else False,
+        sandbox_config_id=agent.sandbox_config_id,
+        memory=agent.memory,
+        created_at=agent.created_at,
+        updated_at=agent.updated_at,
+    )
 
 
 @router.post("", response_model=AgentResponse)
@@ -431,8 +477,8 @@ async def get_agent_context(
         system_prompt=system_prompt,
         available_tools=available_tools,
         recent_messages=[],
-        sandbox_id=agent.sandbox_id,
-        sandbox_active=bool(agent.sandbox_id),
+        sandbox_id=str(agent.sandbox.id) if agent.sandbox else None,
+        sandbox_active=bool(agent.sandbox),
     )
 
 

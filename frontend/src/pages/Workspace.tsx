@@ -9,7 +9,7 @@
  * Replaces the old chat-only workspace and absorbs CoPilot functionality.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import {
   Monitor,
@@ -27,7 +27,7 @@ import { AgentStream } from '../components/AgentChat/AgentStream';
 import { MessageList } from '../components/AgentChat/MessageList';
 import { MessageInput } from '../components/AgentChat/MessageInput';
 import { useAgents, useMessages } from '../hooks';
-import { uploadAttachment } from '../api/client';
+import { uploadAttachment, listSandboxes } from '../api/client';
 import { cn } from '../components/ui';
 import type { Agent } from '../types';
 
@@ -57,6 +57,73 @@ const DEFAULT_LEFT_PCT = 50;
 const MIN_SCREEN_PCT = 25;
 const MAX_SCREEN_PCT = 85;
 const DEFAULT_SCREEN_PCT = 60;
+
+// ── VNC View Wrapper (resolves orchestrator_sandbox_id) ──────────────────
+
+interface VncViewWrapperProps {
+  agentId: string;
+  sandboxId: string;
+}
+
+function VncViewWrapper({ agentId, sandboxId }: VncViewWrapperProps) {
+  const [orchestratorSandboxId, setOrchestratorSandboxId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    const resolve = async () => {
+      try {
+        // The sandbox_id field on agent is the orchestrator_sandbox_id short form
+        // Use it directly if available, otherwise fetch sandboxes to find it
+        const projectId = new URLSearchParams(window.location.search).get('pid');
+        if (!projectId) {
+          setOrchestratorSandboxId(sandboxId);
+          setLoading(false);
+          return;
+        }
+
+        // Try to find the sandbox's orchestrator_sandbox_id via listSandboxes
+        try {
+          const sandboxes = await listSandboxes(projectId);
+          const sb = sandboxes.find(s => s.agent_id === agentId);
+          if (mounted && sb) {
+            setOrchestratorSandboxId(sb.orchestrator_sandbox_id);
+          } else if (mounted) {
+            // Fallback to the sandbox_id if we can't resolve
+            setOrchestratorSandboxId(sandboxId);
+          }
+        } catch {
+          // Fallback: use the sandbox_id directly
+          if (mounted) {
+            setOrchestratorSandboxId(sandboxId);
+          }
+        }
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    resolve();
+    return () => { mounted = false; };
+  }, [agentId, sandboxId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
+        <span className="text-sm">Connecting…</span>
+      </div>
+    );
+  }
+
+  if (!orchestratorSandboxId) {
+    return (
+      <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
+        <span className="text-sm">Unable to connect to sandbox</span>
+      </div>
+    );
+  }
+
+  return <VncView sandboxId={orchestratorSandboxId} />;
+}
 
 // ── Page Shell ─────────────────────────────────────────────────────────────
 
@@ -239,7 +306,7 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
           {/* VNC Screen */}
           <div className="min-h-0 bg-black relative" style={{ height: `${screenPct}%` }}>
             {hasSandbox && selectedAgent?.sandbox_id ? (
-              <VncView sandboxId={selectedAgent.sandbox_id} />
+              <VncViewWrapper agentId={selectedAgent.id} sandboxId={selectedAgent.sandbox_id} />
             ) : (
               <div className="flex items-center justify-center h-full text-[var(--text-muted)] gap-2">
                 <MonitorOff className="w-6 h-6" />
