@@ -804,6 +804,59 @@ export interface SandboxConfigUpdate {
   os_image?: string | null;
 }
 
+// ── Sandbox types (v3 — DB-backed sandboxes) ─────────────────────────────
+
+export interface Sandbox {
+  id: string;
+  project_id: string;
+  agent_id: string | null;
+  agent_name: string | null;
+  agent_role: string | null;
+  sandbox_config_id: string | null;
+  orchestrator_sandbox_id: string;
+  os_image: string;
+  persistent: boolean;
+  status: string;
+  host: string | null;
+  port: number;
+  created_at: string | null;
+  assigned_at: string | null;
+}
+
+export interface SandboxConnectionInfo {
+  host: string;
+  port: number;
+  token: string;
+  vnc_path: string;
+  screen_path: string;
+}
+
+export interface SandboxSnapshot {
+  id: string;
+  sandbox_id: string;
+  label: string | null;
+  k8s_snapshot_name: string;
+  os_image: string;
+  created_at: string | null;
+}
+
+export interface SandboxClaimRequest {
+  agent_id: string;
+}
+
+export interface SandboxUpdateRequest {
+  persistent?: boolean;
+  sandbox_config_id?: string | null;
+}
+
+export interface SandboxSnapshotRequest {
+  label: string;
+}
+
+export interface SandboxRestoreRequest {
+  snapshot_id: string;
+}
+
 // ─── API Response ────────────────────────────────────────────────────
 
 export interface APIError {

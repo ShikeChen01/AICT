@@ -19,7 +19,7 @@ from backend.config import settings
 from backend.core.auth import verify_ws_token, _verify_firebase_token
 from backend.core.ws_backend_log_stream import ws_backend_log_stream
 from backend.db.session import AsyncSessionLocal
-from backend.db.models import Agent, Repository, RepositoryMembership, User
+from backend.db.models import Agent, Repository, RepositoryMembership, User, Sandbox
 from backend.websocket.events import create_backend_log_snapshot_event
 from backend.websocket.manager import Channel, ws_manager
 from backend.websocket.screen_stream import get_screen_stream_proxy
@@ -89,8 +89,8 @@ async def _verify_ws_sandbox_access(token: str, sandbox_id: str) -> bool:
     """
     Return True iff the token is valid AND the caller has access to sandbox_id.
 
-    Resolves the agent that owns the sandbox, then delegates to project access check.
-    Falls back to True (token-only) if no agent is linked yet.
+    Resolves the sandbox and its agent (if linked), then delegates to project access check.
+    Falls back to True (token-only) if no sandbox is found yet.
     """
     if not token:
         return False
@@ -105,14 +105,22 @@ async def _verify_ws_sandbox_access(token: str, sandbox_id: str) -> bool:
         return False
 
     async with AsyncSessionLocal() as db:
-        agent_result = await db.execute(select(Agent).where(Agent.sandbox_id == sandbox_id))
-        agent = agent_result.scalar_one_or_none()
+        # Look up sandbox by orchestrator_sandbox_id (the public sandbox ID)
+        sandbox_result = await db.execute(
+            select(Sandbox).where(Sandbox.orchestrator_sandbox_id == sandbox_id)
+        )
+        sandbox = sandbox_result.scalar_one_or_none()
 
-    if agent is None:
-        # Sandbox not yet linked to an agent — allow if token is valid
+    if sandbox is None:
+        # Sandbox not found yet — allow if token is valid
         return True
 
-    return await _verify_ws_project_access(token, agent.project_id)
+    # Sandbox found; check agent's project access
+    if sandbox.agent_id is None:
+        # Sandbox not yet assigned to an agent — allow if token is valid
+        return True
+
+    return await _verify_ws_project_access(token, sandbox.project_id)
 
 
 # ---- /ws  main event stream -------------------------------------------------

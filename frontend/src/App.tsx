@@ -7,6 +7,7 @@ import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import {
   AgentBuildPage,
+  AgentsPage,
   AuthCallbackPage,
   BackendLogsPage,
   CoPilotPage,
@@ -14,6 +15,7 @@ import {
   LoginPage,
   MonitorPage,
   ProjectsPage,
+  SandboxPage,
   RegisterPage,
   SettingsPage,
   TestLoginPage,
@@ -98,19 +100,22 @@ function AppShell() {
               ) : projects.length === 0 ? (
                 <Navigate to="/projects" replace />
               ) : (
-                <Navigate to={`/project/${projects[0].id}/workspace`} replace />
+                <Navigate to={`/project/${projects[0].id}/dashboard`} replace />
               )
             }
           />
-          <Route path="/project/:projectId/monitor" element={<MonitorPage />} />
-          <Route path="/project/:projectId/copilot" element={<CoPilotPage />} />
-          <Route path="/project/:projectId/workspace" element={<WorkspacePage view="workspace" />} />
+          {/* Primary pages (new v3 structure) */}
           <Route path="/project/:projectId/dashboard" element={<DashboardPage />} />
+          <Route path="/project/:projectId/sandbox" element={<SandboxPage />} />
+          <Route path="/project/:projectId/agents" element={<AgentsPage />} />
+          <Route path="/project/:projectId/workspace" element={<WorkspacePage view="workspace" />} />
+          <Route path="/project/:projectId/copilot" element={<CoPilotPage />} />
           <Route path="/project/:projectId/kanban" element={<WorkspacePage view="kanban" />} />
-          <Route path="/project/:projectId/agent-build" element={<AgentBuildPage />} />
-          <Route path="/project/:projectId/logs" element={<BackendLogsPage />} />
 
           {/* Backward-compatible redirects */}
+          <Route path="/project/:projectId/monitor" element={<MonitorPage />} />
+          <Route path="/project/:projectId/agent-build" element={<AgentBuildPage />} />
+          <Route path="/project/:projectId/logs" element={<BackendLogsPage />} />
           <Route path="/repositories" element={<Navigate to="/projects" replace />} />
         </Route>
 

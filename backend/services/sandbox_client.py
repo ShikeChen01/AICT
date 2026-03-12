@@ -1,17 +1,15 @@
 """
-Sandbox Client — connection multiplexer to individual sandbox containers.
+Sandbox Client — stateless connection to individual sandbox containers.
 
-Maintains one persistent WebSocket per sandbox for shell streaming, and
-issues HTTP requests for stateless operations (screenshot, mouse, keyboard).
+Issues HTTP and WebSocket requests for sandbox operations (shell, screenshot, mouse, keyboard).
+All connection parameters come from the database row, no in-memory cache.
 
-Agents and tool executors never deal with container IPs, ports, or tokens
-directly — they call this client by sandbox_id only.
+This is a completely stateless client — each operation creates fresh connections.
 """
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -43,83 +41,21 @@ class ShellResult:
         return "\n".join(parts)
 
 
-@dataclass
-class SandboxConnection:
-    """State for a single sandbox's connection to the backend."""
-
-    sandbox_id: str
-    rest_base_url: str   # http://{vm_host}:{port}
-    auth_token: str
-    status: str = "idle"  # "idle" | "connected" | "dead"
-
-    # Per-connection HTTP client (persistent, auth pre-configured)
-    _http: httpx.AsyncClient | None = field(default=None, repr=False)
-
-    def http(self) -> httpx.AsyncClient:
-        if self._http is None or self._http.is_closed:
-            self._http = httpx.AsyncClient(
-                base_url=self.rest_base_url,
-                headers={"Authorization": f"Bearer {self.auth_token}"},
-                timeout=30.0,
-            )
-        return self._http
-
-    async def close(self) -> None:
-        if self._http and not self._http.is_closed:
-            await self._http.aclose()
-        self._http = None
-
-
 class SandboxClient:
     """
-    Multiplexer: one instance shared across the backend process.
-    Thread-safe via asyncio.
+    Stateless sandbox client. All connection info comes from parameters.
 
-    Connections are lazily created on first use and cached.
+    Each method creates a fresh httpx.AsyncClient or WebSocket connection
+    and closes it when done. No in-memory connection cache or singleton state.
     """
-
-    def __init__(self) -> None:
-        self._connections: dict[str, SandboxConnection] = {}
-        self._lock = asyncio.Lock()
-
-    # ── Connection management ─────────────────────────────────────────────────
-
-    def register(
-        self,
-        sandbox_id: str,
-        vm_host: str,
-        host_port: int,
-        auth_token: str,
-    ) -> None:
-        """Register a sandbox connection (called after pool manager assigns one)."""
-        conn = SandboxConnection(
-            sandbox_id=sandbox_id,
-            rest_base_url=f"http://{vm_host}:{host_port}",
-            auth_token=auth_token,
-        )
-        self._connections[sandbox_id] = conn
-
-    def unregister(self, sandbox_id: str) -> None:
-        """Remove a sandbox connection (called when sandbox is released)."""
-        conn = self._connections.pop(sandbox_id, None)
-        if conn:
-            asyncio.create_task(conn.close())
-
-    def has_connection(self, sandbox_id: str) -> bool:
-        """Check if a connection is registered for the given sandbox_id."""
-        return sandbox_id in self._connections
-
-    def _get_conn(self, sandbox_id: str) -> SandboxConnection:
-        conn = self._connections.get(sandbox_id)
-        if not conn:
-            raise RuntimeError(f"No connection registered for sandbox {sandbox_id!r}")
-        return conn
 
     # ── Shell execution ───────────────────────────────────────────────────────
 
     async def execute_shell(
         self,
-        sandbox_id: str,
+        host: str,
+        port: int,
+        auth_token: str,
         command: str,
         timeout: int = 120,
     ) -> ShellResult:
@@ -135,11 +71,12 @@ class SandboxClient:
           6. Parse exit code from shell (via $? captured after command)
           7. Close WS
         """
+        import asyncio
         import secrets
         import websockets
 
-        conn = self._get_conn(sandbox_id)
-        ws_url = conn.rest_base_url.replace("http://", "ws://") + f"/ws/shell?token={conn.auth_token}"
+        rest_base_url = f"http://{host}:{port}"
+        ws_url = rest_base_url.replace("http://", "ws://") + f"/ws/shell?token={auth_token}"
 
         marker = secrets.token_hex(8)
         end_sentinel = _CMD_END_MARKER.format(marker=marker)
@@ -219,10 +156,10 @@ class SandboxClient:
                 await asyncio.wait_for(_read(), timeout=timeout)
 
         except asyncio.TimeoutError:
-            logger.warning("Shell timeout on sandbox %s after %ds", sandbox_id, timeout)
+            logger.warning("Shell timeout after %ds", timeout)
             exit_code = None
         except Exception as exc:
-            logger.error("Shell WS error on sandbox %s: %s", sandbox_id, exc)
+            logger.error("Shell WS error: %s", exc)
             raise RuntimeError(f"Shell execution failed: {exc}") from exc
 
         combined = b"".join(output_chunks).decode("utf-8", errors="replace")
@@ -234,106 +171,150 @@ class SandboxClient:
 
     # ── REST operations ───────────────────────────────────────────────────────
 
-    async def health_check(self, sandbox_id: str) -> dict[str, Any]:
-        conn = self._get_conn(sandbox_id)
-        resp = await conn.http().get("/health")
-        resp.raise_for_status()
-        return resp.json()
+    async def health_check(self, host: str, port: int, auth_token: str) -> dict[str, Any]:
+        rest_base_url = f"http://{host}:{port}"
+        async with httpx.AsyncClient(
+            base_url=rest_base_url,
+            headers={"Authorization": f"Bearer {auth_token}"},
+            timeout=30.0,
+        ) as client:
+            resp = await client.get("/health")
+            resp.raise_for_status()
+            return resp.json()
 
-    async def get_screenshot(self, sandbox_id: str) -> bytes:
-        conn = self._get_conn(sandbox_id)
-        resp = await conn.http().get("/screenshot", timeout=20.0)
-        resp.raise_for_status()
-        return resp.content
+    async def get_screenshot(self, host: str, port: int, auth_token: str) -> bytes:
+        rest_base_url = f"http://{host}:{port}"
+        async with httpx.AsyncClient(
+            base_url=rest_base_url,
+            headers={"Authorization": f"Bearer {auth_token}"},
+            timeout=30.0,
+        ) as client:
+            resp = await client.get("/screenshot", timeout=20.0)
+            resp.raise_for_status()
+            return resp.content
 
-    async def mouse_move(self, sandbox_id: str, x: int, y: int) -> dict[str, Any]:
-        conn = self._get_conn(sandbox_id)
-        resp = await conn.http().post("/mouse/move", json={"x": x, "y": y})
-        resp.raise_for_status()
-        return resp.json()
+    async def mouse_move(self, host: str, port: int, auth_token: str, x: int, y: int) -> dict[str, Any]:
+        rest_base_url = f"http://{host}:{port}"
+        async with httpx.AsyncClient(
+            base_url=rest_base_url,
+            headers={"Authorization": f"Bearer {auth_token}"},
+            timeout=30.0,
+        ) as client:
+            resp = await client.post("/mouse/move", json={"x": x, "y": y})
+            resp.raise_for_status()
+            return resp.json()
 
     async def mouse_click(
         self,
-        sandbox_id: str,
+        host: str,
+        port: int,
+        auth_token: str,
         x: int | None = None,
         y: int | None = None,
         button: int = 1,
         click_type: str = "single",
     ) -> dict[str, Any]:
-        conn = self._get_conn(sandbox_id)
+        rest_base_url = f"http://{host}:{port}"
         payload: dict[str, Any] = {"button": button, "click_type": click_type}
         if x is not None:
             payload["x"] = x
         if y is not None:
             payload["y"] = y
-        resp = await conn.http().post("/mouse/click", json=payload)
-        resp.raise_for_status()
-        return resp.json()
+        async with httpx.AsyncClient(
+            base_url=rest_base_url,
+            headers={"Authorization": f"Bearer {auth_token}"},
+            timeout=30.0,
+        ) as client:
+            resp = await client.post("/mouse/click", json=payload)
+            resp.raise_for_status()
+            return resp.json()
 
     async def mouse_scroll(
         self,
-        sandbox_id: str,
+        host: str,
+        port: int,
+        auth_token: str,
         x: int | None = None,
         y: int | None = None,
         direction: str = "down",
         clicks: int = 3,
     ) -> dict[str, Any]:
-        conn = self._get_conn(sandbox_id)
+        rest_base_url = f"http://{host}:{port}"
         payload: dict[str, Any] = {"direction": direction, "clicks": clicks}
         if x is not None:
             payload["x"] = x
         if y is not None:
             payload["y"] = y
-        resp = await conn.http().post("/mouse/scroll", json=payload)
-        resp.raise_for_status()
-        return resp.json()
+        async with httpx.AsyncClient(
+            base_url=rest_base_url,
+            headers={"Authorization": f"Bearer {auth_token}"},
+            timeout=30.0,
+        ) as client:
+            resp = await client.post("/mouse/scroll", json=payload)
+            resp.raise_for_status()
+            return resp.json()
 
-    async def mouse_location(self, sandbox_id: str) -> dict[str, Any]:
-        conn = self._get_conn(sandbox_id)
-        resp = await conn.http().get("/mouse/location")
-        resp.raise_for_status()
-        return resp.json()
+    async def mouse_location(self, host: str, port: int, auth_token: str) -> dict[str, Any]:
+        rest_base_url = f"http://{host}:{port}"
+        async with httpx.AsyncClient(
+            base_url=rest_base_url,
+            headers={"Authorization": f"Bearer {auth_token}"},
+            timeout=30.0,
+        ) as client:
+            resp = await client.get("/mouse/location")
+            resp.raise_for_status()
+            return resp.json()
 
     async def keyboard_press(
         self,
-        sandbox_id: str,
+        host: str,
+        port: int,
+        auth_token: str,
         keys: str | None = None,
         text: str | None = None,
     ) -> dict[str, Any]:
-        conn = self._get_conn(sandbox_id)
+        rest_base_url = f"http://{host}:{port}"
         payload: dict[str, str] = {}
         if keys:
             payload["keys"] = keys
         if text:
             payload["text"] = text
-        resp = await conn.http().post("/keyboard", json=payload)
-        resp.raise_for_status()
-        return resp.json()
+        async with httpx.AsyncClient(
+            base_url=rest_base_url,
+            headers={"Authorization": f"Bearer {auth_token}"},
+            timeout=30.0,
+        ) as client:
+            resp = await client.post("/keyboard", json=payload)
+            resp.raise_for_status()
+            return resp.json()
 
-    async def start_recording(self, sandbox_id: str) -> dict[str, Any]:
-        conn = self._get_conn(sandbox_id)
-        resp = await conn.http().post("/record/start", timeout=10.0)
-        resp.raise_for_status()
-        return resp.json()
+    async def start_recording(self, host: str, port: int, auth_token: str) -> dict[str, Any]:
+        rest_base_url = f"http://{host}:{port}"
+        async with httpx.AsyncClient(
+            base_url=rest_base_url,
+            headers={"Authorization": f"Bearer {auth_token}"},
+            timeout=30.0,
+        ) as client:
+            resp = await client.post("/record/start", timeout=10.0)
+            resp.raise_for_status()
+            return resp.json()
 
-    async def stop_recording(self, sandbox_id: str) -> bytes:
-        conn = self._get_conn(sandbox_id)
-        resp = await conn.http().post("/record/stop", timeout=60.0)
-        resp.raise_for_status()
-        return resp.content
+    async def stop_recording(self, host: str, port: int, auth_token: str) -> bytes:
+        rest_base_url = f"http://{host}:{port}"
+        async with httpx.AsyncClient(
+            base_url=rest_base_url,
+            headers={"Authorization": f"Bearer {auth_token}"},
+            timeout=30.0,
+        ) as client:
+            resp = await client.post("/record/stop", timeout=60.0)
+            resp.raise_for_status()
+            return resp.content
 
-    async def close_all(self) -> None:
-        for conn in list(self._connections.values()):
-            await conn.close()
-        self._connections.clear()
 
-
-# Process-level singleton — instantiated once at backend startup
-_sandbox_client: SandboxClient | None = None
+# Process-level singleton for backward compatibility
+_client = SandboxClient()
 
 
 def get_sandbox_client() -> SandboxClient:
-    global _sandbox_client
-    if _sandbox_client is None:
-        _sandbox_client = SandboxClient()
-    return _sandbox_client
+    """Return the module-level stateless client instance."""
+    return _client

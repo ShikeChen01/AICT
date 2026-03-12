@@ -74,12 +74,11 @@ class AgentService:
         role: str,
         display_name: str,
         template: AgentTemplate,
-        *,
-        sandbox_persist: bool = False,
     ) -> Agent:
         """Create an agent, copying model/provider/thinking_enabled from template.
 
         Also copies prompt block configs from template to agent level.
+        Sandbox persistence is now determined by agent role.
         """
         agent = Agent(
             id=_uuid.uuid4(),
@@ -92,7 +91,7 @@ class AgentService:
             provider=template.provider or infer_provider(template.model),
             thinking_enabled=template.thinking_enabled,
             status="sleeping",
-            sandbox_persist=sandbox_persist,
+            # Note: sandbox_persist is now determined by role; the parameter is deprecated
             current_task_id=None,
         )
         self.session.add(agent)
@@ -238,7 +237,7 @@ class AgentService:
         template_id: UUID,
         *,
         display_name: str | None = None,
-        sandbox_persist: bool = False,
+        sandbox_persist: bool = False,  # Deprecated; sandbox persistence is now determined by role
     ) -> Agent:
         """Create a new agent from any agent template (design).
 
@@ -265,7 +264,6 @@ class AgentService:
 
         agent = await self._create_agent_from_template(
             project_id, role, display_name, template,
-            sandbox_persist=sandbox_persist,
         )
         return agent
 

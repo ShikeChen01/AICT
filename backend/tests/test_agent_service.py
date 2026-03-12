@@ -25,11 +25,12 @@ async def test_count_by_role_after_spawn(session, sample_project, sample_enginee
 
 @pytest.mark.asyncio
 async def test_spawn_engineer(session, sample_project):
+    from backend.services.orchestrator import sandbox_should_persist
     service = get_agent_service(session)
     agent = await service.spawn_engineer(sample_project.id)
     assert agent.role == "engineer"
     assert agent.display_name == "Engineer-1"
-    assert agent.sandbox_persist is False
+    assert sandbox_should_persist(agent.role) is False
     assert agent.status == "sleeping"
 
 
@@ -81,14 +82,15 @@ async def test_spawn_engineer_max_limit(session, sample_project):
 
 @pytest.mark.asyncio
 async def test_ensure_project_agents_creates_manager_cto(session, sample_project):
+    from backend.services.orchestrator import sandbox_should_persist
     service = get_agent_service(session)
     manager, cto = await service.ensure_project_agents(sample_project)
     assert manager.role == "manager"
     assert manager.display_name == "GM"
-    assert manager.sandbox_persist is True
+    assert sandbox_should_persist(manager.role) is True
     assert cto.role == "cto"
     assert cto.display_name == "CTO"
-    assert cto.sandbox_persist is True
+    assert sandbox_should_persist(cto.role) is True
 
 
 @pytest.mark.asyncio

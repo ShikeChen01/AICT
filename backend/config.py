@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     sandbox_orchestrator_port: int = 9090
     sandbox_orchestrator_token: str = ""
 
+    # Sandbox JWT — for direct frontend access to sandbox services
+    sandbox_jwt_secret: str = ""  # Signing secret for connection JWTs
+    sandbox_jwt_ttl_seconds: int = 3600  # Token time-to-live (1 hour)
+
     # Logging — Cloud Logging on Cloud Run (K_SERVICE) or when USE_CLOUD_LOGGING=true
     use_cloud_logging: bool = Field(
         default_factory=lambda: (

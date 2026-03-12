@@ -1,65 +1,71 @@
 /**
- * Dashboard Page — standalone top-nav page showing a live overview of all agents.
+ * Dashboard Page — Project Command Center.
  *
- * Previously embedded as a tab inside AgentBuild; now promoted to its own route
- * for clearer information architecture and navigation.
+ * The primary landing page showing at-a-glance project health:
+ *  • Budget & cost controls (daily spend, rate limits)
+ *  • Emergency stop-all button
+ *  • Agent fleet overview (compact cards)
+ *  • Live sandbox thumbnails (click to enter Sandbox page)
+ *  • Recent activity log (compact feed)
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Loader2,
   AlertCircle,
-  Blocks,
   Bot,
   BrainCircuit,
   Cpu,
+  DollarSign,
+  Activity,
+  OctagonX,
+  Monitor,
   ChevronRight,
-  Play,
-  Settings2,
-  Plus,
-  Layers,
+  Zap,
+  TrendingUp,
+  Clock,
+  Shield,
 } from 'lucide-react';
 import {
   getProject,
   getAgents,
-  listAgentBlocks,
-  listTemplates,
   getAgentStatuses,
+  getProjectUsage,
+  getProjectSettings,
+  listSandboxes,
+  stopAgent,
 } from '../api/client';
-import type { Project, Agent, PromptBlockConfig, AgentTemplate, AgentStatusWithQueue } from '../types';
+import type {
+  Project,
+  Agent,
+  AgentStatusWithQueue,
+  ProjectUsageResponse,
+  ProjectSettings,
+  Sandbox,
+} from '../types';
 import { AppLayout } from '../components/Layout';
+import { useScreenStream } from '../hooks/useScreenStream';
 
-// ── Types ──────────────────────────────────────────────────────────────────
-
-interface AgentOverview {
-  agent: Agent;
-  blockCount: number;
-  enabledBlockCount: number;
-  customBlockCount: number;
-  status: AgentStatusWithQueue | null;
-}
-
-// ── Role color mapping ─────────────────────────────────────────────────────
+// ── Constants ──────────────────────────────────────────────────────────────
 
 const ROLE_COLORS: Record<string, string> = {
-  manager: 'var(--color-manager, #f59e0b)',
-  cto: 'var(--color-cto, #8b5cf6)',
-  engineer: 'var(--color-engineer, #3b82f6)',
+  manager: '#f59e0b',
+  cto: '#8b5cf6',
+  engineer: '#3b82f6',
 };
 
-const STATUS_DOTS: Record<string, string> = {
+const STATUS_COLORS: Record<string, string> = {
   active: '#22c55e',
   busy: '#f59e0b',
   sleeping: '#64748b',
 };
 
-// ── Page Component ─────────────────────────────────────────────────────────
+// ── Page Shell ─────────────────────────────────────────────────────────────
 
 export function DashboardPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-
   const [project, setProject] = useState<Project | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -69,7 +75,7 @@ export function DashboardPage() {
       setIsLoading(true);
       const proj = await getProject(projectId);
       setProject(proj);
-    } catch (_err) { // eslint-disable-line @typescript-eslint/no-unused-vars
+    } catch {
       setProject(null);
     } finally {
       setIsLoading(false);
@@ -96,10 +102,7 @@ export function DashboardPage() {
           <div className="text-center">
             <AlertCircle className="w-12 h-12 mx-auto text-[var(--color-danger)] mb-4" aria-hidden="true" />
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">Project not found</h2>
-            <button
-              onClick={() => navigate('/projects')}
-              className="mt-4 text-[var(--color-primary)] hover:underline"
-            >
+            <button onClick={() => navigate('/projects')} className="mt-4 text-[var(--color-primary)] hover:underline">
               Back to Projects
             </button>
           </div>
@@ -112,11 +115,8 @@ export function DashboardPage() {
     <AppLayout>
       <div className="flex flex-1 flex-col min-h-0 overflow-hidden bg-[var(--app-bg)]">
         <div className="h-full overflow-y-auto">
-          <main className="max-w-5xl mx-auto px-6 py-6">
-            <DashboardView
-              projectId={projectId}
-              onSwitchToBuilder={() => navigate(`/project/${projectId}/agent-build`)}
-            />
+          <main className="max-w-[1400px] mx-auto px-6 py-6">
+            <DashboardContent projectId={projectId} projectName={project.name} />
           </main>
         </div>
       </div>
@@ -124,67 +124,73 @@ export function DashboardPage() {
   );
 }
 
-// ── Dashboard View ─────────────────────────────────────────────────────────
+// ── Dashboard Content ──────────────────────────────────────────────────────
 
-interface DashboardViewProps {
+interface DashboardContentProps {
   projectId: string;
-  onSwitchToBuilder: () => void;
+  projectName: string;
 }
 
-function DashboardView({ projectId, onSwitchToBuilder }: DashboardViewProps) {
-  const [agentOverviews, setAgentOverviews] = useState<AgentOverview[]>([]);
-  const [templates, setTemplates] = useState<AgentTemplate[]>([]);
+function DashboardContent({ projectId, projectName }: DashboardContentProps) {
+  const navigate = useNavigate();
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [statuses, setStatuses] = useState<AgentStatusWithQueue[]>([]);
+  const [usage, setUsage] = useState<ProjectUsageResponse | null>(null);
+  const [settings, setSettings] = useState<ProjectSettings | null>(null);
+  const [sandboxes, setSandboxes] = useState<Sandbox[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [stoppingAll, setStoppingAll] = useState(false);
+  const cacheRef = useRef<{ data: Sandbox[]; timestamp: number } | null>(null);
+  const refreshInterval = useRef<number | undefined>(undefined);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [agentList, statusList, usageData, settingsData, sandboxList] = await Promise.all([
+        getAgents(projectId),
+        getAgentStatuses(projectId).catch(() => [] as AgentStatusWithQueue[]),
+        getProjectUsage(projectId).catch(() => null as ProjectUsageResponse | null),
+        getProjectSettings(projectId).catch(() => null as ProjectSettings | null),
+        listSandboxes(projectId).catch(() => [] as Sandbox[]),
+      ] as const);
+
+      setAgents(agentList);
+      setStatuses(statusList);
+      setUsage(usageData);
+      setSettings(settingsData);
+      setSandboxes(sandboxList);
+      cacheRef.current = { data: sandboxList, timestamp: Date.now() };
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load dashboard');
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setLoading(true);
-        const [agents, tmpls, statuses] = await Promise.all([
-          getAgents(projectId),
-          listTemplates(projectId),
-          getAgentStatuses(projectId).catch(() => [] as AgentStatusWithQueue[]),
-        ]);
+    fetchData();
+    refreshInterval.current = setInterval(fetchData, 15000);
+    return () => { if (refreshInterval.current) clearInterval(refreshInterval.current); };
+  }, [fetchData]);
 
-        const blockResults = await Promise.allSettled(
-          agents.map((a) => listAgentBlocks(a.id))
-        );
-
-        if (cancelled) return;
-
-        const statusMap = new Map(statuses.map((s) => [s.id, s]));
-
-        const overviews: AgentOverview[] = agents.map((agent, idx) => {
-          const blocks: PromptBlockConfig[] =
-            blockResults[idx].status === 'fulfilled' ? blockResults[idx].value : [];
-          return {
-            agent,
-            blockCount: blocks.length,
-            enabledBlockCount: blocks.filter((b) => b.enabled).length,
-            customBlockCount: blocks.filter((b) => b.block_key.startsWith('custom_')).length,
-            status: statusMap.get(agent.id) ?? null,
-          };
-        });
-
-        setAgentOverviews(overviews);
-        setTemplates(tmpls);
-        setError(null);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load dashboard');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [projectId]);
+  const handleStopAll = async () => {
+    if (stoppingAll) return;
+    setStoppingAll(true);
+    try {
+      const active = agents.filter(a => a.status === 'active' || a.status === 'busy');
+      await Promise.allSettled(active.map(a => stopAgent(a.id)));
+      await fetchData();
+    } finally {
+      setStoppingAll(false);
+    }
+  };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20" role="status">
         <Loader2 className="w-6 h-6 animate-spin text-[var(--color-primary)]" aria-hidden="true" />
-        <span className="ml-2 text-sm text-[var(--text-muted)]">Loading dashboard…</span>
+        <span className="ml-2 text-sm text-[var(--text-muted)]">Loading command center…</span>
       </div>
     );
   }
@@ -197,225 +203,327 @@ function DashboardView({ projectId, onSwitchToBuilder }: DashboardViewProps) {
     );
   }
 
-  const systemTemplates = templates.filter((t) => t.is_system_default);
-  const customTemplates = templates.filter((t) => !t.is_system_default);
+  const statusMap = new Map(statuses.map(s => [s.id, s]));
+  const activeAgents = agents.filter(a => a.status === 'active' || a.status === 'busy');
+  const totalCostToday = usage?.today.estimated_cost_usd ?? 0;
+  const dailyBudget = settings?.daily_cost_budget_usd ?? 0;
+  const budgetPct = dailyBudget > 0 ? Math.min(100, (totalCostToday / dailyBudget) * 100) : 0;
+  const totalTokensToday = usage?.today.total_input_tokens ?? 0;
+  const totalOutputToday = usage?.today.total_output_tokens ?? 0;
+  const callsLastHour = usage?.last_hour.total_calls ?? 0;
 
   return (
     <div className="space-y-6">
-      {/* Section: Agents overview */}
-      <section aria-labelledby="agents-heading">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Bot className="w-4 h-4 text-[var(--text-muted)]" aria-hidden="true" />
-            <h2 id="agents-heading" className="text-sm font-semibold text-[var(--text-primary)] uppercase tracking-wide">
-              Agents ({agentOverviews.length})
-            </h2>
-          </div>
-          <button
-            type="button"
-            onClick={onSwitchToBuilder}
-            className="flex items-center gap-1 text-xs text-[var(--color-primary)] hover:text-[var(--color-primary-hover)] font-medium transition-colors"
-          >
-            Open Builder
-            <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
-          </button>
+      {/* ── Header ────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-[var(--text-primary)]">{projectName}</h1>
+          <p className="text-sm text-[var(--text-muted)] mt-0.5">Project Command Center</p>
         </div>
+        <button
+          type="button"
+          onClick={handleStopAll}
+          disabled={stoppingAll || activeAgents.length === 0}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all
+            bg-red-500/10 text-red-400 border border-red-500/20
+            hover:bg-red-500/20 hover:border-red-500/40
+            disabled:opacity-40 disabled:cursor-not-allowed"
+          title={activeAgents.length === 0 ? 'No active agents' : `Stop ${activeAgents.length} active agent(s)`}
+        >
+          <OctagonX className="w-4 h-4" aria-hidden="true" />
+          {stoppingAll ? 'Stopping…' : `Emergency Stop All (${activeAgents.length})`}
+        </button>
+      </div>
 
-        {agentOverviews.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-[var(--border-color)] bg-[var(--surface-muted)] p-8 text-center">
-            <Bot className="w-8 h-8 mx-auto text-[var(--text-faint)] mb-2" aria-hidden="true" />
-            <p className="text-sm text-[var(--text-muted)]">No agents yet. Switch to the Agent Builder to get started.</p>
+      {/* ── Budget & Cost Row ─────────────────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        <StatCard
+          icon={<DollarSign className="w-4 h-4" />}
+          label="Cost Today"
+          value={`$${totalCostToday.toFixed(4)}`}
+          sub={dailyBudget > 0 ? `of $${dailyBudget.toFixed(2)} budget` : 'no budget set'}
+          accent={budgetPct > 80 ? 'danger' : budgetPct > 50 ? 'warning' : 'success'}
+          progress={dailyBudget > 0 ? budgetPct : undefined}
+        />
+        <StatCard
+          icon={<TrendingUp className="w-4 h-4" />}
+          label="Tokens Today"
+          value={formatNumber(totalTokensToday + totalOutputToday)}
+          sub={`${formatNumber(totalTokensToday)} in · ${formatNumber(totalOutputToday)} out`}
+          accent="primary"
+        />
+        <StatCard
+          icon={<Zap className="w-4 h-4" />}
+          label="Calls (Last Hour)"
+          value={String(callsLastHour)}
+          sub={settings?.calls_per_hour_limit ? `limit: ${settings.calls_per_hour_limit}/hr` : 'no rate limit'}
+          accent="primary"
+        />
+        <StatCard
+          icon={<Shield className="w-4 h-4" />}
+          label="Fleet Status"
+          value={`${activeAgents.length} active`}
+          sub={`${agents.length} total · ${sandboxes.length} sandbox${sandboxes.length !== 1 ? 'es' : ''}`}
+          accent={activeAgents.length > 0 ? 'success' : 'muted'}
+        />
+      </div>
+
+      {/* ── Two-column: Agents + Sandboxes ────────────────────────── */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* Agent Fleet */}
+        <section aria-labelledby="fleet-heading">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Bot className="w-4 h-4 text-[var(--text-muted)]" aria-hidden="true" />
+              <h2 id="fleet-heading" className="text-sm font-semibold text-[var(--text-primary)] uppercase tracking-wide">
+                Agent Fleet ({agents.length})
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate(`/project/${projectId}/agents`)}
+              className="flex items-center gap-1 text-xs text-[var(--color-primary)] hover:text-[var(--color-primary-hover)] font-medium transition-colors"
+            >
+              Manage
+              <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3" role="list">
-            {agentOverviews.map(({ agent, blockCount, enabledBlockCount, customBlockCount, status }) => {
-              const roleColor = ROLE_COLORS[agent.role] ?? 'var(--text-muted)';
-              const statusColor = STATUS_DOTS[agent.status] ?? '#64748b';
-              const queueDepth = status?.queue_size ?? 0;
 
-              return (
-                <article
-                  key={agent.id}
-                  role="listitem"
-                  className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 hover:border-[var(--border-color-hover)] transition-colors group"
-                  aria-label={`Agent: ${agent.display_name}, role: ${agent.role}, status: ${agent.status}`}
-                >
-                  {/* Agent header row */}
-                  <div className="flex items-center gap-2.5 mb-3">
+          {agents.length === 0 ? (
+            <EmptyState icon={Bot} message="No agents yet. Go to the Agents page to create one." />
+          ) : (
+            <div className="space-y-2">
+              {agents.map(agent => {
+                const st = statusMap.get(agent.id);
+                const roleColor = ROLE_COLORS[agent.role] ?? '#64748b';
+                const statusColor = STATUS_COLORS[agent.status] ?? '#64748b';
+                const queueSize = st?.queue_size ?? 0;
+
+                return (
+                  <div
+                    key={agent.id}
+                    className="flex items-center gap-3 rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-3.5 py-2.5 hover:border-[var(--border-color-hover)] transition-colors cursor-pointer"
+                    onClick={() => navigate(`/project/${projectId}/agents`)}
+                  >
                     <div
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold text-white shrink-0"
+                      className="w-7 h-7 rounded-md flex items-center justify-center text-[10px] font-bold text-white shrink-0"
                       style={{ backgroundColor: roleColor }}
-                      aria-hidden="true"
                     >
                       {agent.display_name.charAt(0).toUpperCase()}
                     </div>
-                    <div className="min-w-0 flex-1">
+                    <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-semibold text-[var(--text-primary)] truncate">
-                          {agent.display_name}
+                        <span className="text-sm font-medium text-[var(--text-primary)] truncate">{agent.display_name}</span>
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: statusColor }} />
+                        {agent.thinking_enabled && <BrainCircuit className="w-3 h-3 text-[var(--color-accent)] shrink-0" />}
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
+                        <span className="capitalize">{agent.role}</span>
+                        <span className="text-[var(--text-faint)]">·</span>
+                        <Cpu className="w-2.5 h-2.5" />
+                        <span className="font-mono truncate">{agent.model}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] shrink-0">
+                      {queueSize > 0 && (
+                        <span className="text-[var(--color-warning)] font-medium">{queueSize} queued</span>
+                      )}
+                      {sandboxes.some(sb => sb.agent_id === agent.id) && (
+                        <span className="text-[var(--color-success)] flex items-center gap-1">
+                          <Monitor className="w-3 h-3" /> sandbox
                         </span>
-                        <span
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{ backgroundColor: statusColor }}
-                          role="img"
-                          aria-label={`Status: ${agent.status}`}
-                        />
-                      </div>
-                      <span className="text-xs text-[var(--text-muted)] capitalize">{agent.role}</span>
+                      )}
                     </div>
-                    {agent.thinking_enabled && (
-                      <BrainCircuit className="w-4 h-4 text-[var(--color-accent)] shrink-0" aria-label="Thinking enabled" />
-                    )}
                   </div>
-
-                  {/* Model pill */}
-                  <div className="flex items-center gap-1.5 mb-3">
-                    <Cpu className="w-3 h-3 text-[var(--text-faint)]" aria-hidden="true" />
-                    <span className="text-xs font-mono text-[var(--text-secondary)] truncate">{agent.model}</span>
-                    {agent.provider && (
-                      <span className="text-[10px] text-[var(--text-faint)] border border-[var(--border-color-subtle)] rounded px-1 py-px">
-                        {agent.provider}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Stats row */}
-                  <div className="flex items-center gap-4 text-xs text-[var(--text-muted)]">
-                    <div className="flex items-center gap-1" title="Prompt blocks (enabled / total)">
-                      <Blocks className="w-3 h-3" aria-hidden="true" />
-                      <span>
-                        <span className="text-[var(--text-primary)] font-medium">{enabledBlockCount}</span>
-                        /{blockCount} blocks
-                      </span>
-                    </div>
-                    {customBlockCount > 0 && (
-                      <div className="flex items-center gap-1" title="Custom blocks">
-                        <Plus className="w-3 h-3" aria-hidden="true" />
-                        <span>{customBlockCount} custom</span>
-                      </div>
-                    )}
-                    {queueDepth > 0 && (
-                      <div className="flex items-center gap-1 text-[var(--color-warning)]" title="Tasks in queue">
-                        <Play className="w-3 h-3" aria-hidden="true" />
-                        <span>{queueDepth} queued</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Sandbox indicator */}
-                  {agent.sandbox_id && (
-                    <div className="mt-2 flex items-center gap-1 text-[10px] text-[var(--color-success)]">
-                      <div className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)]" aria-hidden="true" />
-                      Sandbox active
-                      {agent.sandbox_persist && <span className="text-[var(--text-faint)]">· persistent</span>}
-                    </div>
-                  )}
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      {/* Section: Templates */}
-      <section aria-labelledby="templates-heading">
-        <div className="flex items-center gap-2 mb-3">
-          <Layers className="w-4 h-4 text-[var(--text-muted)]" aria-hidden="true" />
-          <h2 id="templates-heading" className="text-sm font-semibold text-[var(--text-primary)] uppercase tracking-wide">
-            Agent Templates ({templates.length})
-          </h2>
-        </div>
-
-        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] overflow-hidden" role="table" aria-label="Agent templates">
-          {/* Table header */}
-          <div className="grid grid-cols-[1fr_120px_140px_80px_80px] gap-2 px-4 py-2 text-[10px] font-semibold text-[var(--text-faint)] uppercase tracking-wider border-b border-[var(--border-color-subtle)] bg-[var(--surface-muted)]" role="row">
-            <span role="columnheader">Template</span>
-            <span role="columnheader">Role</span>
-            <span role="columnheader">Model</span>
-            <span role="columnheader">Thinking</span>
-            <span role="columnheader">Type</span>
-          </div>
-
-          {systemTemplates.map((tmpl) => (
-            <TemplateRow key={tmpl.id} template={tmpl} />
-          ))}
-
-          {systemTemplates.length > 0 && customTemplates.length > 0 && (
-            <div className="border-t border-dashed border-[var(--border-color-subtle)]" role="separator" />
-          )}
-
-          {customTemplates.map((tmpl) => (
-            <TemplateRow key={tmpl.id} template={tmpl} />
-          ))}
-
-          {templates.length === 0 && (
-            <div className="px-4 py-6 text-center text-sm text-[var(--text-muted)]">
-              No templates found.
+                );
+              })}
             </div>
           )}
-        </div>
-      </section>
+        </section>
 
-      {/* Quick action banner */}
-      <button
-        type="button"
-        onClick={onSwitchToBuilder}
-        className="w-full rounded-xl border border-[var(--color-primary)]/20 bg-[var(--color-primary)]/5 p-4 flex items-center gap-3 cursor-pointer hover:bg-[var(--color-primary)]/10 transition-colors text-left"
-      >
-        <div className="w-10 h-10 rounded-lg bg-[var(--color-primary)]/15 flex items-center justify-center shrink-0" aria-hidden="true">
-          <Settings2 className="w-5 h-5 text-[var(--color-primary)]" />
+        {/* Sandbox Previews */}
+        <section aria-labelledby="sandbox-heading">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Monitor className="w-4 h-4 text-[var(--text-muted)]" aria-hidden="true" />
+              <h2 id="sandbox-heading" className="text-sm font-semibold text-[var(--text-primary)] uppercase tracking-wide">
+                Sandboxes ({sandboxes.length})
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate(`/project/${projectId}/sandbox`)}
+              className="flex items-center gap-1 text-xs text-[var(--color-primary)] hover:text-[var(--color-primary-hover)] font-medium transition-colors"
+            >
+              Open Sandbox
+              <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+          </div>
+
+          {sandboxes.length === 0 ? (
+            <EmptyState icon={Monitor} message="No sandboxes running. Agents with sandbox access will appear here." />
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              {sandboxes.slice(0, 4).map(sb => (
+                <SandboxThumbnail
+                  key={sb.id}
+                  sandbox={sb}
+                  onClick={() => navigate(`/project/${projectId}/sandbox`)}
+                />
+              ))}
+              {sandboxes.length > 4 && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/project/${projectId}/sandbox`)}
+                  className="col-span-2 text-center text-xs text-[var(--color-primary)] hover:underline py-2"
+                >
+                  +{sandboxes.length - 4} more sandbox{sandboxes.length - 4 !== 1 ? 'es' : ''}
+                </button>
+              )}
+            </div>
+          )}
+        </section>
+      </div>
+
+      {/* ── Recent Activity (compact) ─────────────────────────────── */}
+      <section aria-labelledby="activity-heading">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Activity className="w-4 h-4 text-[var(--text-muted)]" aria-hidden="true" />
+            <h2 id="activity-heading" className="text-sm font-semibold text-[var(--text-primary)] uppercase tracking-wide">
+              Recent LLM Calls
+            </h2>
+          </div>
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-[var(--text-primary)]">
-            Configure prompt blocks, models, and tools
-          </p>
-          <p className="text-xs text-[var(--text-muted)]">
-            Switch to the Agent Builder to edit system prompts, manage context budgets, and customize tool access per agent.
-          </p>
-        </div>
-        <ChevronRight className="w-5 h-5 text-[var(--color-primary)] shrink-0" aria-hidden="true" />
-      </button>
+
+        {usage?.recent_calls && usage.recent_calls.length > 0 ? (
+          <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] overflow-hidden">
+            <div className="grid grid-cols-[1fr_100px_100px_80px_80px] gap-2 px-4 py-2 text-[10px] font-semibold text-[var(--text-faint)] uppercase tracking-wider border-b border-[var(--border-color-subtle)] bg-[var(--surface-muted)]">
+              <span>Model</span>
+              <span>Input Tokens</span>
+              <span>Output Tokens</span>
+              <span>Cost</span>
+              <span>Time</span>
+            </div>
+            {usage.recent_calls.slice(0, 8).map((call, i) => (
+              <div
+                key={i}
+                className="grid grid-cols-[1fr_100px_100px_80px_80px] gap-2 px-4 py-2 items-center border-b border-[var(--border-color-subtle)] last:border-b-0 text-sm"
+              >
+                <span className="font-mono text-xs text-[var(--text-secondary)] truncate">{call.model}</span>
+                <span className="text-xs text-[var(--text-muted)]">{formatNumber(call.input_tokens)}</span>
+                <span className="text-xs text-[var(--text-muted)]">{formatNumber(call.output_tokens)}</span>
+                <span className="text-xs font-medium text-[var(--text-primary)]">${call.estimated_cost_usd.toFixed(4)}</span>
+                <span className="text-[11px] text-[var(--text-faint)]">
+                  <Clock className="w-3 h-3 inline mr-0.5" />
+                  {formatTimeAgo(call.created_at)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState icon={Activity} message="No LLM calls recorded yet." />
+        )}
+      </section>
     </div>
   );
 }
 
-// ── TemplateRow ──────────────────────────────────────────────────────────────
+// ── Stat Card ──────────────────────────────────────────────────────────────
 
-function TemplateRow({ template }: { template: AgentTemplate }) {
-  const roleColor = ROLE_COLORS[template.base_role] ?? 'var(--text-muted)';
+interface StatCardProps {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  sub: string;
+  accent: 'primary' | 'success' | 'warning' | 'danger' | 'muted';
+  progress?: number;
+}
+
+function StatCard({ icon, label, value, sub, accent, progress }: StatCardProps) {
+  const accentVar = accent === 'muted' ? 'var(--text-muted)' : `var(--color-${accent})`;
 
   return (
-    <div className="grid grid-cols-[1fr_120px_140px_80px_80px] gap-2 px-4 py-2.5 items-center border-b border-[var(--border-color-subtle)] last:border-b-0 hover:bg-[var(--surface-hover)] transition-colors text-sm" role="row">
-      <div className="flex items-center gap-2 min-w-0" role="cell">
-        <div
-          className="w-2 h-2 rounded-full shrink-0"
-          style={{ backgroundColor: roleColor }}
-          aria-hidden="true"
-        />
-        <span className="text-[var(--text-primary)] font-medium truncate">{template.name}</span>
+    <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4">
+      <div className="flex items-center gap-2 mb-2">
+        <div className="text-[var(--text-muted)]">{icon}</div>
+        <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide">{label}</span>
       </div>
-      <span className="text-xs text-[var(--text-muted)] capitalize" role="cell">{template.base_role}</span>
-      <span className="text-xs font-mono text-[var(--text-secondary)] truncate" role="cell">{template.model}</span>
-      <span role="cell">
-        {template.thinking_enabled ? (
-          <BrainCircuit className="w-3.5 h-3.5 text-[var(--color-accent)]" aria-label="Thinking enabled" />
-        ) : (
-          <span className="text-xs text-[var(--text-faint)]" aria-label="Thinking disabled">—</span>
-        )}
-      </span>
-      <span role="cell">
-        {template.is_system_default ? (
-          <span className="text-[10px] font-medium text-[var(--color-primary)] bg-[var(--color-primary)]/10 rounded px-1.5 py-0.5">
-            system
-          </span>
-        ) : (
-          <span className="text-[10px] font-medium text-[var(--color-accent)] bg-[var(--color-accent)]/10 rounded px-1.5 py-0.5">
-            custom
-          </span>
-        )}
-      </span>
+      <div className="text-lg font-bold" style={{ color: accentVar }}>{value}</div>
+      <div className="text-[11px] text-[var(--text-faint)] mt-0.5">{sub}</div>
+      {progress !== undefined && (
+        <div className="mt-2 h-1.5 rounded-full bg-[var(--surface-muted)] overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all duration-500"
+            style={{ width: `${progress}%`, backgroundColor: accentVar }}
+          />
+        </div>
+      )}
     </div>
   );
+}
+
+// ── Sandbox Thumbnail ──────────────────────────────────────────────────────
+
+function SandboxThumbnail({ sandbox, onClick }: { sandbox: Sandbox; onClick: () => void }) {
+  const { frameUrl, isConnected } = useScreenStream(sandbox.orchestrator_sandbox_id);
+  const roleColor = ROLE_COLORS[sandbox.agent_role ?? 'engineer'] ?? '#64748b';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="relative rounded-lg border border-[var(--border-color)] bg-black/80 overflow-hidden aspect-video hover:border-[var(--color-primary)]/50 transition-all group"
+    >
+      {frameUrl ? (
+        <img src={frameUrl} alt={`${sandbox.agent_name ?? 'Unknown'} sandbox`} className="w-full h-full object-cover" />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <Monitor className="w-6 h-6 text-[var(--text-faint)]" />
+        </div>
+      )}
+
+      {/* Overlay */}
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1.5">
+        <div className="flex items-center gap-1.5">
+          <div className="w-4 h-4 rounded flex items-center justify-center text-[8px] font-bold text-white" style={{ backgroundColor: roleColor }}>
+            {(sandbox.agent_name ?? 'U').charAt(0).toUpperCase()}
+          </div>
+          <span className="text-[11px] font-medium text-white truncate">{sandbox.agent_name ?? 'Unknown'}</span>
+          <div className={`w-1.5 h-1.5 rounded-full ml-auto shrink-0 ${isConnected ? 'bg-green-400' : 'bg-gray-500'}`} />
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// ── Empty State ────────────────────────────────────────────────────────────
+
+function EmptyState({ icon: Icon, message }: { icon: React.ComponentType<{ className?: string }>; message: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-[var(--border-color)] bg-[var(--surface-muted)] p-8 text-center">
+      <Icon className="w-8 h-8 mx-auto text-[var(--text-faint)] mb-2" />
+      <p className="text-sm text-[var(--text-muted)]">{message}</p>
+    </div>
+  );
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function formatNumber(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+function formatTimeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 export default DashboardPage;

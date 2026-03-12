@@ -46,6 +46,13 @@ import type {
   SandboxConfig,
   SandboxConfigCreate,
   SandboxConfigUpdate,
+  Sandbox,
+  SandboxConnectionInfo,
+  SandboxSnapshot,
+  SandboxClaimRequest,
+  SandboxUpdateRequest,
+  SandboxSnapshotRequest,
+  SandboxRestoreRequest,
 } from '../types';
 
 // ─── Configuration ───────────────────────────────────────────────────
@@ -636,50 +643,70 @@ export async function revertDocument(
   return request<ProjectDocument>('POST', `/repositories/${repositoryId}/documents/${docType}/revert`, { version_number: versionNumber });
 }
 
-// ─── Sandboxes ──────────────────────────────────────────────────────
+// ─── Sandboxes (v3) ─────────────────────────────────────────────────────
 
-export interface SandboxInfo {
-  agent_id: string;
-  agent_name: string;
-  agent_role: string;
-  sandbox_id: string;
-  persistent: boolean;
-  status: string | null;
-  sandbox_config_id: string | null;
-  sandbox_config_name: string | null;
-  os_image: string | null;
+export async function listSandboxes(projectId: string): Promise<Sandbox[]> {
+  return request<Sandbox[]>('GET', `/sandboxes?project_id=${projectId}`);
 }
 
-export async function listSandboxes(projectId: string): Promise<SandboxInfo[]> {
-  return request<SandboxInfo[]>('GET', `/sandboxes?project_id=${projectId}`);
-}
-
-export async function toggleSandboxPersistence(
-  agentId: string,
-  persistent: boolean,
-): Promise<{ ok: boolean }> {
-  return request<{ ok: boolean }>('POST', `/sandboxes/${agentId}/persistent`, { persistent });
-}
-
-export async function startSandbox(agentId: string): Promise<{ ok: boolean; sandbox_id: string; status?: string; message?: string }> {
-  return request<{ ok: boolean; sandbox_id: string; status?: string; message?: string }>(
+export async function claimSandbox(agentId: string): Promise<Sandbox> {
+  return request<Sandbox>(
     'POST',
-    `/sandboxes/${agentId}/start`,
-    undefined,
+    '/sandboxes',
+    { agent_id: agentId } as SandboxClaimRequest,
     120_000,
   );
 }
 
-export async function restartSandbox(agentId: string): Promise<{ ok: boolean }> {
-  return request<{ ok: boolean }>('POST', `/sandboxes/${agentId}/restart`, undefined, 60_000);
+export async function releaseSandbox(sandboxId: string): Promise<void> {
+  return request<void>('POST', `/sandboxes/${sandboxId}/release`);
 }
 
-export async function destroySandbox(agentId: string): Promise<{ ok: boolean }> {
-  return request<{ ok: boolean }>('DELETE', `/sandboxes/${agentId}`);
+export async function updateSandbox(sandboxId: string, data: SandboxUpdateRequest): Promise<Sandbox> {
+  return request<Sandbox>('PATCH', `/sandboxes/${sandboxId}`, data);
 }
 
-export async function applySandboxConfig(agentId: string): Promise<{ ok: boolean }> {
-  return request<{ ok: boolean }>('POST', `/sandboxes/${agentId}/apply-config`, undefined, 300_000);
+export async function getSandboxConnectionInfo(sandboxId: string): Promise<SandboxConnectionInfo> {
+  return request<SandboxConnectionInfo>('GET', `/sandboxes/${sandboxId}/connect`);
+}
+
+export async function restartSandbox(sandboxId: string): Promise<Sandbox> {
+  return request<Sandbox>('POST', `/sandboxes/${sandboxId}/restart`, undefined, 120_000);
+}
+
+export async function destroySandbox(sandboxId: string): Promise<void> {
+  return request<void>('DELETE', `/sandboxes/${sandboxId}`);
+}
+
+export async function applySandboxConfig(sandboxId: string): Promise<Sandbox> {
+  return request<Sandbox>('POST', `/sandboxes/${sandboxId}/apply-config`, undefined, 300_000);
+}
+
+export async function createSandboxSnapshot(
+  sandboxId: string,
+  label: string,
+): Promise<SandboxSnapshot> {
+  return request<SandboxSnapshot>(
+    'POST',
+    `/sandboxes/${sandboxId}/snapshot`,
+    { label } as SandboxSnapshotRequest,
+  );
+}
+
+export async function restoreSandboxSnapshot(
+  sandboxId: string,
+  snapshotId: string,
+): Promise<Sandbox> {
+  return request<Sandbox>(
+    'POST',
+    `/sandboxes/${sandboxId}/restore`,
+    { snapshot_id: snapshotId } as SandboxRestoreRequest,
+    300_000,
+  );
+}
+
+export async function listSandboxSnapshots(sandboxId: string): Promise<SandboxSnapshot[]> {
+  return request<SandboxSnapshot[]>('GET', `/sandboxes/${sandboxId}/snapshots`);
 }
 
 // ─── Sandbox OS Images ───────────────────────────────────────────────
@@ -725,18 +752,6 @@ export async function assignSandboxConfig(agentId: string, configId: string | nu
   return request<{ ok: boolean }>('POST', `/sandbox-configs/assign/${agentId}`, { config_id: configId });
 }
 
-export async function resetSandbox(agentId: string): Promise<{ ok: boolean; sandbox_id: string }> {
-  return request<{ ok: boolean; sandbox_id: string }>('POST', `/sandboxes/${agentId}/reset`, undefined, 120_000);
-}
-
-export async function reassignSandbox(
-  sourceAgentId: string,
-  targetAgentId: string,
-): Promise<{ ok: boolean }> {
-  return request<{ ok: boolean }>('POST', `/sandboxes/${sourceAgentId}/reassign`, {
-    target_agent_id: targetAgentId,
-  });
-}
 
 // ─── WebSocket Client ────────────────────────────────────────────────
 

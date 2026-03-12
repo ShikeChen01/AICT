@@ -31,6 +31,19 @@ from k8s_manager import (
     ANNOTATION_AUTH_TOKEN,
 )
 
+# Additional model classes for new endpoints
+class ClaimRequest(BaseModel):
+    agent_id: str
+    project_id: str | None = None
+    tenant_id: str | None = None
+    setup_script: str | None = None
+
+class SnapshotRequest(BaseModel):
+    label: str = ""
+
+class RestoreRequest(BaseModel):
+    snapshot_name: str
+
 # ── In-memory state ─────────────────────────────────────────────────────────
 # Lightweight cache for fast lookups. The K8s cluster is the source of truth —
 # this cache is rebuilt from K8s on startup and kept in sync by API operations.
@@ -202,6 +215,48 @@ async def list_images(_: None = Depends(require_master_token)) -> JSONResponse:
             "resources": entry["resources"],
         })
     return JSONResponse(catalog)
+
+
+# ── Warm pool provisioning ───────────────────────────────────────────────
+
+@app.post("/api/pool/provision")
+async def provision_warm(
+    _: None = Depends(require_master_token),
+    os_image: str = config.DEFAULT_OS_IMAGE,
+) -> JSONResponse:
+    """Create a sandbox in the warm pool with no agent assignment."""
+    if len(_sandbox_cache) >= config.MAX_SANDBOXES:
+        raise HTTPException(status_code=503, detail=f"At capacity ({config.MAX_SANDBOXES})")
+
+    sandbox_id = secrets.token_hex(8)
+    auth_token = secrets.token_hex(24)
+
+    try:
+        pod = _k8s.create_sandbox_pod(
+            sandbox_id=sandbox_id, auth_token=auth_token, os_image=os_image,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    host = _k8s.get_service_host(sandbox_id)
+    entry = {
+        "sandbox_id": sandbox_id, "agent_id": None, "os_image": os_image,
+        "persistent": False, "tenant_id": None, "project_id": None,
+        "auth_token": auth_token, "status": "idle", "host": host,
+        "port": config.CONTAINER_INTERNAL_PORT,
+    }
+    _sandbox_cache[sandbox_id] = entry
+
+    # Wait for readiness
+    catalog_entry = config.OS_CATALOG.get(os_image, {})
+    timeout = 300.0 if catalog_entry.get("os_family") == "windows" else 120.0
+    ready = await _wait_for_pod_ready(sandbox_id, auth_token, timeout=timeout)
+    if ready:
+        entry["status"] = "idle"
+    else:
+        entry["status"] = "unhealthy"
+
+    return JSONResponse(entry, status_code=201)
 
 
 # ── Create sandbox ───────────────────────────────────────────────────────────
@@ -444,6 +499,76 @@ async def session_end(
     return JSONResponse({"ok": True, "sandbox_id": sandbox_id})
 
 
+# ── Warm pool claim/release ──────────────────────────────────────────────
+
+@app.post("/api/sandbox/{sandbox_id}/claim")
+async def claim_sandbox(
+    sandbox_id: str,
+    body: ClaimRequest,
+    _: None = Depends(require_master_token),
+) -> JSONResponse:
+    entry = _sandbox_cache.get(sandbox_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Sandbox not found")
+    if entry["status"] != "idle" or entry["agent_id"] is not None:
+        raise HTTPException(status_code=409, detail=f"Sandbox is {entry['status']}, not idle")
+
+    entry["agent_id"] = body.agent_id
+    entry["status"] = "assigned"
+    if body.project_id:
+        entry["project_id"] = body.project_id
+    if body.tenant_id:
+        entry["tenant_id"] = body.tenant_id
+    _agent_map[body.agent_id] = sandbox_id
+
+    _k8s.update_pod_labels(sandbox_id, {
+        LABEL_AGENT_ID: body.agent_id,
+        **({LABEL_PROJECT_ID: body.project_id} if body.project_id else {}),
+        **({LABEL_TENANT_ID: body.tenant_id} if body.tenant_id else {}),
+    })
+
+    setup_result = None
+    if body.setup_script:
+        setup_result = await _run_setup_script(entry["host"], entry["auth_token"], body.setup_script)
+
+    return JSONResponse({
+        "sandbox_id": sandbox_id,
+        "host": entry["host"],
+        "host_port": entry["port"],
+        "auth_token": entry["auth_token"],
+        "agent_id": body.agent_id,
+        "status": "assigned",
+        "setup_result": setup_result,
+    })
+
+
+@app.post("/api/sandbox/{sandbox_id}/release")
+async def release_sandbox(
+    sandbox_id: str,
+    _: None = Depends(require_master_token),
+) -> JSONResponse:
+    entry = _sandbox_cache.get(sandbox_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Sandbox not found")
+
+    # Remove agent assignment
+    if entry["agent_id"]:
+        _agent_map.pop(entry["agent_id"], None)
+
+    if not entry["persistent"]:
+        # Wipe user data for ephemeral sandboxes
+        try:
+            await _run_setup_script(entry["host"], entry["auth_token"], "rm -rf /workspace/* /workspace/.[!.]* 2>/dev/null || true")
+        except Exception:
+            pass  # Best effort cleanup
+
+    entry["agent_id"] = None
+    entry["status"] = "idle"
+    _k8s.update_pod_labels(sandbox_id, {LABEL_AGENT_ID: ""})
+
+    return JSONResponse({"ok": True, "sandbox_id": sandbox_id, "status": "idle"})
+
+
 # ── Destroy sandbox ──────────────────────────────────────────────────────────
 
 
@@ -499,6 +624,100 @@ async def restart_sandbox(
         "sandbox_id": sandbox_id,
         "status": entry["status"],
     })
+
+
+# ── Pool metrics ─────────────────────────────────────────────────────────
+
+@app.get("/api/pool/metrics")
+async def pool_metrics(_: None = Depends(require_master_token)) -> JSONResponse:
+    sandboxes = list(_sandbox_cache.values())
+
+    metrics = {}
+    for os_family in ["linux", "windows"]:
+        family_sandboxes = [
+            s for s in sandboxes
+            if config.OS_CATALOG.get(s.get("os_image", ""), {}).get("os_family") == os_family
+        ]
+        total = len(family_sandboxes)
+        idle = sum(1 for s in family_sandboxes if s["status"] == "idle")
+        metrics[os_family] = {
+            "total": total,
+            "idle": idle,
+            "assigned": total - idle,
+            "idle_ratio": idle / total if total > 0 else 1.0,
+        }
+
+    return JSONResponse(metrics)
+
+
+# ── Snapshots ───────────────────────────────────────────────────────────
+
+@app.post("/api/sandbox/{sandbox_id}/snapshot")
+async def create_snapshot(
+    sandbox_id: str,
+    body: SnapshotRequest,
+    _: None = Depends(require_master_token),
+) -> JSONResponse:
+    entry = _sandbox_cache.get(sandbox_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Sandbox not found")
+
+    snapshot_name = f"snap-{sandbox_id}-{secrets.token_hex(4)}"
+    try:
+        result = await asyncio.to_thread(
+            _k8s.create_volume_snapshot, sandbox_id, snapshot_name
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return JSONResponse({
+        "snapshot_name": snapshot_name,
+        "sandbox_id": sandbox_id,
+        "label": body.label,
+        **result,
+    }, status_code=201)
+
+
+@app.post("/api/sandbox/{sandbox_id}/restore")
+async def restore_snapshot(
+    sandbox_id: str,
+    body: RestoreRequest,
+    _: None = Depends(require_master_token),
+) -> JSONResponse:
+    entry = _sandbox_cache.get(sandbox_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Sandbox not found")
+
+    prev_status = entry["status"]
+    entry["status"] = "restoring"
+
+    try:
+        await asyncio.to_thread(
+            _k8s.restore_from_snapshot, sandbox_id, body.snapshot_name
+        )
+    except Exception as exc:
+        entry["status"] = prev_status
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # Wait for pod to come back
+    ready = await _wait_for_pod_ready(sandbox_id, entry["auth_token"], timeout=120.0)
+    entry["status"] = "assigned" if entry["agent_id"] else "idle"
+    if not ready:
+        entry["status"] = "unhealthy"
+
+    return JSONResponse({"ok": ready, "sandbox_id": sandbox_id, "status": entry["status"]})
+
+
+@app.get("/api/sandbox/{sandbox_id}/snapshots")
+async def list_snapshots(
+    sandbox_id: str,
+    _: None = Depends(require_master_token),
+) -> JSONResponse:
+    if sandbox_id not in _sandbox_cache:
+        raise HTTPException(status_code=404, detail="Sandbox not found")
+
+    snapshots = await asyncio.to_thread(_k8s.list_snapshots, sandbox_id)
+    return JSONResponse(snapshots)
 
 
 # ── Toggle persistence ───────────────────────────────────────────────────────

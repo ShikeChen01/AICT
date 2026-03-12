@@ -3,6 +3,8 @@
 import os
 
 AUTH_TOKEN: str = os.environ.get("AUTH_TOKEN", "")
+SANDBOX_JWT_SECRET: str = os.environ.get("SANDBOX_JWT_SECRET", "")
+SANDBOX_ID: str = os.environ.get("SANDBOX_ID", "")
 PORT: int = int(os.environ.get("PORT", "8080"))
 DISPLAY: str = os.environ.get("DISPLAY", ":99")
 

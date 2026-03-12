@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 from typing import Optional
 
@@ -80,29 +81,20 @@ class K8sManager:
             ANNOTATION_AUTH_TOKEN: auth_token,
         }
 
-        # Volume mounts
+        # Volume mounts — ALWAYS use PVC (no more emptyDir)
         volumes = []
         volume_mounts = []
 
-        if persistent:
-            pvc_name = f"sandbox-pvc-{sandbox_id}"
-            self._ensure_pvc(pvc_name, labels)
-            volumes.append(
-                client.V1Volume(
-                    name="workspace",
-                    persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
-                        claim_name=pvc_name,
-                    ),
-                )
+        pvc_name = f"sandbox-pvc-{sandbox_id}"
+        self._ensure_pvc(pvc_name, labels)
+        volumes.append(
+            client.V1Volume(
+                name="workspace",
+                persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
+                    claim_name=pvc_name,
+                ),
             )
-        else:
-            # Ephemeral: use emptyDir (fast, no PVC overhead)
-            volumes.append(
-                client.V1Volume(
-                    name="workspace",
-                    empty_dir=client.V1EmptyDirVolumeSource(),
-                )
-            )
+        )
 
         volume_mounts.append(
             client.V1VolumeMount(
@@ -123,6 +115,8 @@ class K8sManager:
             ],
             env=[
                 client.V1EnvVar(name="AUTH_TOKEN", value=auth_token),
+                client.V1EnvVar(name="SANDBOX_JWT_SECRET", value=os.environ.get("SANDBOX_JWT_SECRET", "")),
+                client.V1EnvVar(name="SANDBOX_ID", value=sandbox_id),
             ],
             resources=client.V1ResourceRequirements(
                 requests=catalog_entry["resources"]["requests"],
@@ -453,6 +447,107 @@ class K8sManager:
             _core.delete_namespaced_persistent_volume_claim(
                 name=pvc_name,
                 namespace=self._ns,
+            )
+        except ApiException as e:
+            if e.status != 404:
+                raise
+
+    # ── Volume snapshots ────────────────────────────────────────────────────────
+
+    def create_volume_snapshot(self, sandbox_id: str, snapshot_name: str) -> dict:
+        """Create a VolumeSnapshot from sandbox PVC."""
+        from kubernetes.client import CustomObjectsApi
+        _custom = CustomObjectsApi()
+        pvc_name = f"sandbox-pvc-{sandbox_id}"
+        snapshot_body = {
+            "apiVersion": "snapshot.storage.k8s.io/v1",
+            "kind": "VolumeSnapshot",
+            "metadata": {
+                "name": snapshot_name,
+                "namespace": self._ns,
+                "labels": {LABEL_SANDBOX_ID: sandbox_id},
+            },
+            "spec": {
+                "volumeSnapshotClassName": "sandbox-snapshot",
+                "source": {"persistentVolumeClaimName": pvc_name},
+            },
+        }
+        result = _custom.create_namespaced_custom_object(
+            group="snapshot.storage.k8s.io",
+            version="v1",
+            namespace=self._ns,
+            plural="volumesnapshots",
+            body=snapshot_body,
+        )
+        return {"snapshot_name": snapshot_name, "status": result.get("status", {})}
+
+    def restore_from_snapshot(self, sandbox_id: str, snapshot_name: str) -> None:
+        """Restore sandbox PVC from a VolumeSnapshot.
+        1. Delete current PVC
+        2. Create new PVC with dataSource pointing to snapshot
+        3. Restart pod to mount new PVC
+        """
+        pvc_name = f"sandbox-pvc-{sandbox_id}"
+        # Delete current PVC
+        self.delete_pvc(sandbox_id)
+        # Create PVC from snapshot
+        pvc = client.V1PersistentVolumeClaim(
+            metadata=client.V1ObjectMeta(
+                name=pvc_name,
+                namespace=self._ns,
+            ),
+            spec=client.V1PersistentVolumeClaimSpec(
+                access_modes=["ReadWriteOnce"],
+                resources=client.V1VolumeResourceRequirements(
+                    requests={"storage": cfg.DEFAULT_PVC_SIZE},
+                ),
+                data_source=client.V1TypedLocalObjectReference(
+                    api_group="snapshot.storage.k8s.io",
+                    kind="VolumeSnapshot",
+                    name=snapshot_name,
+                ),
+            ),
+        )
+        _core.create_namespaced_persistent_volume_claim(namespace=self._ns, body=pvc)
+        # Restart pod to mount new PVC
+        self.restart_sandbox(sandbox_id)
+
+    def list_snapshots(self, sandbox_id: str) -> list[dict]:
+        """List VolumeSnapshots for a sandbox."""
+        from kubernetes.client import CustomObjectsApi
+        _custom = CustomObjectsApi()
+        try:
+            result = _custom.list_namespaced_custom_object(
+                group="snapshot.storage.k8s.io",
+                version="v1",
+                namespace=self._ns,
+                plural="volumesnapshots",
+                label_selector=f"{LABEL_SANDBOX_ID}={sandbox_id}",
+            )
+            return [
+                {
+                    "name": item["metadata"]["name"],
+                    "created_at": item["metadata"].get("creationTimestamp"),
+                    "status": item.get("status", {}),
+                }
+                for item in result.get("items", [])
+            ]
+        except ApiException as e:
+            if e.status == 404:
+                return []
+            raise
+
+    def delete_snapshot(self, snapshot_name: str) -> None:
+        """Delete a VolumeSnapshot."""
+        from kubernetes.client import CustomObjectsApi
+        _custom = CustomObjectsApi()
+        try:
+            _custom.delete_namespaced_custom_object(
+                group="snapshot.storage.k8s.io",
+                version="v1",
+                namespace=self._ns,
+                plural="volumesnapshots",
+                name=snapshot_name,
             )
         except ApiException as e:
             if e.status != 404:

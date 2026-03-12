@@ -42,8 +42,14 @@ def _make_connection(host_port: int = 30001, auth_token: str = "tok") -> Sandbox
 def _make_agent(sandbox_id: str | None = "testsandbox") -> MagicMock:
     agent = MagicMock()
     agent.id = "agent-1"
-    agent.sandbox_id = sandbox_id
-    agent.sandbox_persist = False
+    agent.role = "engineer"
+    # Create a mock sandbox object if sandbox_id is provided
+    if sandbox_id:
+        mock_sandbox = MagicMock()
+        mock_sandbox.id = sandbox_id
+        agent.sandbox = mock_sandbox
+    else:
+        agent.sandbox = None
     return agent
 
 
