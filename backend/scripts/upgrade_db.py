@@ -222,6 +222,27 @@ def ensure_task_agent_relationships(conn) -> None:
 
 
 def ensure_sandbox_tables(conn) -> None:
+    # Ensure sandbox_configs has the os_image and setup_script columns before we
+    # try to read them during migrate_agent_sandbox_columns().  These were added
+    # to sandbox_configs in the old incremental chain *before* the sandbox table
+    # was introduced, so a DB that never ran those migrations won't have them.
+    conn.execute(
+        text(
+            """
+            ALTER TABLE sandbox_configs
+            ADD COLUMN IF NOT EXISTS os_image varchar(50) NULL
+            """
+        )
+    )
+    conn.execute(
+        text(
+            """
+            ALTER TABLE sandbox_configs
+            ADD COLUMN IF NOT EXISTS setup_script text NOT NULL DEFAULT ''
+            """
+        )
+    )
+
     conn.execute(
         text(
             """
@@ -289,24 +310,19 @@ def migrate_agent_sandbox_columns(conn) -> None:
     if not sandbox_id_present:
         return
 
-    # sandbox_configs.os_image was added in a later migration and may not exist
-    # on databases that were never migrated past the point it was added.
-    sc_has_os_image = has_column(conn, "sandbox_configs", "os_image")
-    os_image_expr = "sc.os_image" if sc_has_os_image else "'ubuntu-22.04'"
-    sc_has_setup_script = has_column(conn, "sandbox_configs", "setup_script")
-    setup_script_expr = "sc.setup_script" if sc_has_setup_script else "NULL"
-
+    # By this point ensure_sandbox_tables() has run ADD COLUMN IF NOT EXISTS for
+    # sandbox_configs.os_image and sandbox_configs.setup_script, so the JOIN is safe.
     rows = conn.execute(
         text(
-            f"""
+            """
             SELECT
                 a.id AS agent_id,
                 a.project_id,
                 a.sandbox_config_id,
                 a.sandbox_id,
                 COALESCE(a.sandbox_persist, false) AS sandbox_persist,
-                {os_image_expr} AS os_image,
-                {setup_script_expr} AS setup_script
+                sc.os_image AS os_image,
+                sc.setup_script AS setup_script
             FROM agents a
             LEFT JOIN sandbox_configs sc ON sc.id = a.sandbox_config_id
             WHERE a.sandbox_id IS NOT NULL
