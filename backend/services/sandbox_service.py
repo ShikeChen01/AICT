@@ -296,9 +296,14 @@ class SandboxService:
         if not self._vm_configured():
             raise RuntimeError("Sandbox not configured: SANDBOX_VM_HOST or orchestrator not set")
 
-        # Check if agent already has a sandbox via relationship
-        if agent.sandbox:
-            return agent.sandbox
+        # Check if agent already has a sandbox via explicit query
+        # (avoids lazy-load issues in async context)
+        existing = await db.execute(
+            select(Sandbox).where(Sandbox.agent_id == agent.id)
+        )
+        existing_sandbox = existing.scalar_one_or_none()
+        if existing_sandbox:
+            return existing_sandbox
 
         # Load agent's config to get os_image preference
         os_image = "ubuntu-22.04"

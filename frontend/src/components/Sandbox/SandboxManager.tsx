@@ -94,7 +94,7 @@ export function SandboxManager({ projectId }: SandboxManagerProps) {
     try {
       await releaseSandbox(sandboxId);
       if (agentId) {
-        await claimSandbox(agentId);
+        await claimSandbox(projectId, agentId);
       }
       await refresh();
     } finally {

@@ -14,7 +14,7 @@ This starts:
 - Backend at `http://localhost:8000`
 - Frontend at `http://localhost:3000`
 
-**Run backend only (uses Cloud SQL from .env.development):**
+**Run backend only (uses `.env.development`, typically pointed at the shared dev VM DB):**
 
 ```powershell
 .\scripts\local\run.ps1
@@ -32,13 +32,13 @@ This starts:
 .\scripts\local\verify.ps1
 ```
 
-**Run migrations (Cloud SQL dev):**
+**Run migrations against the shared dev DB:**
 
 ```powershell
 .\scripts\local\migrate.ps1
 ```
 
-**Optional: use local Docker Postgres instead of Cloud SQL:**
+**Optional: use local Docker Postgres instead of the shared dev DB:**
 
 ```powershell
 .\scripts\local\db.up.ps1          # start Postgres container
@@ -57,7 +57,7 @@ $env:DATABASE_URL = "postgresql+asyncpg://aict:aict@localhost:5432/aict"
 .\scripts\cloud\build.ps1
 ```
 
-**2. Run migrations against Cloud SQL** (before first deploy or after schema changes):
+**2. Run migrations against the self-hosted Postgres VM** (before first deploy or after schema changes):
 
 ```powershell
 .\scripts\cloud\migrate.ps1
@@ -86,7 +86,7 @@ This checks:
 ## Requirements
 
 - **Local:** Python 3.11+, `.env.development` with DATABASE_URL and API keys
-- **Cloud:** `gcloud` CLI, project with Cloud Run + Cloud SQL + Artifact Registry enabled
+- **Cloud:** `gcloud` CLI, project with Cloud Run + self-hosted Postgres VM + Artifact Registry enabled
 
 ---
 

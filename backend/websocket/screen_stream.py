@@ -27,7 +27,6 @@ from fastapi import WebSocket
 from starlette.websockets import WebSocketState
 
 from backend.logging.my_logger import get_logger
-from backend.services.sandbox_client import get_sandbox_client
 
 logger = get_logger(__name__)
 
@@ -93,31 +92,42 @@ class ScreenStreamProxy:
         retry_delay = 2.0  # seconds, doubles each attempt
 
         for attempt in range(max_retries):
-            client = get_sandbox_client()
-            conn = client._connections.get(sandbox_id)
-            if not conn:
-                from backend.services.sandbox_service import PoolManagerClient
+            # Look up sandbox connection info from the database
+            from backend.db.session import AsyncSessionLocal
+            from backend.db.models import Sandbox
+            from sqlalchemy import select
+
+            host = port = auth_token = None
+            try:
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(
+                        select(Sandbox).where(Sandbox.orchestrator_sandbox_id == sandbox_id)
+                    )
+                    sandbox = result.scalar_one_or_none()
+                    if sandbox:
+                        host = sandbox.host
+                        port = sandbox.port
+                        auth_token = sandbox.auth_token
+            except Exception as exc:
+                logger.warning("Cannot look up sandbox %s from DB: %s", sandbox_id, exc)
+
+            if not host or not auth_token:
+                # Fallback: try the orchestrator directly
+                from backend.services.sandbox_service import OrchestratorClient
                 from backend.config import settings
                 try:
-                    pool = PoolManagerClient()
-                    data = await pool.get_sandbox_by_id(sandbox_id)
-                    client.register(
-                        sandbox_id=sandbox_id,
-                        vm_host=settings.sandbox_vm_host,
-                        host_port=data["host_port"],
-                        auth_token=data["auth_token"],
-                    )
-                    conn = client._connections.get(sandbox_id)
+                    orch = OrchestratorClient()
+                    data = await orch.get_sandbox_by_id(sandbox_id)
+                    host = settings.sandbox_vm_internal_host or settings.sandbox_vm_host
+                    port = data.get("host_port", 8080)
+                    auth_token = data.get("auth_token")
                 except Exception as exc:
-                    logger.warning("Cannot relay screen stream: sandbox %s not registered and re-registration failed: %s", sandbox_id, exc)
+                    logger.warning("Cannot relay screen stream: sandbox %s lookup failed: %s", sandbox_id, exc)
                     return
-                if not conn:
+                if not auth_token:
                     return
 
-            ws_url = (
-                conn.rest_base_url.replace("http://", "ws://")
-                + f"/ws/screen?token={conn.auth_token}"
-            )
+            ws_url = f"ws://{host}:{port}/ws/screen?token={auth_token}"
 
             try:
                 async with websockets.connect(

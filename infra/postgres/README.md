@@ -11,7 +11,7 @@ Cloud Run (us-central1)
     │       │
     │       ▼
     │   VM: aict-postgres (10.128.0.5:5432)
-    │       └── Docker: postgres:16-alpine (SSL enabled)
+    │       └── Docker: pgvector/pgvector:pg16 (SSL enabled)
     │
     └── HTTP :9090
         VM: aict-sandbox (sandbox pool manager)
@@ -34,7 +34,9 @@ Cloud Run (us-central1)
    sudo /tmp/aict/infra/postgres/scripts/setup.sh
    ```
 
-4. The script will output the generated password and the env vars to add to `.env.development`.
+4. The script will enable `CREATE EXTENSION IF NOT EXISTS vector` in the `aict` database.
+
+5. The script will output the generated password and the env vars to add to `.env.development`.
 
 ## Directory Layout on the VM
 
@@ -61,6 +63,7 @@ If a data disk is attached at `/dev/sdb`, the setup script will format it, mount
 docker ps                                    # container running?
 docker exec aict-postgres pg_isready -U aict # accepting connections?
 docker logs aict-postgres --tail 50          # recent logs
+docker exec aict-postgres psql -U aict -d aict -c "\dx vector" # pgvector enabled?
 ```
 
 ### Restart
@@ -118,6 +121,7 @@ These go in `.env.development` on your local machine:
 ## Upgrading PostgreSQL
 
 1. Backup: `sudo /opt/postgres/compose/scripts/backup.sh`
-2. Update `docker-compose.yml` image tag (e.g., `postgres:17-alpine`)
+2. Update `docker-compose.yml` image tag to a pgvector-capable image (for example `pgvector/pgvector:pg17`)
 3. `cd /opt/postgres/compose && docker compose pull && docker compose up -d`
 4. Verify: `docker exec aict-postgres psql -U aict -c "SELECT version();"`
+5. Re-enable the extension if needed: `docker exec aict-postgres psql -U aict -d aict -c "CREATE EXTENSION IF NOT EXISTS vector;"`

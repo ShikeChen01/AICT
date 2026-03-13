@@ -81,7 +81,7 @@ try {
         # Ignore
     }
 
-    $MigrateCmd = "python -m backend.scripts.safe_migrate"
+    $MigrateCmd = "python -m backend.scripts.upgrade_db"
     $ShArgs = "-c," + $MigrateCmd
     if ($jobExists) {
         Write-Host "Updating existing job..."

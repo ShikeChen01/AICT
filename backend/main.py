@@ -19,6 +19,7 @@ from backend.logging.my_logger import configure_logging, get_logger, ws_backend_
 
 configure_logging()
 
+import fastapi.exceptions
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -330,6 +331,29 @@ app.add_middleware(
 # ---- Exception handlers -----------------------------------------------------
 
 app.add_exception_handler(AICTException, aict_exception_handler)
+
+
+@app.exception_handler(fastapi.exceptions.ResponseValidationError)
+async def response_validation_exception_handler(request: Request, exc: fastapi.exceptions.ResponseValidationError):
+    """
+    Catch Pydantic response-model validation errors.
+
+    FastAPI/Starlette swallows these silently (returns 500 with no log).
+    This handler logs the real error server-side for debugging.
+    """
+    logger.error(
+        "ResponseValidationError on %s %s: %s",
+        request.method,
+        request.url.path,
+        exc,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "An internal error occurred. Please try again or contact support.",
+            "path": request.url.path,
+        },
+    )
 
 
 @app.middleware("http")

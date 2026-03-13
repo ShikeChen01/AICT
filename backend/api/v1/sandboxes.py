@@ -178,8 +178,12 @@ async def claim_sandbox(
     """
     await require_project_access(db, project_id, current_user.id)
 
-    # Fetch the agent
-    result = await db.execute(select(Agent).where(Agent.id == body.agent_id))
+    # Fetch the agent with sandbox relationship pre-loaded
+    result = await db.execute(
+        select(Agent)
+        .where(Agent.id == body.agent_id)
+        .options(selectinload(Agent.sandbox))
+    )
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -190,8 +194,10 @@ async def claim_sandbox(
     # Claim sandbox
     svc = _get_sandbox_service()
     sandbox = await svc.claim(db, agent)
-    # Note: claim() already establishes the relationship via sandbox.agent_id = agent.id
     await db.commit()
+
+    # Ensure the agent relationship is loaded for the response serializer
+    await db.refresh(sandbox, ["agent"])
 
     return _sandbox_to_response(sandbox)
 

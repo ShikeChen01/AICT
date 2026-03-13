@@ -1,6 +1,6 @@
 # Run Alembic migrations.
-# Uses .env.development (Cloud SQL) when ENV=development.
-# For local Docker DB, set DATABASE_URL first or use -UseLocalDb.
+# Uses .env.development for normal development config.
+# For the local Docker Postgres DB, set DATABASE_URL first or use -UseLocalDb.
 
 param(
     [switch]$UseLocalDb
@@ -18,8 +18,8 @@ if ($UseLocalDb) {
     Write-Host "Using local DB: localhost:5432"
 }
 
-Write-Host "Running Alembic migrations..."
-python -m alembic -c backend/alembic.ini upgrade head
+Write-Host "Running database migrations..."
+python -m backend.scripts.upgrade_db
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Migration failed."

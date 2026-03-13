@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from backend.core.auth import get_current_user
 from backend.core.exceptions import AgentNotFoundError
@@ -35,7 +36,9 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 async def _ensure_agent_access(db: AsyncSession, agent_id: UUID, user_id: UUID) -> Agent:
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    result = await db.execute(
+        select(Agent).options(selectinload(Agent.sandbox)).where(Agent.id == agent_id)
+    )
     agent = result.scalar_one_or_none()
     if not agent:
         raise AgentNotFoundError(agent_id)
@@ -61,6 +64,7 @@ async def list_agents(
     )
     result = await db.execute(
         select(Agent)
+        .options(selectinload(Agent.sandbox))
         .where(Agent.project_id == project_id)
         .order_by(role_order, Agent.display_name)
     )
@@ -112,6 +116,7 @@ async def list_agent_status(
     )
     result = await db.execute(
         select(Agent)
+        .options(selectinload(Agent.sandbox))
         .where(Agent.project_id == project_id)
         .order_by(role_order, Agent.display_name)
     )
