@@ -1,8 +1,5 @@
 """
 Run database migrations at backend startup.
-
-Uses the shared upgrade wrapper so legacy 024-029 databases can be converged to
-the squashed baseline before normal Alembic upgrades continue.
 """
 
 from __future__ import annotations
