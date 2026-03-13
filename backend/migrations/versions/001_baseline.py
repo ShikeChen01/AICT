@@ -1,24 +1,19 @@
-"""Squashed baseline: full schema from models.py
+"""Baseline: full schema from models.py (v2 redesign).
 
-This migration replaces the previous 29 incremental migrations (001–029).
-It creates the entire schema in a single idempotent operation derived
-directly from the SQLAlchemy ORM models — the single source of truth.
-
-For existing databases that already ran the old migrations, stamp this
-revision instead of running it:
+Creates the entire schema in a single idempotent operation.
+For existing databases, stamp this revision instead of running it:
 
     alembic stamp 001_baseline
 
 Revision ID: 001_baseline
 Revises: —
-Create Date: 2026-03-12
+Create Date: 2026-03-13
 """
 
 from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 revision: str = "001_baseline"
 down_revision: str | None = None
@@ -42,9 +37,9 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
 
-    # ── repositories (formerly "projects") ───────────────────────────
+    # ── projects ─────────────────────────────────────────────────────
     op.create_table(
-        "repositories",
+        "projects",
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("owner_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("name", sa.String(255), nullable=False),
@@ -63,30 +58,31 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("name", sa.String(100), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("os_image", sa.String(100), nullable=False, server_default="ubuntu-22.04"),
         sa.Column("setup_script", sa.Text(), nullable=False, server_default=""),
-        sa.Column("os_image", sa.String(50), nullable=True),
+        sa.Column("persistent", sa.Boolean(), nullable=False, server_default="false"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("user_id", "name", name="uq_sandbox_configs_user_name"),
     )
 
-    # ── repository_memberships ───────────────────────────────────────
+    # ── project_memberships ──────────────────────────────────────────
     op.create_table(
-        "repository_memberships",
+        "project_memberships",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("repository_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("role", sa.String(50), nullable=False, server_default="member"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_index("ix_repo_memberships_repo_user", "repository_memberships", ["repository_id", "user_id"], unique=True)
-    op.create_index("ix_repo_memberships_user", "repository_memberships", ["user_id"])
+    op.create_index("ix_project_memberships_project_user", "project_memberships", ["project_id", "user_id"], unique=True)
+    op.create_index("ix_project_memberships_user", "project_memberships", ["user_id"])
 
     # ── project_settings ─────────────────────────────────────────────
     op.create_table(
         "project_settings",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), unique=True, nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), unique=True, nullable=False),
         sa.Column("max_engineers", sa.Integer(), nullable=False, server_default="5"),
         sa.Column("persistent_sandbox_count", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("model_overrides", sa.JSON(), nullable=True),
@@ -105,7 +101,7 @@ def upgrade() -> None:
     op.create_table(
         "project_secrets",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("name", sa.String(100), nullable=False),
         sa.Column("encrypted_value", sa.Text(), nullable=False),
         sa.Column("hint", sa.String(10), nullable=True),
@@ -118,7 +114,7 @@ def upgrade() -> None:
     op.create_table(
         "agent_templates",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("name", sa.String(100), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("base_role", sa.String(50), nullable=False),
@@ -136,22 +132,22 @@ def upgrade() -> None:
     )
     op.create_index("ix_agent_templates_project", "agent_templates", ["project_id"])
 
-    # ── tasks (created before agents because agents FK → tasks) ──────
+    # ── tasks (before agents — agents FK → tasks) ────────────────────
     op.create_table(
         "tasks",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("title", sa.String(255), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("status", sa.String(50), nullable=False, server_default="backlog"),
         sa.Column("critical", sa.Integer(), nullable=False, server_default="5"),
         sa.Column("urgent", sa.Integer(), nullable=False, server_default="5"),
-        sa.Column("assigned_agent_id", sa.Uuid(), nullable=True),  # FK added after agents table
+        sa.Column("assigned_agent_id", sa.Uuid(), nullable=True),
         sa.Column("module_path", sa.String(512), nullable=True),
         sa.Column("git_branch", sa.String(255), nullable=True),
         sa.Column("pr_url", sa.String(512), nullable=True),
         sa.Column("parent_task_id", sa.Uuid(), sa.ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("created_by_id", sa.Uuid(), nullable=True),  # FK added after agents table
+        sa.Column("created_by_id", sa.Uuid(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
@@ -161,17 +157,15 @@ def upgrade() -> None:
     op.create_table(
         "agents",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("template_id", sa.Uuid(), sa.ForeignKey("agent_templates.id", ondelete="SET NULL"), nullable=True),
         sa.Column("role", sa.String(50), nullable=False),
         sa.Column("display_name", sa.String(100), nullable=False),
-        sa.Column("tier", sa.String(50), nullable=True),
         sa.Column("model", sa.String(100), nullable=False),
         sa.Column("provider", sa.String(50), nullable=True),
         sa.Column("thinking_enabled", sa.Boolean(), nullable=False, server_default="false"),
         sa.Column("status", sa.String(20), nullable=False, server_default="sleeping"),
         sa.Column("current_task_id", sa.Uuid(), sa.ForeignKey("tasks.id", use_alter=True, name="fk_agent_current_task"), nullable=True),
-        sa.Column("sandbox_config_id", sa.Uuid(), sa.ForeignKey("sandbox_configs.id", ondelete="SET NULL"), nullable=True),
         sa.Column("memory", sa.JSON(), nullable=True),
         sa.Column("token_allocations", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -180,21 +174,18 @@ def upgrade() -> None:
     op.create_index("ix_agents_project_status", "agents", ["project_id", "status"])
     op.create_index("ix_agents_project_role", "agents", ["project_id", "role"])
 
-    # Now add deferred FKs from tasks → agents
+    # Deferred FKs: tasks → agents
     op.create_foreign_key("fk_tasks_assigned_agent", "tasks", "agents", ["assigned_agent_id"], ["id"], ondelete="SET NULL")
     op.create_foreign_key("fk_tasks_created_by", "tasks", "agents", ["created_by_id"], ["id"], ondelete="SET NULL")
 
-    # ── sandbox (runtime instances) ──────────────────────────────────
+    # ── sandboxes (runtime instances) ────────────────────────────────
     op.create_table(
-        "sandbox",
+        "sandboxes",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("agent_id", sa.Uuid(), sa.ForeignKey("agents.id", ondelete="SET NULL"), nullable=True),
         sa.Column("sandbox_config_id", sa.Uuid(), sa.ForeignKey("sandbox_configs.id", ondelete="SET NULL"), nullable=True),
         sa.Column("orchestrator_sandbox_id", sa.String(255), nullable=False, unique=True),
-        sa.Column("os_image", sa.String(100), nullable=False, server_default="ubuntu-22.04"),
-        sa.Column("setup_script", sa.Text(), nullable=True),
-        sa.Column("persistent", sa.Boolean(), nullable=False, server_default="false"),
         sa.Column("status", sa.String(50), nullable=False, server_default="provisioning"),
         sa.Column("host", sa.String(255), nullable=True),
         sa.Column("port", sa.Integer(), server_default="8080"),
@@ -205,12 +196,12 @@ def upgrade() -> None:
         sa.Column("released_at", sa.DateTime(timezone=True), nullable=True),
     )
 
-    # ── sandbox_snapshot ─────────────────────────────────────────────
+    # ── sandbox_snapshots ────────────────────────────────────────────
     op.create_table(
-        "sandbox_snapshot",
+        "sandbox_snapshots",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("sandbox_id", sa.Uuid(), sa.ForeignKey("sandbox.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("sandbox_id", sa.Uuid(), sa.ForeignKey("sandboxes.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("agent_id", sa.Uuid(), sa.ForeignKey("agents.id", ondelete="SET NULL"), nullable=True),
         sa.Column("k8s_snapshot_name", sa.String(255), nullable=False),
         sa.Column("os_image", sa.String(100), nullable=False),
@@ -219,12 +210,12 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
 
-    # ── sandbox_usage_event ──────────────────────────────────────────
+    # ── sandbox_usage_events ─────────────────────────────────────────
     op.create_table(
-        "sandbox_usage_event",
+        "sandbox_usage_events",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("sandbox_id", sa.Uuid(), sa.ForeignKey("sandbox.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("sandbox_id", sa.Uuid(), sa.ForeignKey("sandboxes.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("agent_id", sa.Uuid(), sa.ForeignKey("agents.id", ondelete="SET NULL"), nullable=True),
         sa.Column("event_type", sa.String(50), nullable=False),
         sa.Column("pod_seconds", sa.Float(), nullable=False, server_default="0"),
@@ -292,9 +283,9 @@ def upgrade() -> None:
     op.create_table(
         "channel_messages",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("from_agent_id", sa.Uuid(), nullable=True),
-        sa.Column("target_agent_id", sa.Uuid(), nullable=True),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("from_agent_id", sa.Uuid(), sa.ForeignKey("agents.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("target_agent_id", sa.Uuid(), sa.ForeignKey("agents.id", ondelete="SET NULL"), nullable=True),
         sa.Column("from_user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("content", sa.Text(), nullable=False),
         sa.Column("message_type", sa.String(20), nullable=False, server_default="normal"),
@@ -310,7 +301,7 @@ def upgrade() -> None:
         "agent_sessions",
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("agent_id", sa.Uuid(), sa.ForeignKey("agents.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("task_id", sa.Uuid(), sa.ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True),
         sa.Column("trigger_message_id", sa.Uuid(), sa.ForeignKey("channel_messages.id", ondelete="SET NULL"), nullable=True),
         sa.Column("status", sa.String(20), nullable=False, server_default="running"),
@@ -328,7 +319,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("agent_id", sa.Uuid(), sa.ForeignKey("agents.id", ondelete="CASCADE"), nullable=False),
         sa.Column("session_id", sa.Uuid(), sa.ForeignKey("agent_sessions.id", ondelete="CASCADE"), nullable=True),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("role", sa.String(20), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
         sa.Column("tool_name", sa.String(100), nullable=True),
@@ -344,7 +335,7 @@ def upgrade() -> None:
     op.create_table(
         "llm_usage_events",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("agent_id", sa.Uuid(), sa.ForeignKey("agents.id", ondelete="SET NULL"), nullable=True),
         sa.Column("session_id", sa.Uuid(), sa.ForeignKey("agent_sessions.id", ondelete="SET NULL"), nullable=True),
         sa.Column("user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
@@ -363,7 +354,7 @@ def upgrade() -> None:
     op.create_table(
         "attachments",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("uploaded_by_user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("filename", sa.String(255), nullable=False),
         sa.Column("mime_type", sa.String(100), nullable=False),
@@ -374,7 +365,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_attachments_project", "attachments", ["project_id", "created_at"])
 
-    # ── message_attachments (junction) ───────────────────────────────
+    # ── message_attachments ──────────────────────────────────────────
     op.create_table(
         "message_attachments",
         sa.Column("id", sa.Uuid(), primary_key=True),
@@ -389,7 +380,7 @@ def upgrade() -> None:
     op.create_table(
         "project_documents",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("doc_type", sa.String(100), nullable=False),
         sa.Column("title", sa.String(255), nullable=True),
         sa.Column("content", sa.Text(), nullable=True),
@@ -421,7 +412,7 @@ def upgrade() -> None:
     op.create_table(
         "knowledge_documents",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("uploaded_by_user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("filename", sa.String(255), nullable=False),
         sa.Column("file_type", sa.String(20), nullable=False),
@@ -442,7 +433,7 @@ def upgrade() -> None:
         "knowledge_chunks",
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("document_id", sa.Uuid(), sa.ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("project_id", sa.Uuid(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("chunk_index", sa.Integer(), nullable=False),
         sa.Column("text_content", sa.Text(), nullable=False),
         sa.Column("char_count", sa.Integer(), nullable=False),
@@ -450,11 +441,9 @@ def upgrade() -> None:
         sa.Column("metadata_", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
-    # The embedding column uses pgvector's VECTOR type directly
     op.execute("ALTER TABLE knowledge_chunks ADD COLUMN embedding vector(1024)")
     op.create_index("ix_knowledge_chunks_doc_idx", "knowledge_chunks", ["document_id", "chunk_index"], unique=True)
     op.create_index("ix_knowledge_chunks_project", "knowledge_chunks", ["project_id", "created_at"])
-    # HNSW index for cosine-similarity search
     op.execute(
         "CREATE INDEX ix_knowledge_chunks_embedding_hnsw "
         "ON knowledge_chunks USING hnsw (embedding vector_cosine_ops) "
@@ -463,7 +452,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Reverse order — drop all tables
+    op.drop_constraint("fk_tasks_assigned_agent", "tasks", type_="foreignkey")
+    op.drop_constraint("fk_tasks_created_by", "tasks", type_="foreignkey")
+
     tables = [
         "knowledge_chunks",
         "knowledge_documents",
@@ -478,23 +469,19 @@ def downgrade() -> None:
         "tool_configs",
         "prompt_block_configs",
         "mcp_server_configs",
-        "sandbox_usage_event",
-        "sandbox_snapshot",
-        "sandbox",
+        "sandbox_usage_events",
+        "sandbox_snapshots",
+        "sandboxes",
         "agents",
         "tasks",
         "agent_templates",
         "project_secrets",
         "project_settings",
-        "repository_memberships",
+        "project_memberships",
         "sandbox_configs",
-        "repositories",
+        "projects",
         "users",
     ]
-    # Drop deferred FKs first
-    op.drop_constraint("fk_tasks_assigned_agent", "tasks", type_="foreignkey")
-    op.drop_constraint("fk_tasks_created_by", "tasks", type_="foreignkey")
-
     for table in tables:
         op.drop_table(table)
 

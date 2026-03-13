@@ -19,7 +19,7 @@ from backend.config import settings
 from backend.core.auth import verify_ws_token, _verify_firebase_token
 from backend.core.ws_backend_log_stream import ws_backend_log_stream
 from backend.db.session import AsyncSessionLocal
-from backend.db.models import Agent, Repository, RepositoryMembership, User, Sandbox
+from backend.db.models import Agent, Repository, ProjectMembership, User, Sandbox
 from backend.websocket.events import create_backend_log_snapshot_event
 from backend.websocket.manager import Channel, ws_manager
 from backend.websocket.screen_stream import get_screen_stream_proxy
@@ -77,9 +77,9 @@ async def _verify_ws_project_access(token: str, project_id: UUID) -> bool:
             return True
 
         mem_result = await db.execute(
-            select(RepositoryMembership).where(
-                RepositoryMembership.repository_id == project_id,
-                RepositoryMembership.user_id == user.id,
+            select(ProjectMembership).where(
+                ProjectMembership.project_id == project_id,
+                ProjectMembership.user_id == user.id,
             )
         )
         return mem_result.scalar_one_or_none() is not None

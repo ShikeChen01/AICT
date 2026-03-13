@@ -39,8 +39,6 @@ class SandboxResponse(BaseModel):
     agent_role: str | None = None
     sandbox_config_id: str | None = None
     orchestrator_sandbox_id: str
-    os_image: str
-    persistent: bool
     status: str
     host: str | None
     port: int
@@ -89,8 +87,6 @@ def _sandbox_to_response(sb: Sandbox) -> dict:
         "agent_role": sb.agent.role if sb.agent else None,
         "sandbox_config_id": str(sb.sandbox_config_id) if sb.sandbox_config_id else None,
         "orchestrator_sandbox_id": sb.orchestrator_sandbox_id,
-        "os_image": sb.os_image,
-        "persistent": sb.persistent,
         "status": sb.status,
         "host": sb.host,
         "port": sb.port or 8080,
@@ -260,16 +256,11 @@ async def destroy_sandbox(
 @router.patch("/{sandbox_id}")
 async def update_sandbox(
     sandbox_id: UUID,
-    persistent: bool | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update sandbox properties (e.g., persistent flag)."""
+    """Update sandbox properties."""
     sandbox = await _require_sandbox_access(db, sandbox_id, current_user.id)
-
-    if persistent is not None:
-        sandbox.persistent = persistent
-        await db.flush()
 
     await db.commit()
     return _sandbox_to_response(sandbox)
@@ -281,14 +272,14 @@ async def apply_config(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Run the agent's sandbox config setup script."""
+    """Run the sandbox config setup script."""
     sandbox = await _require_sandbox_access(db, sandbox_id, current_user.id)
 
-    if not sandbox.agent_id or not sandbox.agent.sandbox_config_id:
+    if not sandbox.sandbox_config_id:
         return {"ok": True, "skipped": True, "message": "No config assigned"}
 
     result = await db.execute(
-        select(SandboxConfig).where(SandboxConfig.id == sandbox.agent.sandbox_config_id)
+        select(SandboxConfig).where(SandboxConfig.id == sandbox.sandbox_config_id)
     )
     config = result.scalar_one_or_none()
     if not config or not config.setup_script:

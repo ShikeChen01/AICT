@@ -1,4 +1,4 @@
-"""Repository membership data access."""
+"""Project membership data access."""
 
 from __future__ import annotations
 
@@ -8,47 +8,47 @@ from uuid import UUID
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.db.models import RepositoryMembership
+from backend.db.models import ProjectMembership
 
 
 class MembershipRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def has_access(self, repository_id: UUID, user_id: UUID) -> bool:
-        """Return True if the user has any membership role for this repository."""
+    async def has_access(self, project_id: UUID, user_id: UUID) -> bool:
+        """Return True if the user has any membership role for this project."""
         result = await self.session.execute(
             select(
                 exists().where(
-                    RepositoryMembership.repository_id == repository_id,
-                    RepositoryMembership.user_id == user_id,
+                    ProjectMembership.project_id == project_id,
+                    ProjectMembership.user_id == user_id,
                 )
             )
         )
         return bool(result.scalar())
 
-    async def get(self, repository_id: UUID, user_id: UUID) -> RepositoryMembership | None:
+    async def get(self, project_id: UUID, user_id: UUID) -> ProjectMembership | None:
         result = await self.session.execute(
-            select(RepositoryMembership).where(
-                RepositoryMembership.repository_id == repository_id,
-                RepositoryMembership.user_id == user_id,
+            select(ProjectMembership).where(
+                ProjectMembership.project_id == project_id,
+                ProjectMembership.user_id == user_id,
             )
         )
         return result.scalar_one_or_none()
 
     async def add(
         self,
-        repository_id: UUID,
+        project_id: UUID,
         user_id: UUID,
         role: str = "member",
-    ) -> RepositoryMembership:
+    ) -> ProjectMembership:
         """Add a membership, no-op if already exists (returns existing)."""
-        existing = await self.get(repository_id, user_id)
+        existing = await self.get(project_id, user_id)
         if existing:
             return existing
-        membership = RepositoryMembership(
+        membership = ProjectMembership(
             id=uuid.uuid4(),
-            repository_id=repository_id,
+            project_id=project_id,
             user_id=user_id,
             role=role,
         )
@@ -56,17 +56,17 @@ class MembershipRepository:
         await self.session.flush()
         return membership
 
-    async def remove(self, repository_id: UUID, user_id: UUID) -> bool:
-        membership = await self.get(repository_id, user_id)
+    async def remove(self, project_id: UUID, user_id: UUID) -> bool:
+        membership = await self.get(project_id, user_id)
         if not membership:
             return False
         await self.session.delete(membership)
         return True
 
-    async def list_by_repository(self, repository_id: UUID) -> list[RepositoryMembership]:
+    async def list_by_repository(self, project_id: UUID) -> list[ProjectMembership]:
         result = await self.session.execute(
-            select(RepositoryMembership).where(
-                RepositoryMembership.repository_id == repository_id
-            ).order_by(RepositoryMembership.created_at)
+            select(ProjectMembership).where(
+                ProjectMembership.project_id == project_id
+            ).order_by(ProjectMembership.created_at)
         )
         return list(result.scalars().all())

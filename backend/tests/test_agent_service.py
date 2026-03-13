@@ -53,7 +53,6 @@ async def test_spawn_engineer_resolves_seniority_model(session, sample_project, 
         display_name="Engineer-Senior",
         seniority=" Senior ",
     )
-    assert agent.tier == "senior"
     assert agent.model == "claude-4-6-sonnet-latest"
 
 
@@ -66,7 +65,6 @@ async def test_spawn_engineer_invalid_seniority_defaults_to_junior(session, samp
         display_name="Engineer-Junior-Defaulted",
         seniority="staff-plus",
     )
-    assert agent.tier == "junior"
     assert agent.model == "gemini-2.0-flash-lite"
 
 

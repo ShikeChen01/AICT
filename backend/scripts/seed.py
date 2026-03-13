@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # Reuse the session URL resolver so it works in Cloud Run too
 os.environ.setdefault("PYTHONPATH", "/app")
 
-from backend.db.models import Base, Project, Agent
+from backend.db.models import Project, Agent
 from backend.services.agent_service import get_agent_service
 from backend.config import settings
 
@@ -118,7 +118,6 @@ async def _ensure_agents(session: AsyncSession, project: Project, agent_service)
             display_name="Manager",
             model=settings.manager_model_default,
             status="sleeping",
-            sandbox_persist=True,
         )
         session.add(manager)
         await session.flush()

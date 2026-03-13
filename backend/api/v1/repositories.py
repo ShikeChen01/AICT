@@ -54,15 +54,15 @@ async def list_repositories(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from backend.db.models import RepositoryMembership
+    from backend.db.models import ProjectMembership
     result = await db.execute(
         select(Repository)
         .where(
             (Repository.owner_id.is_(None))
             | (
                 Repository.id.in_(
-                    select(RepositoryMembership.repository_id).where(
-                        RepositoryMembership.user_id == current_user.id
+                    select(ProjectMembership.project_id).where(
+                        ProjectMembership.user_id == current_user.id
                     )
                 )
             )

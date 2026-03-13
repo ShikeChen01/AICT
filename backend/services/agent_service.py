@@ -26,13 +26,6 @@ from backend.llm.model_resolver import default_model_for_role, infer_provider
 _ROLE_TO_BASE_ROLE = {"manager": "manager", "cto": "cto", "engineer": "worker"}
 
 
-def _model_for_tier(tier: str) -> str:
-    """Return the config model for a given engineer tier."""
-    if tier == "senior":
-        return settings.engineer_senior_model
-    if tier == "intermediate":
-        return settings.engineer_intermediate_model
-    return settings.engineer_junior_model
 
 
 class AgentService:
@@ -149,36 +142,22 @@ class AgentService:
         else:
             template = await template_repo.get_by_project_and_role(project_id, "worker")
 
-        # Normalize seniority for model selection and tier storage
-        from backend.llm.model_resolver import normalize_seniority
-        normalized_tier = normalize_seniority(seniority) if seniority else "junior"
-
         if template:
             agent = await self._create_agent_from_template(
                 project_id, "engineer", display_name, template
             )
-            # Override model with seniority-specific default if seniority was explicitly provided
-            if seniority:
-                seniority_model = _model_for_tier(normalized_tier)
-                agent.model = seniority_model
-                agent.provider = infer_provider(seniority_model)
-                agent.tier = normalized_tier
-                await self.session.flush()
             return agent
         else:
-            # Fallback: create template-less agent with seniority-aware defaults
-            seniority_model = _model_for_tier(normalized_tier)
+            # Fallback: create template-less agent
             agent = Agent(
                 id=_uuid.uuid4(),
                 project_id=project_id,
                 role="engineer",
                 display_name=display_name,
-                model=seniority_model,
-                provider=infer_provider(seniority_model),
-                tier=normalized_tier,
+                model=settings.engineer_junior_model,
+                provider=infer_provider(settings.engineer_junior_model),
                 thinking_enabled=False,
                 status="sleeping",
-                sandbox_persist=False,
                 current_task_id=None,
             )
             self.session.add(agent)
@@ -217,7 +196,7 @@ class AgentService:
                 mgr_template.model = manager_model
                 mgr_template.provider = infer_provider(manager_model)
             manager = await self._create_agent_from_template(
-                project.id, "manager", "GM", mgr_template, sandbox_persist=True
+                project.id, "manager", "GM", mgr_template
             )
 
         if not cto:
@@ -226,7 +205,7 @@ class AgentService:
                 cto_template.model = cto_model
                 cto_template.provider = infer_provider(cto_model)
             cto = await self._create_agent_from_template(
-                project.id, "cto", "CTO", cto_template, sandbox_persist=True
+                project.id, "cto", "CTO", cto_template
             )
 
         return manager, cto
@@ -237,7 +216,6 @@ class AgentService:
         template_id: UUID,
         *,
         display_name: str | None = None,
-        sandbox_persist: bool = False,  # Deprecated; sandbox persistence is now determined by role
     ) -> Agent:
         """Create a new agent from any agent template (design).
 

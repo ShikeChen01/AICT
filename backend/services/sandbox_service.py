@@ -306,12 +306,15 @@ class SandboxService:
         if existing_sandbox:
             return existing_sandbox
 
-        # Load agent's config to get os_image preference
+        # Load agent's config to get os_image preference from its sandbox (if any)
         os_image = "ubuntu-22.04"
         setup_script = None
-        if agent.sandbox_config_id:
+        sandbox_config_id = None
+        if existing_sandbox and existing_sandbox.sandbox_config_id:
+            sandbox_config_id = existing_sandbox.sandbox_config_id
+        if sandbox_config_id:
             result = await db.execute(
-                select(SandboxConfig).where(SandboxConfig.id == agent.sandbox_config_id)
+                select(SandboxConfig).where(SandboxConfig.id == sandbox_config_id)
             )
             config = result.scalar_one_or_none()
             if config:
@@ -397,10 +400,8 @@ class SandboxService:
             id=uuid_module.uuid4(),
             project_id=agent.project_id,
             agent_id=agent.id,
-            sandbox_config_id=agent.sandbox_config_id,
+            sandbox_config_id=sandbox_config_id,
             orchestrator_sandbox_id=sandbox_id,
-            os_image=os_image,
-            setup_script=setup_script,
             persistent=persistent,
             status="assigned",
             host=host,

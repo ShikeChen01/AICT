@@ -1,9 +1,15 @@
 """
 SQLAlchemy models for AICT.
 
-Target schema per docs/db.md:
-- users, repositories, repository_memberships, project_settings, agents, tasks
-- channel_messages, agent_messages, agent_sessions, llm_usage_events
+Central schema:
+  projects, users, project_memberships, project_settings, project_secrets
+  agents, agent_templates, tasks
+  sandbox_configs, sandboxes, sandbox_snapshots, sandbox_usage_events
+  channel_messages, agent_sessions, agent_messages
+  llm_usage_events, attachments, message_attachments
+  project_documents, document_versions
+  knowledge_documents, knowledge_chunks
+  mcp_server_configs, prompt_block_configs, tool_configs
 """
 
 import uuid
@@ -26,7 +32,6 @@ from sqlalchemy import (
     Uuid,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
-
 from sqlalchemy.types import TypeDecorator
 
 
@@ -92,21 +97,22 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
-    repositories = relationship("Repository", back_populates="owner")
-    memberships = relationship("RepositoryMembership", back_populates="user", cascade="all, delete-orphan")
+    projects = relationship("Project", back_populates="owner")
+    memberships = relationship("ProjectMembership", back_populates="user", cascade="all, delete-orphan")
     sandbox_configs = relationship("SandboxConfig", back_populates="user", cascade="all, delete-orphan")
 
 
-# ── Sandbox Configs ────────────────────────────────────────────────
+# ── Sandbox Configs (user-owned blueprints) ────────────────────────
 
 
 class SandboxConfig(Base):
-    """User-level sandbox configuration profile.
+    """User-level sandbox configuration blueprint.
 
     Stores a setup script (shell commands) that runs inside a sandbox container
     after creation.  Users create configs (e.g. "Chrome + Slack + VS Code")
-    and assign them to agents.  Configs are user-owned and reusable across
-    projects.
+    and assign them to sandboxes.  Configs are user-owned and reusable across
+    projects.  The ``persistent`` flag indicates whether sandboxes created from
+    this config should survive across agent runs.
     """
 
     __tablename__ = "sandbox_configs"
@@ -115,42 +121,39 @@ class SandboxConfig(Base):
     user_id = Column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
+    os_image = Column(String(100), nullable=False, default="ubuntu-22.04")
     setup_script = Column(Text, nullable=False, default="")
-    os_image = Column(String(50), nullable=True)  # e.g. "ubuntu-22.04", "windows-server-2022"
+    persistent = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
     user = relationship("User", back_populates="sandbox_configs")
-    agents = relationship("Agent", back_populates="sandbox_config")
+    sandboxes = relationship("Sandbox", back_populates="config")
 
     __table_args__ = (
         UniqueConstraint("user_id", "name", name="uq_sandbox_configs_user_name"),
     )
 
 
-# ── Sandbox (HPA Implementation) ────────────────────────────────────────
+# ── Sandboxes (runtime instances) ──────────────────────────────────
 
 
 class Sandbox(Base):
-    """Runtime sandbox instance. One per agent execution.
+    """Runtime sandbox instance.
 
     Tracks the lifecycle of a sandbox container from provisioning to release.
-    Can be assigned to an agent or left unassigned for the pool.
-    Persistent sandboxes can be reused across multiple agent runs.
+    Created from a SandboxConfig blueprint — runtime state only; no duplication
+    of config fields.  Can be assigned to an agent or left in a pool.
     """
 
-    __tablename__ = "sandbox"
+    __tablename__ = "sandboxes"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
-    project_id = Column(Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     agent_id = Column(Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     sandbox_config_id = Column(Uuid, ForeignKey("sandbox_configs.id", ondelete="SET NULL"), nullable=True)
 
     orchestrator_sandbox_id = Column(String(255), nullable=False, unique=True)
-    os_image = Column(String(100), nullable=False, default="ubuntu-22.04")
-    setup_script = Column(Text, nullable=True)
-    persistent = Column(Boolean, nullable=False, default=False)
-
     status = Column(String(50), nullable=False, default="provisioning")
     host = Column(String(255), nullable=True)
     port = Column(Integer, default=8080)
@@ -161,25 +164,20 @@ class Sandbox(Base):
     last_health_at = Column(DateTime(timezone=True), nullable=True)
     released_at = Column(DateTime(timezone=True), nullable=True)
 
-    # Relationships
-    project = relationship("Repository")
+    project = relationship("Project")
     agent = relationship("Agent", back_populates="sandbox")
-    config = relationship("SandboxConfig")
+    config = relationship("SandboxConfig", back_populates="sandboxes")
     snapshots = relationship("SandboxSnapshot", back_populates="sandbox", cascade="all, delete-orphan")
 
 
 class SandboxSnapshot(Base):
-    """Snapshot of a sandbox state for rollback/restore.
+    """Point-in-time capture of a sandbox for rollback/restore."""
 
-    Stores a Kubernetes snapshot reference and metadata for a point-in-time
-    capture of a sandbox.  Used to restore a sandbox to a previous state.
-    """
-
-    __tablename__ = "sandbox_snapshot"
+    __tablename__ = "sandbox_snapshots"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
-    sandbox_id = Column(Uuid, ForeignKey("sandbox.id", ondelete="CASCADE"), nullable=False)
-    project_id = Column(Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False)
+    sandbox_id = Column(Uuid, ForeignKey("sandboxes.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     agent_id = Column(Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     k8s_snapshot_name = Column(String(255), nullable=False)
     os_image = Column(String(100), nullable=False)
@@ -191,17 +189,13 @@ class SandboxSnapshot(Base):
 
 
 class SandboxUsageEvent(Base):
-    """Cost tracking and pod utilization events for a sandbox.
+    """Cost tracking event for sandbox pod utilization."""
 
-    Records pod seconds consumed and estimated USD cost for sandbox operations.
-    Used for cost attribution and budget enforcement.
-    """
-
-    __tablename__ = "sandbox_usage_event"
+    __tablename__ = "sandbox_usage_events"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
-    sandbox_id = Column(Uuid, ForeignKey("sandbox.id", ondelete="CASCADE"), nullable=False)
-    project_id = Column(Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False)
+    sandbox_id = Column(Uuid, ForeignKey("sandboxes.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     agent_id = Column(Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     event_type = Column(String(50), nullable=False)
     pod_seconds = Column(Float, nullable=False, default=0)
@@ -209,11 +203,11 @@ class SandboxUsageEvent(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
 
-# ── Repositories ────────────────────────────────────────────────────
+# ── Projects ───────────────────────────────────────────────────────
 
 
-class Repository(Base):
-    __tablename__ = "repositories"
+class Project(Base):
+    __tablename__ = "projects"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     owner_id = Column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -225,7 +219,7 @@ class Repository(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
-    owner = relationship("User", back_populates="repositories")
+    owner = relationship("User", back_populates="projects")
     agents = relationship("Agent", back_populates="project", cascade="all, delete-orphan")
     agent_templates = relationship("AgentTemplate", back_populates="project", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="project", cascade="all, delete-orphan")
@@ -236,7 +230,7 @@ class Repository(Base):
         "ChannelMessage", back_populates="project", cascade="all, delete-orphan"
     )
     memberships = relationship(
-        "RepositoryMembership", back_populates="repository", cascade="all, delete-orphan"
+        "ProjectMembership", back_populates="project", cascade="all, delete-orphan"
     )
     documents = relationship(
         "ProjectDocument", back_populates="project", cascade="all, delete-orphan"
@@ -249,41 +243,41 @@ class Repository(Base):
     )
 
 
-# Backwards compatibility
-Project = Repository
+# Backwards compatibility alias — service layer uses both names.
+Repository = Project
 
 
-# ── Repository Memberships ───────────────────────────────────────────
+# ── Project Memberships ─────────────────────────────────────────────
 
 
 VALID_MEMBERSHIP_ROLES = ("owner", "member", "viewer")
 
 
-class RepositoryMembership(Base):
-    """Tracks which users have access to which repositories and their role."""
+class ProjectMembership(Base):
+    """Tracks which users have access to which projects and their role."""
 
-    __tablename__ = "repository_memberships"
+    __tablename__ = "project_memberships"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
-    repository_id = Column(
-        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    project_id = Column(
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     user_id = Column(
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    role = Column(String(50), nullable=False, default="member")  # owner | member | viewer
+    role = Column(String(50), nullable=False, default="member")
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
-    repository = relationship("Repository", back_populates="memberships")
+    project = relationship("Project", back_populates="memberships")
     user = relationship("User", back_populates="memberships")
 
     __table_args__ = (
-        Index("ix_repo_memberships_repo_user", "repository_id", "user_id", unique=True),
-        Index("ix_repo_memberships_user", "user_id"),
+        Index("ix_project_memberships_project_user", "project_id", "user_id", unique=True),
+        Index("ix_project_memberships_user", "user_id"),
     )
 
 
-# ── Project Settings (NEW) ──────────────────────────────────────────
+# ── Project Settings ────────────────────────────────────────────────
 
 
 class ProjectSettings(Base):
@@ -292,44 +286,37 @@ class ProjectSettings(Base):
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
         Uuid,
-        ForeignKey("repositories.id", ondelete="CASCADE"),
+        ForeignKey("projects.id", ondelete="CASCADE"),
         unique=True,
         nullable=False,
     )
     max_engineers = Column(Integer, default=5, nullable=False)
     persistent_sandbox_count = Column(Integer, default=1, nullable=False)
-    # Phase 3: per-project model and prompt overrides
     model_overrides = Column(JSON, nullable=True)
     prompt_overrides = Column(JSON, nullable=True)
-    # Phase 4: hard daily limits
     daily_token_budget = Column(Integer, default=0, nullable=False)
-    # Phase 4b: rolling hourly rate limits (0 = unlimited)
     calls_per_hour_limit = Column(Integer, default=0, nullable=False)
     tokens_per_hour_limit = Column(Integer, default=0, nullable=False)
-    # Phase 4b: daily cost cap in USD (0.0 = unlimited)
     daily_cost_budget_usd = Column(Float, default=0.0, nullable=False)
-    # Phase 1.6: RAG knowledge base quotas (0 = unlimited)
     knowledge_max_documents = Column(Integer, default=50, nullable=False)
     knowledge_max_total_bytes = Column(BigInteger, default=100 * 1024 * 1024, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
-    project = relationship("Repository", back_populates="project_settings")
+    project = relationship("Project", back_populates="project_settings")
 
 
-# ── Project Secrets ──────────────────────────────────────────────────
+# ── Project Secrets ─────────────────────────────────────────────────
 
 
 class ProjectSecret(Base):
-    """Per-project secret tokens (e.g. API keys) for agent use. Values stored encrypted."""
+    """Per-project encrypted secret tokens (e.g. API keys) for agent use."""
 
     __tablename__ = "project_secrets"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        Uuid,
-        ForeignKey("repositories.id", ondelete="CASCADE"),
-        nullable=False,
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     name = Column(String(100), nullable=False)
     encrypted_value = Column(Text, nullable=False)
@@ -337,55 +324,48 @@ class ProjectSecret(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
-    project = relationship("Repository", back_populates="project_secrets")
+    project = relationship("Project", back_populates="project_secrets")
 
     __table_args__ = (UniqueConstraint("project_id", "name", name="uq_project_secrets_project_name"),)
 
 
-# ── Agents (MODIFIED: memory added, priority removed) ─────────────────
+# ── Agent Templates ─────────────────────────────────────────────────
 
-
-# System roles (backwards-compat) plus "worker" for user-defined agents.
-# Any string is accepted in the DB; this tuple is only for display/sort ordering.
-VALID_ROLES = ("manager", "cto", "engineer", "worker")
-VALID_STATUSES = ("sleeping", "active", "busy")
-
-# ── Agent Templates ──────────────────────────────────────────────────
 
 VALID_BASE_ROLES = ("manager", "cto", "worker", "custom")
 
 
 class AgentTemplate(Base):
-    """Reusable agent design/configuration. DB is source of truth.
+    """Reusable agent design/configuration.
 
-    System defaults (Manager, CTO, Engineer) are created automatically per project.
-    Users can create custom agent designs with any role, prompt, tools, and sandbox
-    configuration.  This serves as the "Agent Designer" concept in the product.
-    Template changes only affect newly created agents; existing agents keep their values.
+    System defaults (Manager, CTO, Engineer) are created automatically per
+    project.  Users can create custom agent designs with any role, prompt,
+    tools, and sandbox configuration.  Template changes only affect newly
+    created agents; existing agents keep their snapshot values.
     """
 
     __tablename__ = "agent_templates"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)  # Human-readable description
-    base_role = Column(String(50), nullable=False)  # 'manager', 'cto', 'worker', or any custom string
+    description = Column(Text, nullable=True)
+    base_role = Column(String(50), nullable=False)
     model = Column(String(100), nullable=False)
-    provider = Column(String(50), nullable=True)  # NULL = infer from model name
+    provider = Column(String(50), nullable=True)
     thinking_enabled = Column(Boolean, default=False, nullable=False)
-    tool_access = Column(JSON, nullable=True)  # Future: custom tool whitelist
-    sandbox_template = Column(String(100), nullable=True)  # e.g. "dev-python", "browser-automation"
-    knowledge_sources = Column(JSON, nullable=True)  # RAG config: {sources: [...], shared_access: "read"|"write"|"both"}
-    trigger_config = Column(JSON, nullable=True)  # Trigger config: {type: "message"|"schedule"|"event", ...}
-    cost_limits = Column(JSON, nullable=True)  # {max_tokens_per_session, max_cost_per_session_usd, ...}
+    tool_access = Column(JSON, nullable=True)
+    sandbox_template = Column(String(100), nullable=True)
+    knowledge_sources = Column(JSON, nullable=True)
+    trigger_config = Column(JSON, nullable=True)
+    cost_limits = Column(JSON, nullable=True)
     is_system_default = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
-    project = relationship("Repository", back_populates="agent_templates")
+    project = relationship("Project", back_populates="agent_templates")
     agents = relationship("Agent", back_populates="template")
     prompt_blocks = relationship(
         "PromptBlockConfig",
@@ -404,13 +384,14 @@ class AgentTemplate(Base):
     )
 
 
+# ── Prompt Block Configs ────────────────────────────────────────────
+
+
 class PromptBlockConfig(Base):
     """Per-agent or per-template prompt block configuration.
 
-    DB is always the source of truth. Seeded from .md files at template/agent creation.
     Exactly one of template_id or agent_id must be set.
-    The 'content' column is always populated (never NULL after seeding).
-    Duplication is supported: multiple rows with same block_key but different position.
+    Content is always populated after seeding.
     """
 
     __tablename__ = "prompt_block_configs"
@@ -429,16 +410,8 @@ class PromptBlockConfig(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
-    template = relationship(
-        "AgentTemplate",
-        foreign_keys=[template_id],
-        back_populates="prompt_blocks",
-    )
-    agent = relationship(
-        "Agent",
-        foreign_keys=[agent_id],
-        back_populates="prompt_blocks",
-    )
+    template = relationship("AgentTemplate", foreign_keys=[template_id], back_populates="prompt_blocks")
+    agent = relationship("Agent", foreign_keys=[agent_id], back_populates="prompt_blocks")
 
     __table_args__ = (
         Index("ix_prompt_block_configs_template", "template_id", "position"),
@@ -446,13 +419,15 @@ class PromptBlockConfig(Base):
     )
 
 
+# ── MCP Server Configs ──────────────────────────────────────────────
+
+
 class McpServerConfig(Base):
     """Per-agent MCP server connection.
 
     Each row represents one remote MCP server that an agent can reach.
     Tools exposed by the server are discovered at runtime via tools/list
-    and injected into the agent's tool registry as first-class tools.
-    Individual MCP tools are toggled via ToolConfig rows (source='mcp').
+    and injected into the agent's tool registry.
     """
 
     __tablename__ = "mcp_server_configs"
@@ -461,14 +436,14 @@ class McpServerConfig(Base):
     agent_id = Column(
         Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
     )
-    name = Column(String(120), nullable=False)           # human label, e.g. "GitHub"
-    url = Column(Text, nullable=False)                   # SSE endpoint URL
-    api_key = Column(LargeBinary, nullable=True)         # Fernet-encrypted bearer token
-    headers = Column(JSON, nullable=True)                # extra HTTP headers (encrypted values)
+    name = Column(String(120), nullable=False)
+    url = Column(Text, nullable=False)
+    api_key = Column(LargeBinary, nullable=True)
+    headers = Column(JSON, nullable=True)
     enabled = Column(Boolean, default=True, nullable=False)
-    status = Column(String(30), default="disconnected", nullable=False)  # connected | disconnected | error
-    status_detail = Column(Text, nullable=True)          # last error message if status=error
-    tool_count = Column(Integer, default=0, nullable=False)  # cached count from last discovery
+    status = Column(String(30), default="disconnected", nullable=False)
+    status_detail = Column(Text, nullable=True)
+    tool_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
@@ -477,16 +452,14 @@ class McpServerConfig(Base):
     )
 
 
+# ── Tool Configs ────────────────────────────────────────────────────
+
+
 class ToolConfig(Base):
     """Per-agent or per-template tool configuration.
 
-    DB is the source of truth. Seeded from tool_descriptions.json at agent creation.
     Exactly one of template_id or agent_id must be set.
-    Users can edit: description, detailed_description, enabled, position.
-    Users cannot edit: tool_name, input_schema, allowed_roles (structural).
-
-    source: 'native' (default, from tool_descriptions.json) or 'mcp' (discovered from MCP server).
-    mcp_server_id: if source='mcp', FK to the McpServerConfig that provides this tool.
+    source: 'native' (from tool_descriptions.json) or 'mcp' (discovered).
     """
 
     __tablename__ = "tool_configs"
@@ -505,7 +478,7 @@ class ToolConfig(Base):
     allowed_roles = Column(JSON, nullable=False, default=list)
     enabled = Column(Boolean, default=True, nullable=False)
     position = Column(Integer, nullable=False, default=0)
-    source = Column(String(20), default="native", nullable=False)  # 'native' | 'mcp'
+    source = Column(String(20), default="native", nullable=False)
     mcp_server_id = Column(
         Uuid, ForeignKey("mcp_server_configs.id", ondelete="CASCADE"), nullable=True
     )
@@ -519,21 +492,27 @@ class ToolConfig(Base):
     )
 
 
+# ── Agents ──────────────────────────────────────────────────────────
+
+
+VALID_ROLES = ("manager", "cto", "engineer", "worker")
+VALID_STATUSES = ("sleeping", "active", "busy")
+
+
 class Agent(Base):
     __tablename__ = "agents"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     template_id = Column(
         Uuid, ForeignKey("agent_templates.id", ondelete="SET NULL"), nullable=True
     )
-    role = Column(String(50), nullable=False)  # 'manager', 'cto', 'engineer'
+    role = Column(String(50), nullable=False)
     display_name = Column(String(100), nullable=False)
-    tier = Column(String(50), nullable=True)  # deprecated; use template.name
-    model = Column(String(100), nullable=False)  # always populated; DB is source of truth
-    provider = Column(String(50), nullable=True)  # explicit provider; populated at creation
+    model = Column(String(100), nullable=False)
+    provider = Column(String(50), nullable=True)
     thinking_enabled = Column(Boolean, default=False, nullable=False)
     status = Column(String(20), default="sleeping", nullable=False)
     current_task_id = Column(
@@ -541,19 +520,13 @@ class Agent(Base):
         ForeignKey("tasks.id", use_alter=True, name="fk_agent_current_task"),
         nullable=True,
     )
-    sandbox_config_id = Column(
-        Uuid, ForeignKey("sandbox_configs.id", ondelete="SET NULL"), nullable=True
-    )
-    memory = Column(JSON, nullable=True)  # Layer 1 self-define block
-    # Per-agent dynamic pool overrides. NULL = use system defaults.
-    # Shape: {incoming_msg_tokens, memory_pct, past_session_pct, current_session_pct}
+    memory = Column(JSON, nullable=True)
     token_allocations = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
-    project = relationship("Repository", back_populates="agents")
+    project = relationship("Project", back_populates="agents")
     template = relationship("AgentTemplate", back_populates="agents", foreign_keys=[template_id])
-    sandbox_config = relationship("SandboxConfig", back_populates="agents")
     sandbox = relationship("Sandbox", back_populates="agent", uselist=False)
     current_task = relationship("Task", foreign_keys=[current_task_id])
     agent_sessions = relationship(
@@ -580,7 +553,7 @@ class Agent(Base):
     )
 
 
-# ── Tasks (MODIFIED: abort fields removed) ───────────────────────────
+# ── Tasks ───────────────────────────────────────────────────────────
 
 
 VALID_TASK_STATUSES = (
@@ -599,7 +572,7 @@ class Task(Base):
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
@@ -621,7 +594,7 @@ class Task(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
-    project = relationship("Repository", back_populates="tasks")
+    project = relationship("Project", back_populates="tasks")
     assigned_agent = relationship("Agent", foreign_keys=[assigned_agent_id])
     created_by = relationship("Agent", foreign_keys=[created_by_id])
     subtasks = relationship("Task", back_populates="parent_task", foreign_keys=[parent_task_id])
@@ -632,8 +605,7 @@ class Task(Base):
     )
 
 
-# ── Channel Messages (NEW) ──────────────────────────────────────────
-# from_agent_id / target_agent_id are NOT FKs (user = reserved UUID)
+# ── Channel Messages ───────────────────────────────────────────────
 
 
 class ChannelMessage(Base):
@@ -641,22 +613,26 @@ class ChannelMessage(Base):
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
-    from_agent_id = Column(Uuid, nullable=True)  # NULL = system; user = USER_AGENT_ID
-    target_agent_id = Column(Uuid, nullable=True)  # NULL = broadcast
-    # Phase 2: real user FK for attribution (set when sent from REST API; NULL for agent-to-agent)
+    from_agent_id = Column(
+        Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
+    )
+    target_agent_id = Column(
+        Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
+    )
     from_user_id = Column(
         Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     content = Column(Text, nullable=False)
-    message_type = Column(String(20), default="normal", nullable=False)  # 'normal', 'system'
-    status = Column(String(20), default="sent", nullable=False)  # 'sent', 'received'
+    message_type = Column(String(20), default="normal", nullable=False)
+    status = Column(String(20), default="sent", nullable=False)
     broadcast = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
-    project = relationship("Repository", back_populates="channel_messages")
-    # Phase 6: linked attachments (selectin avoids N+1 for list queries)
+    project = relationship("Project", back_populates="channel_messages")
+    from_agent = relationship("Agent", foreign_keys=[from_agent_id])
+    target_agent = relationship("Agent", foreign_keys=[target_agent_id])
     message_attachments = relationship(
         "MessageAttachment",
         lazy="selectin",
@@ -666,8 +642,6 @@ class ChannelMessage(Base):
 
     @property
     def attachment_ids(self) -> list[str]:
-        # Never trigger IO from this property (Pydantic from_attributes calls it in
-        # a sync context). Only return IDs when the relationship is already loaded.
         from sqlalchemy import inspect as _sa_inspect
         from sqlalchemy.orm.attributes import NO_VALUE
         try:
@@ -687,7 +661,7 @@ class ChannelMessage(Base):
     )
 
 
-# ── Agent Sessions (NEW) ────────────────────────────────────────────
+# ── Agent Sessions ──────────────────────────────────────────────────
 
 
 class AgentSession(Base):
@@ -698,13 +672,11 @@ class AgentSession(Base):
         Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
     )
     project_id = Column(
-        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     task_id = Column(Uuid, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
     trigger_message_id = Column(
-        Uuid,
-        ForeignKey("channel_messages.id", ondelete="SET NULL"),
-        nullable=True,
+        Uuid, ForeignKey("channel_messages.id", ondelete="SET NULL"), nullable=True
     )
     status = Column(String(20), default="running", nullable=False)
     end_reason = Column(String(50), nullable=True)
@@ -723,7 +695,7 @@ class AgentSession(Base):
     )
 
 
-# ── Agent Messages (NEW) ────────────────────────────────────────────
+# ── Agent Messages ──────────────────────────────────────────────────
 
 
 class AgentMessage(Base):
@@ -734,14 +706,12 @@ class AgentMessage(Base):
         Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
     )
     session_id = Column(
-        Uuid,
-        ForeignKey("agent_sessions.id", ondelete="CASCADE"),
-        nullable=True,
+        Uuid, ForeignKey("agent_sessions.id", ondelete="CASCADE"), nullable=True
     )
     project_id = Column(
-        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
-    role = Column(String(20), nullable=False)  # 'system', 'user', 'assistant', 'tool'
+    role = Column(String(20), nullable=False)
     content = Column(Text, nullable=False)
     tool_name = Column(String(100), nullable=True)
     tool_input = Column(JSON, nullable=True)
@@ -758,17 +728,17 @@ class AgentMessage(Base):
     )
 
 
-# ── LLM Usage Events (Phase 4) ──────────────────────────────────────
+# ── LLM Usage Events ───────────────────────────────────────────────
 
 
 class LLMUsageEvent(Base):
-    """One row per LLM API call. Used for cost attribution and daily budget enforcement."""
+    """One row per LLM API call. Used for cost attribution and budget enforcement."""
 
     __tablename__ = "llm_usage_events"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     agent_id = Column(
         Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
@@ -779,7 +749,7 @@ class LLMUsageEvent(Base):
     user_id = Column(
         Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    provider = Column(String(50), nullable=False)   # anthropic | google | openai
+    provider = Column(String(50), nullable=False)
     model = Column(String(100), nullable=False)
     input_tokens = Column(Integer, nullable=False, default=0)
     output_tokens = Column(Integer, nullable=False, default=0)
@@ -793,7 +763,7 @@ class LLMUsageEvent(Base):
     )
 
 
-# ── Phase 6: Attachments ─────────────────────────────────────────────
+# ── Attachments ─────────────────────────────────────────────────────
 
 
 ALLOWED_ATTACHMENT_MIME_TYPES = frozenset({
@@ -802,21 +772,17 @@ ALLOWED_ATTACHMENT_MIME_TYPES = frozenset({
     "image/gif",
     "image/webp",
 })
-MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024
 
 
 class Attachment(Base):
-    """Binary image blob stored directly in Postgres (bytea).
-
-    Capped at 10 MB per file; only image/* MIME types accepted.
-    SHA-256 hash stored for integrity checking.
-    """
+    """Binary image blob stored in Postgres. Capped at 10 MB, image/* only."""
 
     __tablename__ = "attachments"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     uploaded_by_user_id = Column(
         Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -838,7 +804,7 @@ class Attachment(Base):
 
 
 class MessageAttachment(Base):
-    """Junction table: channel_message ↔ attachment (supports multiple images per message)."""
+    """Junction: channel_message <-> attachment (multiple images per message)."""
 
     __tablename__ = "message_attachments"
 
@@ -859,24 +825,21 @@ class MessageAttachment(Base):
     )
 
 
-# ── Phase 10: Project Documents ──────────────────────────────────────
+# ── Project Documents ───────────────────────────────────────────────
 
 
 class ProjectDocument(Base):
     """Architecture document. Writable by both users and the manager agent.
 
     Well-known doc_type values:
-      'architecture_source_of_truth' — single canonical architecture description
-      'arc42_lite'                   — arc42-lite template content
-      'c4_diagrams'                  — C4 model diagrams (Markdown + PlantUML/Mermaid)
-      'adr/<slug>'                   — individual Architecture Decision Records
+      'architecture_source_of_truth', 'arc42_lite', 'c4_diagrams', 'adr/<slug>'
     """
 
     __tablename__ = "project_documents"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     doc_type = Column(String(100), nullable=False)
     title = Column(String(255), nullable=True)
@@ -891,7 +854,7 @@ class ProjectDocument(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
-    project = relationship("Repository", back_populates="documents")
+    project = relationship("Project", back_populates="documents")
     updated_by_agent = relationship("Agent", foreign_keys=[updated_by_agent_id])
     updated_by_user = relationship("User", foreign_keys=[updated_by_user_id])
     versions = relationship(
@@ -901,16 +864,11 @@ class ProjectDocument(Base):
 
     __table_args__ = (
         Index("ix_project_documents_project", "project_id", "updated_at"),
-        # unique constraint handled at migration level
     )
 
 
 class DocumentVersion(Base):
-    """Version snapshot of a project document.
-
-    Created before every edit (by user or agent). Keeps last N=20 versions per document.
-    Revert creates a new version rather than destructive rollback.
-    """
+    """Version snapshot of a project document. Created before every edit."""
 
     __tablename__ = "document_versions"
 
@@ -940,32 +898,27 @@ class DocumentVersion(Base):
     )
 
 
-# ── Knowledge Base (RAG — Feature 1.6) ──────────────────────────────
+# ── Knowledge Base (RAG) ────────────────────────────────────────────
 
-# Valid file types accepted by the ingestion pipeline
+
 KNOWLEDGE_VALID_FILE_TYPES = frozenset({"pdf", "txt", "markdown", "csv"})
 KNOWLEDGE_VALID_STATUSES = frozenset({"pending", "indexing", "indexed", "failed"})
 
 
 class KnowledgeDocument(Base):
-    """An uploaded document in the project's RAG knowledge base.
-
-    After upload, the ingestion pipeline parses, chunks, and embeds the document.
-    Once status == 'indexed', agents can search its content via the
-    search_knowledge tool.
-    """
+    """Uploaded document in a project's RAG knowledge base."""
 
     __tablename__ = "knowledge_documents"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     uploaded_by_user_id = Column(
         Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     filename = Column(String(255), nullable=False)
-    file_type = Column(String(20), nullable=False)   # pdf | txt | markdown | csv
+    file_type = Column(String(20), nullable=False)
     mime_type = Column(String(100), nullable=False)
     original_size_bytes = Column(Integer, nullable=False)
     chunk_count = Column(Integer, default=0, nullable=False)
@@ -975,7 +928,7 @@ class KnowledgeDocument(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
-    project = relationship("Repository", back_populates="knowledge_documents")
+    project = relationship("Project", back_populates="knowledge_documents")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_user_id])
     chunks = relationship(
         "KnowledgeChunk", back_populates="document", cascade="all, delete-orphan"
@@ -988,12 +941,7 @@ class KnowledgeDocument(Base):
 
 
 class KnowledgeChunk(Base):
-    """A chunked excerpt from a KnowledgeDocument, stored with its embedding.
-
-    The embedding column holds a 1024-dimension float vector produced by
-    Voyage AI (voyage-3-large).  pgvector HNSW index on the embedding column
-    enables sub-millisecond cosine-similarity search.
-    """
+    """Chunked excerpt with 1024-dim embedding (Voyage-3-large) for cosine search."""
 
     __tablename__ = "knowledge_chunks"
 
@@ -1002,15 +950,13 @@ class KnowledgeChunk(Base):
         Uuid, ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False
     )
     project_id = Column(
-        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     chunk_index = Column(Integer, nullable=False)
     text_content = Column(Text, nullable=False)
     char_count = Column(Integer, nullable=False)
     token_count = Column(Integer, nullable=False)
-    # Voyage-3-large produces 1024-dim vectors
     embedding = Column(_VECTOR_1024, nullable=True)
-    # Extra metadata: page_num, char_offset, section_title, …
     metadata_ = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
@@ -1019,6 +965,5 @@ class KnowledgeChunk(Base):
     __table_args__ = (
         Index("ix_knowledge_chunks_doc_idx", "document_id", "chunk_index", unique=True),
         Index("ix_knowledge_chunks_project", "project_id", "created_at"),
-        # NOTE: the HNSW vector index is created via raw DDL in migration 024
-        # because Alembic cannot render CREATE INDEX … USING hnsw natively.
+        # HNSW vector index created via raw DDL in migration (Alembic can't render it).
     )

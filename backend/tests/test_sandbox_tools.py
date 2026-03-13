@@ -69,7 +69,6 @@ def _make_ctx(agent, project, session=None) -> RunContext:
 def _make_agent(sandbox_id: str | None = "sbox-1") -> MagicMock:
     agent = MagicMock()
     agent.sandbox_id = sandbox_id
-    agent.sandbox_persist = False
     agent.role = "engineer"
     agent.id = "agent-uuid-001"
     return agent
