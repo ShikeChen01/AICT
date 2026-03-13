@@ -677,10 +677,10 @@ export async function listSandboxes(projectId: string): Promise<Sandbox[]> {
   return request<Sandbox[]>('GET', `/sandboxes?project_id=${projectId}`);
 }
 
-export async function claimSandbox(agentId: string): Promise<Sandbox> {
+export async function claimSandbox(projectId: string, agentId: string): Promise<Sandbox> {
   return request<Sandbox>(
     'POST',
-    '/sandboxes',
+    `/sandboxes?project_id=${projectId}`,
     { agent_id: agentId } as SandboxClaimRequest,
     120_000,
   );

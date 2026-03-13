@@ -227,7 +227,7 @@ function SandboxContent({ projectId }: { projectId: string }) {
               <p className="text-sm text-[var(--text-muted)] mt-0.5">{sandboxes.length} running · Click to enter remote desktop</p>
             </div>
             {agentsWithoutSandbox.length > 0 && (
-              <StartSandboxDropdown agents={agentsWithoutSandbox} onStarted={fetchData} />
+              <StartSandboxDropdown projectId={projectId} agents={agentsWithoutSandbox} onStarted={fetchData} />
             )}
           </div>
 
@@ -243,6 +243,7 @@ function SandboxContent({ projectId }: { projectId: string }) {
               {sandboxes.map(sb => (
                 <SandboxCard
                   key={sb.id}
+                  projectId={projectId}
                   sandbox={sb}
                   configs={configs}
                   onExpand={() => {
@@ -273,6 +274,7 @@ function SandboxContent({ projectId }: { projectId: string }) {
 // ── Sandbox Card ───────────────────────────────────────────────────────────
 
 interface SandboxCardProps {
+  projectId: string;
   sandbox: Sandbox;
   configs: SandboxConfig[];
   onExpand: () => void;
@@ -280,7 +282,7 @@ interface SandboxCardProps {
   onRefresh: () => void;
 }
 
-function SandboxCard({ sandbox, onExpand, onConfigure, onRefresh }: SandboxCardProps) {
+function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: SandboxCardProps) {
   const { frameUrl, isConnected } = useScreenStream(sandbox.orchestrator_sandbox_id);
   const roleColor = ROLE_COLORS[sandbox.agent_role ?? 'engineer'] ?? '#64748b';
   const statusClass = STATUS_BG[sandbox.status] ?? STATUS_BG.idle;
@@ -371,7 +373,7 @@ function SandboxCard({ sandbox, onExpand, onConfigure, onRefresh }: SandboxCardP
             onClick={() => handleAction(async () => {
               await releaseSandbox(sandbox.id);
               if (sandbox.agent_id) {
-                await claimSandbox(sandbox.agent_id);
+                await claimSandbox(projectId, sandbox.agent_id);
               }
             })}
             disabled={acting}
@@ -430,7 +432,7 @@ function SandboxCard({ sandbox, onExpand, onConfigure, onRefresh }: SandboxCardP
 
 // ── Start Sandbox Dropdown ─────────────────────────────────────────────────
 
-function StartSandboxDropdown({ agents, onStarted }: { agents: Agent[]; onStarted: () => void }) {
+function StartSandboxDropdown({ projectId, agents, onStarted }: { projectId: string; agents: Agent[]; onStarted: () => void }) {
   const [open, setOpen] = useState(false);
   const [starting, setStarting] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -446,8 +448,11 @@ function StartSandboxDropdown({ agents, onStarted }: { agents: Agent[]; onStarte
   const handleStart = async (agentId: string) => {
     setStarting(true);
     try {
-      await claimSandbox(agentId);
+      await claimSandbox(projectId, agentId);
       onStarted();
+    } catch (err) {
+      console.error('Failed to start sandbox:', err);
+      alert(err instanceof Error ? err.message : 'Failed to start sandbox');
     } finally {
       setStarting(false);
       setOpen(false);

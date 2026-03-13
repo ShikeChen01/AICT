@@ -26,7 +26,6 @@ from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from backend.logging.my_logger import get_logger
-from backend.services.sandbox_client import get_sandbox_client
 
 logger = get_logger(__name__)
 
@@ -54,41 +53,51 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
     Bidirectionally relay VNC/RFB protocol bytes between a frontend
     noVNC WebSocket and a sandbox container's /ws/vnc endpoint.
     """
-    client = get_sandbox_client()
-    conn = client._connections.get(sandbox_id)
-    if not conn:
-        # Backend may have restarted — try to re-register from pool manager
-        from backend.services.sandbox_service import PoolManagerClient
-        from backend.config import settings
-        try:
-            pool = PoolManagerClient()
-            data = await pool.get_sandbox_by_id(sandbox_id)
-            vm_host = settings.sandbox_vm_internal_host or settings.sandbox_vm_host
-            client.register(
-                sandbox_id=sandbox_id,
-                vm_host=vm_host,
-                host_port=data["host_port"],
-                auth_token=data["auth_token"],
-            )
-            conn = client._connections.get(sandbox_id)
-        except Exception as exc:
-            logger.warning("VNC proxy: sandbox %s not registered and re-registration failed: %s", sandbox_id, exc)
-            await _safe_close_viewer(viewer_ws, 4004, "Sandbox not registered")
-            return
-        if not conn:
-            await _safe_close_viewer(viewer_ws, 4004, "Sandbox not registered")
-            return
-
     from backend.config import settings
 
-    upstream_url = (
-        conn.rest_base_url.replace("http://", "ws://")
-        + f"/ws/vnc?token={conn.auth_token}"
-    )
+    # Look up sandbox connection info from the database
+    from backend.db.session import AsyncSessionLocal
+    from backend.db.models import Sandbox
+    from sqlalchemy import select
+
+    host = port = auth_token = None
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Sandbox).where(Sandbox.orchestrator_sandbox_id == sandbox_id)
+            )
+            sandbox = result.scalar_one_or_none()
+            if sandbox:
+                host = sandbox.host
+                port = sandbox.port
+                auth_token = sandbox.auth_token
+    except Exception as exc:
+        logger.warning("VNC proxy: sandbox %s DB lookup failed: %s", sandbox_id, exc)
+
+    if not host or not auth_token:
+        # Fallback: try the orchestrator directly
+        from backend.services.sandbox_service import OrchestratorClient
+        try:
+            orch = OrchestratorClient()
+            data = await orch.get_sandbox_by_id(sandbox_id)
+            host = settings.sandbox_vm_internal_host or settings.sandbox_vm_host
+            port = data.get("host_port", 8080)
+            auth_token = data.get("auth_token")
+        except Exception as exc:
+            logger.warning("VNC proxy: sandbox %s not found and orchestrator lookup failed: %s", sandbox_id, exc)
+            await _safe_close_viewer(viewer_ws, 4004, "Sandbox not registered")
+            return
+
+    if not host or not auth_token:
+        await _safe_close_viewer(viewer_ws, 4004, "Sandbox not registered")
+        return
+
+    rest_base_url = f"http://{host}:{port}"
+    upstream_url = f"ws://{host}:{port}/ws/vnc?token={auth_token}"
     logger.info(
         "VNC proxy opening upstream to sandbox %s (%s)",
         sandbox_id,
-        conn.rest_base_url,
+        rest_base_url,
     )
 
     # Use short timeouts so we can send a proper close frame before proxies drop the connection.
@@ -118,19 +127,15 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
 
     # Fallback: if internal host failed and we have external host, try once
     if upstream is None and last_exc is not None and settings.sandbox_vm_internal_host and settings.sandbox_vm_host:
-        if conn.rest_base_url.startswith(f"http://{settings.sandbox_vm_internal_host}:"):
+        if rest_base_url.startswith(f"http://{settings.sandbox_vm_internal_host}:"):
             try:
-                port = conn.rest_base_url.rstrip("/").split(":")[-1]
-                client.register(sandbox_id=sandbox_id, vm_host=settings.sandbox_vm_host, host_port=int(port), auth_token=conn.auth_token)
-                conn = client._connections.get(sandbox_id)
-                if conn:
-                    upstream_url = conn.rest_base_url.replace("http://", "ws://") + f"/ws/vnc?token={conn.auth_token}"
-                    logger.info("VNC proxy retry upstream via external host %s", conn.rest_base_url)
-                    upstream = await asyncio.wait_for(
-                        websockets.connect(upstream_url, open_timeout=_open_timeout, max_size=2**22, subprotocols=[websockets.Subprotocol("binary")], ping_interval=_UPSTREAM_PING_INTERVAL_S, ping_timeout=10,
-                        ).__aenter__(),
-                        timeout=_connect_timeout,
-                    )
+                ext_upstream_url = f"ws://{settings.sandbox_vm_host}:{port}/ws/vnc?token={auth_token}"
+                logger.info("VNC proxy retry upstream via external host %s:%s", settings.sandbox_vm_host, port)
+                upstream = await asyncio.wait_for(
+                    websockets.connect(ext_upstream_url, open_timeout=_open_timeout, max_size=2**22, subprotocols=[websockets.Subprotocol("binary")], ping_interval=_UPSTREAM_PING_INTERVAL_S, ping_timeout=10,
+                    ).__aenter__(),
+                    timeout=_connect_timeout,
+                )
             except Exception as retry_exc:
                 logger.warning("VNC proxy retry via external host failed: %s", retry_exc)
                 last_exc = retry_exc

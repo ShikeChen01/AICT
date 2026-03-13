@@ -6,6 +6,7 @@ that can be assigned to agents.  Configs are user-owned and reusable
 across projects.
 """
 
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -44,8 +45,8 @@ class SandboxConfigResponse(BaseModel):
     description: str | None
     setup_script: str
     os_image: str | None
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
