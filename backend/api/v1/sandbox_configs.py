@@ -64,12 +64,18 @@ async def list_configs(
     db: AsyncSession = Depends(get_db),
 ):
     """List all sandbox configs owned by the current user."""
-    result = await db.execute(
-        select(SandboxConfig)
-        .where(SandboxConfig.user_id == current_user.id)
-        .order_by(SandboxConfig.name)
-    )
-    return list(result.scalars().all())
+    try:
+        result = await db.execute(
+            select(SandboxConfig)
+            .where(SandboxConfig.user_id == current_user.id)
+            .order_by(SandboxConfig.name)
+        )
+        return list(result.scalars().all())
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list sandbox configs: {type(exc).__name__}: {exc}",
+        ) from exc
 
 
 @router.post("", response_model=SandboxConfigResponse, status_code=201)

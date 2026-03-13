@@ -341,17 +341,28 @@ async def response_validation_exception_handler(request: Request, exc: fastapi.e
     FastAPI/Starlette swallows these silently (returns 500 with no log).
     This handler logs the real error server-side for debugging.
     """
+    import traceback
+    tb = traceback.format_exception(type(exc), exc, exc.__traceback__)
     logger.error(
-        "ResponseValidationError on %s %s: %s",
+        "ResponseValidationError on %s %s:\n%s",
         request.method,
         request.url.path,
-        exc,
+        "".join(tb),
     )
+    # Include just enough detail in the response to help diagnose without leaking internals
+    errors = []
+    for err in exc.errors():
+        errors.append({
+            "loc": err.get("loc"),
+            "msg": err.get("msg"),
+            "type": err.get("type"),
+        })
     return JSONResponse(
         status_code=500,
         content={
-            "detail": "An internal error occurred. Please try again or contact support.",
+            "detail": "Response validation failed",
             "path": request.url.path,
+            "errors": errors,
         },
     )
 
@@ -377,17 +388,21 @@ async def readiness_gate_middleware(request: Request, call_next):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """
-    Global exception handler for unhandled errors.
-
-    v3 hardening: does NOT include exception type or message in the response
-    body (code review medium #2). Full details still logged server-side.
-    """
-    logger.exception("Unhandled exception on %s %s: %s", request.method, request.url.path, exc)
+    """Global exception handler for unhandled errors."""
+    import traceback
+    tb = traceback.format_exception(type(exc), exc, exc.__traceback__)
+    logger.error(
+        "Unhandled %s on %s %s: %s\n%s",
+        type(exc).__name__,
+        request.method,
+        request.url.path,
+        exc,
+        "".join(tb),
+    )
     return JSONResponse(
         status_code=500,
         content={
-            "detail": "An internal error occurred. Please try again or contact support.",
+            "detail": f"{type(exc).__name__}: {exc}",
             "path": request.url.path,
         },
     )

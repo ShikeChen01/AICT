@@ -191,9 +191,17 @@ async def claim_sandbox(
     if agent.project_id != project_id:
         raise HTTPException(status_code=403, detail="Agent not in this project")
 
-    # Claim sandbox
     svc = _get_sandbox_service()
-    sandbox = await svc.claim(db, agent)
+    try:
+        sandbox = await svc.claim(db, agent)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start sandbox: {type(exc).__name__}: {exc}",
+        ) from exc
+
     await db.commit()
 
     # Ensure the agent relationship is loaded for the response serializer

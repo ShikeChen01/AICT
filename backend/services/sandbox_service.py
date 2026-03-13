@@ -91,7 +91,7 @@ class OrchestratorClient:
             body["project_id"] = project_id
         if setup_script:
             body["setup_script"] = setup_script
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0)) as client:
             resp = await client.post(
                 f"{self._base}/sandbox/{sandbox_id}/claim",
                 json=body,
@@ -174,7 +174,8 @@ class OrchestratorClient:
             body["tenant_id"] = tenant_id
         if project_id:
             body["project_id"] = project_id
-        timeout = 300.0 if setup_script else 120.0
+        read_timeout = 300.0 if setup_script else 120.0
+        timeout = httpx.Timeout(read_timeout, connect=10.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 f"{self._base}/sandbox/session/start",
@@ -372,6 +373,14 @@ class SandboxService:
                 os_image=os_image,
                 project_id=str(agent.project_id),
             )
+        except httpx.ConnectError as exc:
+            raise RuntimeError(
+                f"Cannot reach sandbox orchestrator at {self._orchestrator._base}: {exc}"
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise RuntimeError(
+                f"Sandbox orchestrator timed out ({self._orchestrator._base}): {exc}"
+            ) from exc
         except httpx.HTTPStatusError as exc:
             raise RuntimeError(
                 f"Orchestrator error: {exc.response.status_code} {exc.response.text}"
