@@ -278,10 +278,9 @@ jobs:
             --set-env-vars="CTO_MODEL_DEFAULT=${{ secrets.CTO_MODEL_DEFAULT }}" \
             --set-env-vars="ENGINEER_MODEL_DEFAULT=${{ secrets.ENGINEER_MODEL_DEFAULT }}" \
             --set-env-vars="GITHUB_TOKEN=${{ secrets.GH_REPO_TOKEN }}" \
-            --set-env-vars="SANDBOX_VM_HOST=${{ secrets.SANDBOX_VM_HOST }}" \
-            --set-env-vars="SANDBOX_VM_INTERNAL_HOST=${{ secrets.SANDBOX_VM_INTERNAL_HOST }}" \
-            --set-env-vars="SANDBOX_VM_POOL_PORT=${{ secrets.SANDBOX_VM_POOL_PORT }}" \
-            --set-env-vars="SANDBOX_VM_MASTER_TOKEN=${{ secrets.SANDBOX_VM_MASTER_TOKEN }}" \
+            --set-env-vars="SANDBOX_ORCHESTRATOR_HOST=${{ secrets.SANDBOX_ORCHESTRATOR_HOST }}" \
+            --set-env-vars="SANDBOX_ORCHESTRATOR_PORT=${{ secrets.SANDBOX_ORCHESTRATOR_PORT }}" \
+            --set-env-vars="SANDBOX_ORCHESTRATOR_TOKEN=${{ secrets.SANDBOX_ORCHESTRATOR_TOKEN }}" \
             --set-env-vars="SECRET_ENCRYPTION_KEY=${{ secrets.SECRET_ENCRYPTION_KEY }}" \
             --set-env-vars="VOYAGE_API_KEY=${{ secrets.VOYAGE_API_KEY }}" \
             --set-env-vars="PROVISION_REPOS_ON_STARTUP=false" \

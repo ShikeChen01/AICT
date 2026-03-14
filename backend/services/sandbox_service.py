@@ -420,9 +420,9 @@ class SandboxService:
             ) from exc
 
         orch_id = data["sandbox_id"]
-        host = data.get("host") or (
-            settings.sandbox_vm_internal_host or settings.sandbox_vm_host
-        )
+        host = data.get("host")
+        if not host:
+            logger.error("Orchestrator returned no host for sandbox %s", orch_id)
         port = data.get("host_port", 8080)
         auth_token = data["auth_token"]
 
