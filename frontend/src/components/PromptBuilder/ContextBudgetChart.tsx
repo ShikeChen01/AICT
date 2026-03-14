@@ -49,15 +49,18 @@ function describeArc(cx: number, cy: number, r: number, startDeg: number, endDeg
 
 interface ContextBudgetChartProps {
   meta: PromptMeta;
+  /** When set (e.g. during block edit), use this for System Prompt segment instead of meta. */
+  overrideSystemPromptTokens?: number;
 }
 
-export function ContextBudgetChart({ meta }: ContextBudgetChartProps) {
+export function ContextBudgetChart({ meta, overrideSystemPromptTokens }: ContextBudgetChartProps) {
   const total = meta.total_budget_tokens ?? meta.context_window_tokens + (meta.image_reserve_tokens ?? 0);
   const imageReserve = meta.image_reserve_tokens ?? 0;
+  const systemPromptTokens = overrideSystemPromptTokens ?? meta.system_prompt_tokens;
 
   const segments: Segment[] = [
     // Static sections
-    { label: 'System Prompt',   tokens: meta.system_prompt_tokens,          color: '#7c3aed', group: 'static' },
+    { label: 'System Prompt',   tokens: systemPromptTokens,                color: '#7c3aed', group: 'static' },
     { label: 'Tool Schemas',    tokens: meta.tool_schema_tokens,            color: '#ec4899', group: 'static' },
     { label: 'Incoming Msgs',   tokens: meta.incoming_msg_budget_tokens,    color: '#f59e0b', group: 'static' },
     ...(imageReserve > 0

@@ -65,6 +65,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
   const [loadingAgents, setLoadingAgents] = useState(true);
   const [loadingBlocks, setLoadingBlocks] = useState(false);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
+  const [editingBlockDraftContent, setEditingBlockDraftContent] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savingBlocks, setSavingBlocks] = useState(false);
 
@@ -251,6 +252,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
 
   const handleEdit = useCallback((blockId: string) => {
     setEditingBlockId(blockId);
+    setEditingBlockDraftContent(null);
   }, []);
 
   const handleAgentUpdated = useCallback((updated: Agent) => {
@@ -307,10 +309,19 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
     [blocks]
   );
 
-  const totalSystemTokens = useMemo(
-    () => [...mainBlocks, ...customBlocks].filter((b) => b.enabled).reduce((sum, b) => sum + estimateTokens(b.content), 0),
-    [mainBlocks, customBlocks]
-  );
+  const totalSystemTokens = useMemo(() => {
+    const all = [...mainBlocks, ...customBlocks];
+    return all
+      .filter((b) => b.enabled)
+      .reduce(
+        (sum, b) =>
+          sum +
+          estimateTokens(
+            b.id === editingBlockId && editingBlockDraftContent !== null ? editingBlockDraftContent : b.content
+          ),
+        0
+      );
+  }, [mainBlocks, customBlocks, editingBlockId, editingBlockDraftContent]);
 
   // ── Loading / empty states ────────────────────────────────────────────────
 
@@ -405,7 +416,12 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
             </h3>
 
             {meta ? (
-              <ContextBudgetChart meta={meta} />
+              <ContextBudgetChart
+                meta={meta}
+                overrideSystemPromptTokens={
+                  editingBlockId && editingBlockDraftContent !== null ? totalSystemTokens : undefined
+                }
+              />
             ) : (
               <div className="text-xs text-[var(--text-muted)]">Loading budget…</div>
             )}
@@ -496,6 +512,11 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
                       block={block}
                       meta={meta?.block_registry[block.block_key]}
                       totalSystemTokens={totalSystemTokens}
+                      effectiveContent={
+                        block.id === editingBlockId && editingBlockDraftContent !== null
+                          ? editingBlockDraftContent
+                          : undefined
+                      }
                       isFirst={idx === 0}
                       isLast={idx === mainBlocks.length - 1}
                       mutationsDisabled={savingBlocks}
@@ -521,6 +542,11 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
                         block={block}
                         meta={undefined}
                         totalSystemTokens={totalSystemTokens}
+                        effectiveContent={
+                          block.id === editingBlockId && editingBlockDraftContent !== null
+                            ? editingBlockDraftContent
+                            : undefined
+                        }
                         isFirst={idx === 0}
                         isLast={idx === customBlocks.length - 1}
                         mutationsDisabled={savingBlocks}
@@ -662,12 +688,17 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
         <BlockEditorPanel
           agentId={selectedAgentId}
           block={editingBlock}
-          onClose={() => setEditingBlockId(null)}
+          onClose={() => {
+            setEditingBlockId(null);
+            setEditingBlockDraftContent(null);
+          }}
           onSaved={(updated) => {
             setBlocks(updated);
             setEditingBlockId(null);
+            setEditingBlockDraftContent(null);
             refreshMeta(selectedAgentId, selectedAgent?.model);
           }}
+          onDraftChange={setEditingBlockDraftContent}
         />
       )}
 

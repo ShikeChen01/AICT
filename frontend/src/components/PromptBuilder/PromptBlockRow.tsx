@@ -59,6 +59,8 @@ interface PromptBlockRowProps {
   block: PromptBlockConfig;
   meta: BlockMetaInfo | undefined;
   totalSystemTokens: number;
+  /** When set (e.g. block being edited), use for token count and bar instead of block.content. */
+  effectiveContent?: string;
   isFirst: boolean;
   isLast: boolean;
   mutationsDisabled?: boolean;
@@ -72,6 +74,7 @@ export function PromptBlockRow({
   block,
   meta,
   totalSystemTokens,
+  effectiveContent,
   isFirst,
   isLast,
   mutationsDisabled = false,
@@ -82,7 +85,8 @@ export function PromptBlockRow({
 }: PromptBlockRowProps) {
   const kind = meta?.kind ?? 'system';
   const styles = KIND_STYLES[kind] ?? KIND_STYLES.system;
-  const tokens = estimateTokens(block.content);
+  const contentForTokens = effectiveContent ?? block.content;
+  const tokens = estimateTokens(contentForTokens);
   const barPct = totalSystemTokens > 0 ? Math.min(100, (tokens / totalSystemTokens) * 100) : 0;
 
   const fmtTokens = (n: number) =>
