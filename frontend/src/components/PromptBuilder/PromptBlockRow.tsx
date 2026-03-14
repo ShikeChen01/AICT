@@ -15,7 +15,6 @@ import { estimateTokens } from './ContextBudgetChart';
 const BLOCK_LABELS: Record<string, string> = {
   rules: 'Rules',
   history_rules: 'History Rules',
-  incoming_msg_rules: 'Incoming Msg Rules',
   incoming_message_rules: 'Incoming Msg Rules',
   tool_result_rules: 'Tool Result Rules',
   tool_io: 'Tool I/O',
