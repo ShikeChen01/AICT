@@ -136,9 +136,9 @@ export function ContextBudgetChart({ meta }: ContextBudgetChartProps) {
           {segments.filter(s => s.group === 'static').map((seg) => (
             <div key={seg.label} className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: seg.color }} />
-              <span className="text-[var(--text-secondary)] truncate flex-1">{seg.label}</span>
-              <span className="font-mono text-[var(--text-primary)] font-medium tabular-nums">{fmt(seg.tokens)}</span>
-              <span className="text-[var(--text-muted)] tabular-nums w-9 text-right">
+              <span className="text-[var(--text-secondary)] truncate flex-1" title={seg.label}>{seg.label}</span>
+              <span className="font-mono text-[var(--text-primary)] font-medium tabular-nums flex-shrink-0">{fmt(seg.tokens)}</span>
+              <span className="text-[var(--text-muted)] tabular-nums w-9 text-right flex-shrink-0">
                 {total > 0 ? `${Math.round((seg.tokens / total) * 100)}%` : '0%'}
               </span>
             </div>
@@ -147,9 +147,9 @@ export function ContextBudgetChart({ meta }: ContextBudgetChartProps) {
           {segments.filter(s => s.group === 'dynamic').map((seg) => (
             <div key={seg.label} className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: seg.color }} />
-              <span className="text-[var(--text-secondary)] truncate flex-1">{seg.label}</span>
-              <span className="font-mono text-[var(--text-primary)] font-medium tabular-nums">{fmt(seg.tokens)}</span>
-              <span className="text-[var(--text-muted)] tabular-nums w-9 text-right">
+              <span className="text-[var(--text-secondary)] truncate flex-1" title={seg.label}>{seg.label}</span>
+              <span className="font-mono text-[var(--text-primary)] font-medium tabular-nums flex-shrink-0">{fmt(seg.tokens)}</span>
+              <span className="text-[var(--text-muted)] tabular-nums w-9 text-right flex-shrink-0">
                 {total > 0 ? `${Math.round((seg.tokens / total) * 100)}%` : '0%'}
               </span>
             </div>

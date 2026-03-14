@@ -388,13 +388,13 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
       </div>
 
       {/* ── Scrollable content area — whole page scrolls as one unit ── */}
-      <div ref={containerRef} id="prompt-builder-content" role="tabpanel" className="flex-1 min-h-0 overflow-y-auto">
-        <div className="flex min-h-full">
+      <div ref={containerRef} id="prompt-builder-content" role="tabpanel" className="flex-1 min-h-0 overflow-auto">
+        <div className="flex min-h-full max-h-[calc(100vh-6rem)]" style={{ minWidth: 'max(100%, 600px)' }}>
 
           {/* Left column: context budget — sticky sidebar */}
           <div
             className="flex-shrink-0 border-r border-[var(--border-color)] bg-[var(--surface-card)] self-start sticky top-0"
-            style={{ width: `${leftPct}%` }}
+            style={{ width: `${leftPct}%`, minWidth: 260 }}
           >
             <div className="p-3 space-y-3 pb-12 max-h-[calc(100vh-6rem)] overflow-y-auto">
             <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">
@@ -435,9 +435,10 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
             style={{ height: 'calc(100vh - 6rem)' }}
           />
 
-          {/* Right column: block list + tool assembly — flows naturally, page scrolls */}
-          <div className="flex-1 min-w-0">
-            <div className="p-4 space-y-6 max-w-2xl pb-16">
+          {/* Right column: block list + tool assembly — own scroll like left column */}
+          <div className="flex-1 min-w-[320px] min-h-0 flex flex-col">
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <div className="p-4 space-y-6 max-w-2xl pb-16">
             {/* System Prompt Blocks section */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -631,6 +632,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
                 </div>
               </div>
             )}
+              </div>
             </div>
           </div>
         </div>
