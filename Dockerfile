@@ -15,6 +15,8 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ backend/
 
 # Run API (Cloud Run injects PORT; default to 8080)
+# Use Python to read PORT so binding is reliable regardless of shell/env.
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 EXPOSE 8080
-CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["sh", "-c", "exec python -m uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

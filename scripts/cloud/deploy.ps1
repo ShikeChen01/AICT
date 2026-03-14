@@ -61,6 +61,7 @@ Write-Host "Deploying $ServiceName to Cloud Run (region: $Region, vpc-connector:
 
 # Write env vars to a temporary YAML file.
 $EnvFile = Join-Path $Root "tmp_env_vars.yaml"
+# PORT and K_SERVICE are reserved by Cloud Run; do not set them here.
 $yamlLines = @(
     "ENV: 'development'"
     "DATABASE_URL: '$DbUrl'"
@@ -93,8 +94,8 @@ $yamlLines = @(
 try {
     # --timeout 3600 : Allow WebSocket connections (VNC, screen stream) to live up
     #   to 1 hour.  The default (300s) kills long-lived VNC sessions prematurely.
-    # --session-affinity : Sticky sessions so that WebSocket connections are always
     #   routed to the same instance (required for stateful VNC proxy).
+    # --no-cpu-throttling : Full CPU during startup so the container can listen on PORT in time.
     gcloud run deploy $ServiceName `
         --project $ProjectId `
         --image $ImageTag `
@@ -106,6 +107,7 @@ try {
         --env-vars-file $EnvFile `
         --min-instances 1 `
         --cpu-boost `
+        --no-cpu-throttling `
         --timeout 3600 `
         --session-affinity
 }

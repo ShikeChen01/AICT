@@ -49,8 +49,8 @@ async def seed(
     engine = create_async_engine(url, echo=False)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    # Use settings if not provided
-    actual_repo_url = repo_url or settings.code_repo_url or "https://github.com/placeholder/firstproject"
+    # Use settings if not provided; seeded template has no git repo by default
+    actual_repo_url = repo_url or settings.code_repo_url or ""
     actual_repo_path = repo_path or settings.code_repo_path or "/data/project"
     
     async with factory() as session:
@@ -86,7 +86,7 @@ async def seed(
         session.add(project)
         await session.flush()
         print(f"Created project: {project.name} ({project.id})")
-        print(f"  - Code repo URL: {project.code_repo_url}")
+        print(f"  - Code repo URL: {project.code_repo_url or '(none)'}")
         print(f"  - Code repo path: {project.code_repo_path}")
 
         # Create agents
