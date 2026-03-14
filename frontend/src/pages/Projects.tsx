@@ -43,7 +43,6 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
   const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formRepoUrl, setFormRepoUrl] = useState('');
-  const [formPrivate, setFormPrivate] = useState(true);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -72,7 +71,7 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
       const project = await createProject({
         name: formName.trim(),
         description: formDescription.trim() || null,
-        private: formPrivate,
+        code_repo_url: formRepoUrl.trim() || undefined,
       });
       setProjects((prev) => [project, ...prev]);
       await onProjectsUpdated?.();
@@ -126,7 +125,6 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
     setFormName('');
     setFormDescription('');
     setFormRepoUrl('');
-    setFormPrivate(true);
     setError(null);
   };
 
@@ -303,14 +301,17 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
                 </div>
                 )}
                 {modal === 'create' && (
-                  <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-                    <input
-                      type="checkbox"
-                      checked={formPrivate}
-                      onChange={(e) => setFormPrivate(e.target.checked)}
-                    />
-                    Create as private GitHub project
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                    Repository URL (optional)
                   </label>
+                  <Input
+                    type="url"
+                    value={formRepoUrl}
+                    onChange={(e) => setFormRepoUrl(e.target.value)}
+                    placeholder="https://github.com/user/repo"
+                  />
+                </div>
                 )}
               </div>
 

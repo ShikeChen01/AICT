@@ -28,7 +28,6 @@ from backend.schemas.repository import (
     RepositoryResponse,
     RepositoryUpdate,
 )
-from backend.services.git_service import GitService
 
 logger = get_logger(__name__)
 
@@ -89,12 +88,6 @@ async def create_repository(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if not current_user.github_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Configure a GitHub token in user settings before creating repositories.",
-        )
-
     repository_id = uuid_module.uuid4()
     spec_path = Path(settings.spec_repo_path) / str(repository_id)
     code_path = Path(settings.code_repo_path) / str(repository_id)
@@ -102,37 +95,43 @@ async def create_repository(
     spec_path.mkdir(parents=True, exist_ok=True)
     code_path.mkdir(parents=True, exist_ok=True)
 
-    git_service = GitService(repo_path=str(code_path), github_token=current_user.github_token)
-    github_repo = git_service.create_repository(
-        name=data.name,
-        description=data.description or "",
-        private=data.private,
-    )
-    code_repo_url = github_repo.get("clone_url") or github_repo.get("html_url") or ""
+    code_repo_url = (data.code_repo_url or "").strip() or ""
 
-    clone_url = code_repo_url
-    if current_user.github_token and "github.com" in code_repo_url:
-        clone_url = code_repo_url.replace("https://", f"https://{current_user.github_token}@")
+    if code_repo_url:
+        # Clone existing repo (same as import) — token required for private repos
+        clone_url = code_repo_url
+        if current_user.github_token and "github.com" in clone_url:
+            clone_url = clone_url.replace("https://", f"https://{current_user.github_token}@")
 
-    def _do_clone_create() -> None:
-        """Blocking git clone — run in thread pool to avoid blocking the event loop."""
-        subprocess.run(
-            ["git", "clone", "--depth", "1", clone_url, str(code_path)],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        def _do_clone() -> None:
+            subprocess.run(
+                ["git", "clone", "--depth", "1", clone_url, str(code_path)],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
 
-    try:
-        await asyncio.to_thread(_do_clone_create)
-    except subprocess.CalledProcessError as exc:
-        await asyncio.to_thread(shutil.rmtree, spec_path, True)
-        await asyncio.to_thread(shutil.rmtree, code_path, True)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to clone repository: {(exc.stderr or exc.stdout or 'unknown error').strip()}",
-        ) from exc
+        try:
+            await asyncio.to_thread(_do_clone)
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            await asyncio.to_thread(shutil.rmtree, spec_path, True)
+            await asyncio.to_thread(shutil.rmtree, code_path, True)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to clone repository: {stderr or 'unknown error'}",
+            ) from exc
+        except subprocess.TimeoutExpired:
+            await asyncio.to_thread(shutil.rmtree, spec_path, True)
+            await asyncio.to_thread(shutil.rmtree, code_path, True)
+            raise HTTPException(
+                status_code=status.HTTP_408_REQUEST_TIMEOUT,
+                detail="Repository clone timed out",
+            ) from None
+    else:
+        # No repo URL: project without linked Git repo
+        code_repo_url = ""
 
     repository = Repository(
         id=repository_id,

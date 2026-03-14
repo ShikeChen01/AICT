@@ -505,7 +505,7 @@ export interface Repository {
 export interface RepositoryCreate {
   name: string;
   description?: string | null;
-  private?: boolean;
+  code_repo_url?: string | null;
 }
 
 export interface RepositoryImport {

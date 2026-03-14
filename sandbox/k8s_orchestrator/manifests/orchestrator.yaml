@@ -26,6 +26,10 @@ spec:
         app: sandbox-orchestrator
     spec:
       serviceAccountName: sandbox-orchestrator
+      # Prevent K8s from injecting Service env vars like
+      # SANDBOX_ORCHESTRATOR_PORT=tcp://x.x.x.x:9090 which
+      # collide with Pydantic settings expecting an integer.
+      enableServiceLinks: false
       containers:
         - name: orchestrator
           image: us-central1-docker.pkg.dev/aict-487016/aict-dev/sandbox-orchestrator:latest

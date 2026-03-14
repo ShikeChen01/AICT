@@ -162,7 +162,8 @@ async def _wait_for_pod_ready(
 
 
 @app.get("/api/health")
-async def health(_: None = Depends(require_master_token)) -> JSONResponse:
+async def health() -> JSONResponse:
+    """Unauthenticated so K8s liveness/readiness probes can reach it."""
     sandboxes = list(_sandbox_cache.values())
     return JSONResponse({
         "status": "ok",

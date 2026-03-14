@@ -166,10 +166,19 @@ async function request<T>(
       // ignore parse error
     }
 
+    const detail = errorData?.detail;
+    const msg =
+      typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+          ? (detail as { msg?: string }[]).map((e) => e.msg).filter(Boolean).join('; ') || undefined
+          : undefined;
+    const message = msg ?? errorData?.message ?? `HTTP ${response.status}`;
+
     throw new APIClientError(
       response.status,
       errorData?.error_type ?? 'unknown_error',
-      errorData?.message ?? `HTTP ${response.status}`,
+      message,
       errorData?.detail
     );
   }
@@ -461,7 +470,7 @@ export async function getRepository(repositoryId: string): Promise<Repository> {
 export async function createRepository(data: {
   name: string;
   description?: string | null;
-  private?: boolean;
+  code_repo_url?: string | null;
 }): Promise<Repository> {
   return request<Repository>('POST', '/repositories', data);
 }

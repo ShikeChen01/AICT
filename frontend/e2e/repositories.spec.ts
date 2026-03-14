@@ -10,14 +10,13 @@ test.describe('Repositories Page', () => {
     await setupAuth(page);
   });
 
-  test('displays repositories heading and subtext', async ({ page }) => {
+  test('displays projects heading and subtext', async ({ page }) => {
     await page.goto('/repositories');
-    await expect(page.getByRole('heading', { name: /repositories/i })).toBeVisible();
-    await expect(page.getByText(/monitor and manage/i)).toBeVisible();
+    await expect(page.getByRole('heading', { name: /^projects$/i })).toBeVisible();
+    await expect(page.getByText(/design, deploy, and manage/i)).toBeVisible();
   });
 
   test('shows empty state when no projects', async ({ page }) => {
-    // Override with empty list
     await page.route('**/api/v1/repositories', async (route) => {
       if (route.request().method() === 'GET') {
         await route.fulfill({
@@ -29,7 +28,7 @@ test.describe('Repositories Page', () => {
     });
 
     await page.goto('/repositories');
-    await expect(page.getByText(/no repositories yet/i)).toBeVisible();
+    await expect(page.getByText(/no projects yet/i)).toBeVisible();
   });
 
   test('empty state shows create and import buttons', async ({ page }) => {
@@ -44,10 +43,9 @@ test.describe('Repositories Page', () => {
     });
 
     await page.goto('/repositories');
-    await expect(page.getByText(/no repositories yet/i)).toBeVisible();
-    // Both header and empty state have these buttons — verify at least 2 exist
-    await expect(page.getByRole('button', { name: /new repository/i })).toHaveCount(2);
-    await expect(page.getByRole('button', { name: /import repository/i })).toHaveCount(2);
+    await expect(page.getByText(/no projects yet/i)).toBeVisible();
+    await expect(page.getByRole('button', { name: /new project/i })).toHaveCount(2);
+    await expect(page.getByRole('button', { name: /import project/i })).toHaveCount(2);
   });
 
   test('displays project cards in grid', async ({ page }) => {
@@ -101,54 +99,55 @@ test.describe('Repositories Page', () => {
     });
 
     await page.goto('/repositories');
-    await page.getByText(/open repository/i).click();
-    await expect(page).toHaveURL(new RegExp(`/repository/${MOCK_PROJECT_ID}/workspace`));
+    await page.getByText(/open project/i).click();
+    await expect(page).toHaveURL(new RegExp(`/project/${MOCK_PROJECT_ID}/workspace`));
   });
 
-  test('new repository button opens create modal', async ({ page }) => {
+  test('new project button opens create modal', async ({ page }) => {
     await page.goto('/repositories');
-    // The button in the header
-    await page.getByRole('button', { name: /new repository/i }).first().click();
-    await expect(page.getByRole('heading', { name: /create new repository/i })).toBeVisible();
+    // The button in the header (/repositories redirects to /projects)
+    await page.getByRole('button', { name: /new project/i }).first().click();
+    await expect(page.getByRole('heading', { name: /create new project/i })).toBeVisible();
   });
 
-  test('import repository button opens import modal', async ({ page }) => {
+  test('import project button opens import modal', async ({ page }) => {
     await page.goto('/repositories');
-    await page.getByRole('button', { name: /import repository/i }).first().click();
-    await expect(page.getByRole('heading', { name: /import repository/i })).toBeVisible();
+    await page.getByRole('button', { name: /import project/i }).first().click();
+    await expect(page.getByRole('heading', { name: /import project/i })).toBeVisible();
   });
 
-  test('create modal has name, description, and private checkbox', async ({ page }) => {
+  test('create modal has name, description, and optional repository URL', async ({ page }) => {
     await page.goto('/repositories');
-    await page.getByRole('button', { name: /new repository/i }).first().click();
+    await page.getByRole('button', { name: /new project/i }).first().click();
 
     // Labels don't use htmlFor, so locate by text within the modal
     const modal = page.locator('.relative.mx-4');
-    await expect(modal.getByText(/repository name/i)).toBeVisible();
-    await expect(modal.getByPlaceholder('my-repository')).toBeVisible();
-    await expect(modal.getByText(/description/i).first()).toBeVisible();
-    await expect(modal.getByText(/private/i)).toBeVisible();
-  });
-
-  test('import modal has name, description, and URL fields', async ({ page }) => {
-    await page.goto('/repositories');
-    await page.getByRole('button', { name: /import repository/i }).first().click();
-
-    const modal = page.locator('.relative.mx-4');
-    await expect(modal.getByText(/repository name/i)).toBeVisible();
-    await expect(modal.getByPlaceholder('my-repository')).toBeVisible();
+    await expect(modal.getByText(/project name/i)).toBeVisible();
+    await expect(modal.getByPlaceholder('my-project')).toBeVisible();
     await expect(modal.getByText(/description/i).first()).toBeVisible();
     await expect(modal.getByText(/repository url/i)).toBeVisible();
     await expect(modal.getByPlaceholder('https://github.com/user/repo')).toBeVisible();
   });
 
+  test('import modal has name, description, and URL fields', async ({ page }) => {
+    await page.goto('/repositories');
+    await page.getByRole('button', { name: /import project/i }).first().click();
+
+    const modal = page.locator('.relative.mx-4');
+    await expect(modal.getByText(/project name/i)).toBeVisible();
+    await expect(modal.getByPlaceholder('my-project')).toBeVisible();
+    await expect(modal.getByText(/description/i).first()).toBeVisible();
+    await expect(modal.getByText(/project url/i)).toBeVisible();
+    await expect(modal.getByPlaceholder('https://github.com/user/repo')).toBeVisible();
+  });
+
   test('cancel button closes modal', async ({ page }) => {
     await page.goto('/repositories');
-    await page.getByRole('button', { name: /new repository/i }).first().click();
-    await expect(page.getByRole('heading', { name: /create new repository/i })).toBeVisible();
+    await page.getByRole('button', { name: /new project/i }).first().click();
+    await expect(page.getByRole('heading', { name: /create new project/i })).toBeVisible();
 
     await page.getByRole('button', { name: /cancel/i }).click();
-    await expect(page.getByRole('heading', { name: /create new repository/i })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: /create new project/i })).toHaveCount(0);
   });
 
   test('user settings button navigates to /settings', async ({ page }) => {
