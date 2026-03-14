@@ -28,13 +28,13 @@ import {
   getAgents,
   listSandboxes,
   listSandboxConfigs,
-  claimSandbox,
-  releaseSandbox,
+  createAndAssignSandbox,
+  createSandbox,
+  unassignSandbox,
   restartSandbox,
   destroySandbox,
   updateSandbox,
   applySandboxConfig,
-  assignSandboxConfig,
   restoreSandboxSnapshot,
   listSandboxSnapshots,
 } from '../api/client';
@@ -45,11 +45,14 @@ import { VncView } from '../components/ScreenStream';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const ROLE_COLORS: Record<string, string> = {
-  manager: '#f59e0b',
-  cto: '#8b5cf6',
-  engineer: '#3b82f6',
-};
+/** Deterministic color based on agent name for sandbox card avatars. */
+const AGENT_COLORS = ['#3b82f6', '#8b5cf6', '#f59e0b', '#10b981', '#ef4444', '#ec4899'];
+function agentColor(name: string | null): string {
+  if (!name) return '#64748b';
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  return AGENT_COLORS[Math.abs(hash) % AGENT_COLORS.length];
+}
 
 const STATUS_BG: Record<string, string> = {
   assigned: 'bg-green-500/20 text-green-400',
@@ -186,7 +189,7 @@ function SandboxContent({ projectId }: { projectId: string }) {
           <div className="flex-1" />
           {sb && (
             <span className="text-sm font-medium text-[var(--text-primary)]">
-              {sb.agent_name ?? 'Unknown'} — {sb.os_image}
+              {sb.agent_name ?? 'Unknown'}{sb.name ? ` — ${sb.name}` : ''}
             </span>
           )}
           <div className="flex-1" />
@@ -284,7 +287,7 @@ interface SandboxCardProps {
 
 function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: SandboxCardProps) {
   const { frameUrl, isConnected } = useScreenStream(sandbox.orchestrator_sandbox_id);
-  const roleColor = ROLE_COLORS[sandbox.agent_role ?? 'engineer'] ?? '#64748b';
+  const avatarColor = agentColor(sandbox.agent_name);
   const statusClass = STATUS_BG[sandbox.status] ?? STATUS_BG.idle;
   const [acting, setActing] = useState(false);
   const [showSnapshots, setShowSnapshots] = useState(false);
@@ -337,7 +340,7 @@ function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: S
       <div className="px-3 py-2.5">
         <div className="flex items-center gap-2 mb-1.5">
           <div className="w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold text-white shrink-0"
-            style={{ backgroundColor: roleColor }}>
+            style={{ backgroundColor: avatarColor }}>
             {(sandbox.agent_name ?? 'U').charAt(0).toUpperCase()}
           </div>
           <span className="text-sm font-medium text-[var(--text-primary)] truncate flex-1">{sandbox.agent_name ?? 'Unknown'}</span>
@@ -347,9 +350,13 @@ function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: S
         </div>
 
         <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)] mb-2">
-          <span className="font-mono">{sandbox.os_image}</span>
-          <span className="text-[var(--text-faint)]">·</span>
-          <span>{sandbox.persistent ? 'persistent' : 'ephemeral'}</span>
+          <span className="font-mono">{sandbox.orchestrator_sandbox_id.slice(0, 12)}</span>
+          {sandbox.name && (
+            <>
+              <span className="text-[var(--text-faint)]">·</span>
+              <span>{sandbox.name}</span>
+            </>
+          )}
         </div>
 
         {/* Action buttons */}
@@ -371,10 +378,12 @@ function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: S
           </button>
           <button
             onClick={() => handleAction(async () => {
-              await releaseSandbox(sandbox.id);
-              if (sandbox.agent_id) {
-                await claimSandbox(projectId, sandbox.agent_id);
+              const agentId = sandbox.agent_id;
+              await unassignSandbox(sandbox.id);
+              if (agentId) {
+                await createAndAssignSandbox(projectId, agentId);
               }
+              await destroySandbox(sandbox.id);
             })}
             disabled={acting}
             title="Reset (fresh)"
@@ -391,13 +400,6 @@ function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: S
             <Trash2 className="w-3.5 h-3.5" />
           </button>
           <div className="flex-1" />
-          <button
-            onClick={() => handleAction(() => updateSandbox(sandbox.id, { persistent: !sandbox.persistent }))}
-            disabled={acting}
-            className="text-[10px] font-medium px-2 py-1 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] transition-colors disabled:opacity-40"
-          >
-            {sandbox.persistent ? 'Make Ephemeral' : 'Make Persistent'}
-          </button>
         </div>
 
         {/* Snapshots */}
@@ -448,7 +450,7 @@ function StartSandboxDropdown({ projectId, agents, onStarted }: { projectId: str
   const handleStart = async (agentId: string) => {
     setStarting(true);
     try {
-      await claimSandbox(projectId, agentId);
+      await createAndAssignSandbox(projectId, agentId);
       onStarted();
     } catch (err) {
       console.error('Failed to start sandbox:', err);
@@ -504,9 +506,7 @@ function ConfigModal({ sandbox, configs, onClose, onSaved }: ConfigModalProps) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      if (sandbox.agent_id) {
-        await assignSandboxConfig(sandbox.agent_id, selectedConfigId || null);
-      }
+      await updateSandbox(sandbox.id, { config_id: selectedConfigId || null });
       if (selectedConfigId) {
         await applySandboxConfig(sandbox.id);
       }

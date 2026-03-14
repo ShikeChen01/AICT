@@ -49,15 +49,18 @@ function describeArc(cx: number, cy: number, r: number, startDeg: number, endDeg
 
 interface ContextBudgetChartProps {
   meta: PromptMeta;
+  /** When set (e.g. during block edit), use this for System Prompt segment instead of meta. */
+  overrideSystemPromptTokens?: number;
 }
 
-export function ContextBudgetChart({ meta }: ContextBudgetChartProps) {
+export function ContextBudgetChart({ meta, overrideSystemPromptTokens }: ContextBudgetChartProps) {
   const total = meta.total_budget_tokens ?? meta.context_window_tokens + (meta.image_reserve_tokens ?? 0);
   const imageReserve = meta.image_reserve_tokens ?? 0;
+  const systemPromptTokens = overrideSystemPromptTokens ?? meta.system_prompt_tokens;
 
   const segments: Segment[] = [
     // Static sections
-    { label: 'System Prompt',   tokens: meta.system_prompt_tokens,          color: '#7c3aed', group: 'static' },
+    { label: 'System Prompt',   tokens: systemPromptTokens,                color: '#7c3aed', group: 'static' },
     { label: 'Tool Schemas',    tokens: meta.tool_schema_tokens,            color: '#ec4899', group: 'static' },
     { label: 'Incoming Msgs',   tokens: meta.incoming_msg_budget_tokens,    color: '#f59e0b', group: 'static' },
     ...(imageReserve > 0
@@ -136,9 +139,9 @@ export function ContextBudgetChart({ meta }: ContextBudgetChartProps) {
           {segments.filter(s => s.group === 'static').map((seg) => (
             <div key={seg.label} className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: seg.color }} />
-              <span className="text-[var(--text-secondary)] truncate flex-1">{seg.label}</span>
-              <span className="font-mono text-[var(--text-primary)] font-medium tabular-nums">{fmt(seg.tokens)}</span>
-              <span className="text-[var(--text-muted)] tabular-nums w-9 text-right">
+              <span className="text-[var(--text-secondary)] truncate flex-1" title={seg.label}>{seg.label}</span>
+              <span className="font-mono text-[var(--text-primary)] font-medium tabular-nums flex-shrink-0">{fmt(seg.tokens)}</span>
+              <span className="text-[var(--text-muted)] tabular-nums w-9 text-right flex-shrink-0">
                 {total > 0 ? `${Math.round((seg.tokens / total) * 100)}%` : '0%'}
               </span>
             </div>
@@ -147,9 +150,9 @@ export function ContextBudgetChart({ meta }: ContextBudgetChartProps) {
           {segments.filter(s => s.group === 'dynamic').map((seg) => (
             <div key={seg.label} className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: seg.color }} />
-              <span className="text-[var(--text-secondary)] truncate flex-1">{seg.label}</span>
-              <span className="font-mono text-[var(--text-primary)] font-medium tabular-nums">{fmt(seg.tokens)}</span>
-              <span className="text-[var(--text-muted)] tabular-nums w-9 text-right">
+              <span className="text-[var(--text-secondary)] truncate flex-1" title={seg.label}>{seg.label}</span>
+              <span className="font-mono text-[var(--text-primary)] font-medium tabular-nums flex-shrink-0">{fmt(seg.tokens)}</span>
+              <span className="text-[var(--text-muted)] tabular-nums w-9 text-right flex-shrink-0">
                 {total > 0 ? `${Math.round((seg.tokens / total) * 100)}%` : '0%'}
               </span>
             </div>

@@ -93,7 +93,7 @@ async def test_execute_command_tool_uses_vm_sandbox(sample_engineer, session) ->
 
     with patch("backend.tools.executors.sandbox._get_sandbox_service") as mock_f:
         mock_svc = MagicMock()
-        mock_svc.execute_command = AsyncMock(return_value=shell_result)
+        mock_svc.execute_command_legacy = AsyncMock(return_value=shell_result)
         mock_f.return_value = mock_svc
 
         result = await _run_execute_command(ctx, {"command": "pwd"})
@@ -109,13 +109,14 @@ def test_tool_defs_include_sandbox_tools_for_all_roles() -> None:
         assert "think" in tool_names
 
 
-def test_tool_defs_include_spawn_engineer_for_manager_and_cto() -> None:
+def test_tool_defs_include_spawn_engineer_for_all_roles() -> None:
+    """v3.1: All roles get all tools — role gating removed."""
     manager_tools = {tool["name"] for tool in get_tool_defs_for_role("manager")}
     cto_tools = {tool["name"] for tool in get_tool_defs_for_role("cto")}
     engineer_tools = {tool["name"] for tool in get_tool_defs_for_role("engineer")}
     assert "spawn_engineer" in manager_tools
     assert "spawn_engineer" in cto_tools
-    assert "spawn_engineer" not in engineer_tools
+    assert "spawn_engineer" in engineer_tools
 
 
 @pytest.mark.asyncio
@@ -141,7 +142,7 @@ async def test_execute_command_tool_reports_sandbox_output(sample_engineer, sess
 
     with patch("backend.tools.executors.sandbox._get_sandbox_service") as mock_f:
         mock_svc = MagicMock()
-        mock_svc.execute_command = AsyncMock(return_value=shell_result)
+        mock_svc.execute_command_legacy = AsyncMock(return_value=shell_result)
         mock_f.return_value = mock_svc
 
         result = await _run_execute_command(ctx, {"command": "pwd"})

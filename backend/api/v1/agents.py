@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import case, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -52,21 +52,14 @@ async def list_agents(
     current_user: User | None = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all agents for a project (ordered by role: manager, cto, engineer)."""
+    """List all agents for a project (ordered by display name)."""
     if isinstance(current_user, User):
         await require_project_access(db, project_id, current_user.id)
-    from backend.services.orchestrator import sandbox_should_persist
-    role_order = case(
-        (Agent.role == "manager", 0),
-        (Agent.role == "cto", 1),
-        (Agent.role == "engineer", 2),
-        else_=3,
-    )
     result = await db.execute(
         select(Agent)
         .options(selectinload(Agent.sandbox))
         .where(Agent.project_id == project_id)
-        .order_by(role_order, Agent.display_name)
+        .order_by(Agent.created_at, Agent.display_name)
     )
     agents = list(result.scalars().all())
 
@@ -79,15 +72,12 @@ async def list_agents(
             template_id=agent.template_id,
             role=agent.role,
             display_name=agent.display_name,
-            tier=agent.tier,
             model=agent.model,
             provider=agent.provider,
             thinking_enabled=agent.thinking_enabled,
             status=agent.status,
             current_task_id=agent.current_task_id,
             sandbox_id=str(agent.sandbox.id) if agent.sandbox else None,
-            sandbox_persist=sandbox_should_persist(agent.role) if agent.role else False,
-            sandbox_config_id=agent.sandbox_config_id,
             memory=agent.memory,
             created_at=agent.created_at,
             updated_at=agent.updated_at,
@@ -108,17 +98,11 @@ async def list_agent_status(
     """
     if isinstance(current_user, User):
         await require_project_access(db, project_id, current_user.id)
-    role_order = case(
-        (Agent.role == "manager", 0),
-        (Agent.role == "cto", 1),
-        (Agent.role == "engineer", 2),
-        else_=3,
-    )
     result = await db.execute(
         select(Agent)
         .options(selectinload(Agent.sandbox))
         .where(Agent.project_id == project_id)
-        .order_by(role_order, Agent.display_name)
+        .order_by(Agent.created_at, Agent.display_name)
     )
     agents = list(result.scalars().all())
     if not agents:
@@ -154,8 +138,6 @@ async def list_agent_status(
     msg_service = get_message_service(db)
     pending_counts = await msg_service.count_unread_by_targets(agent_ids)
 
-    from backend.services.orchestrator import sandbox_should_persist
-
     return [
         AgentStatusWithQueueResponse(
             id=agent.id,
@@ -166,7 +148,6 @@ async def list_agent_status(
             status=agent.status,
             current_task_id=agent.current_task_id,
             sandbox_id=str(agent.sandbox.id) if agent.sandbox else None,
-            sandbox_persist=sandbox_should_persist(agent.role) if agent.role else False,
             memory=agent.memory,
             created_at=agent.created_at,
             updated_at=agent.updated_at,
@@ -185,7 +166,6 @@ async def get_agent(
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single agent by ID."""
-    from backend.services.orchestrator import sandbox_should_persist
     agent = await _ensure_agent_access(db, agent_id, current_user.id)
     return AgentResponse(
         id=agent.id,
@@ -193,15 +173,12 @@ async def get_agent(
         template_id=agent.template_id,
         role=agent.role,
         display_name=agent.display_name,
-        tier=agent.tier,
         model=agent.model,
         provider=agent.provider,
         thinking_enabled=agent.thinking_enabled,
         status=agent.status,
         current_task_id=agent.current_task_id,
         sandbox_id=str(agent.sandbox.id) if agent.sandbox else None,
-        sandbox_persist=sandbox_should_persist(agent.role) if agent.role else False,
-        sandbox_config_id=agent.sandbox_config_id,
         memory=agent.memory,
         created_at=agent.created_at,
         updated_at=agent.updated_at,
@@ -209,25 +186,34 @@ async def get_agent(
 
 
 @router.post("", response_model=AgentResponse)
-async def spawn_engineer(
+async def create_agent(
     data: SpawnEngineerCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Spawn a new engineer agent for the project.
+    """Create a new agent from a template.
 
-    Enforces max_engineers limit (default 5). Raises 400 if limit reached.
-    Optionally specify template_id to use a specific agent template.
+    If template_id is provided, creates from that template.
+    Otherwise falls back to the project's default worker template.
+    No role-based limits — users manage their own agent fleet.
     """
     await require_project_access(db, data.project_id, current_user.id)
     service = get_agent_service(db)
-    agent = await service.spawn_engineer(
-        data.project_id,
-        display_name=data.display_name,
-        template_id=getattr(data, "template_id", None),
-        seniority=getattr(data, "seniority", None),
-        module_path=getattr(data, "module_path", None),
-    )
+
+    if data.template_id:
+        agent = await service.create_agent(
+            data.project_id,
+            data.template_id,
+            display_name=data.display_name,
+        )
+    else:
+        # Backward compat: no template_id → use spawn_engineer path
+        agent = await service.spawn_engineer(
+            data.project_id,
+            display_name=data.display_name,
+            template_id=None,
+        )
+
     await db.commit()
     await db.refresh(agent)
     return agent
@@ -236,30 +222,15 @@ async def spawn_engineer(
 # ── Agent Inspector (Frontend V2) ──────────────────────────────────
 
 
-# System prompts for different roles (used by the graph nodes and inspector)
-_SYSTEM_PROMPTS = {
-    "manager": """You are the Manager (GM) agent in an AI software development team.
-Your responsibilities:
-- Communicate with the user to understand requirements
-- Break down high-level goals into actionable tasks and assign/dispatch to engineers
-- Consult the CTO for architecture and design when needed
-- Review completed work and provide feedback to the user""",
-    "cto": """You are the CTO (Chief Technology Officer) in an AI software development team.
-Your responsibilities:
-- Provide architectural guidance and design recommendations when consulted
-- Review technical decisions and integration concerns
-- You do NOT assign tasks or dispatch work to engineers; the Manager does that""",
-    "engineer": """You are an Engineer in an AI software development team.
-Your responsibilities:
-- Implement specific coding tasks assigned by the Manager
-- Write clean, tested code following project conventions
-- Create branches, commits, and pull requests
-- Report completion or ask the Manager or CTO for help when stuck""",
-}
+# Generic fallback prompt when no template/prompt blocks are configured
+_DEFAULT_SYSTEM_PROMPT = """You are an AI agent in a software development team.
+Your behavior, capabilities, and responsibilities are defined by your assigned
+template and tools. Use the tools available to you to accomplish your tasks."""
 
 
-def _get_tools_for_role(role: str) -> list[AgentTool]:
-    """Return the list of tools available to an agent role."""
+def _get_tools_for_agent(agent_id, role: str, db) -> list[AgentTool]:
+    """Return tools available to an agent (reads from DB config)."""
+    # This is sync context (for inspector), so we use the role-based fallback
     from backend.tools.loop_registry import get_tool_defs_for_role
 
     return [
@@ -462,11 +433,11 @@ async def get_agent_context(
             )
             system_prompt = pa.system_prompt
         else:
-            system_prompt = _SYSTEM_PROMPTS.get(agent.role, "")
+            system_prompt = _DEFAULT_SYSTEM_PROMPT
     else:
-        system_prompt = _SYSTEM_PROMPTS.get(agent.role, "")
+        system_prompt = _DEFAULT_SYSTEM_PROMPT
 
-    available_tools = _get_tools_for_role(agent.role)
+    available_tools = _get_tools_for_agent(agent.id, agent.role, db)
 
     return AgentContextResponse(
         id=agent.id,
@@ -474,7 +445,6 @@ async def get_agent_context(
         template_id=agent.template_id,
         role=agent.role,
         display_name=agent.display_name,
-        tier=agent.tier,
         model=agent.model,
         provider=agent.provider,
         thinking_enabled=agent.thinking_enabled,
@@ -493,14 +463,11 @@ async def delete_agent(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove a non-core agent from the project.
-
-    Manager and CTO agents are protected and cannot be deleted.
-    """
-    await _ensure_agent_access(db, agent_id, current_user.id)
+    """Remove an agent from the project. Any agent can be deleted."""
+    agent = await _ensure_agent_access(db, agent_id, current_user.id)
     service = get_agent_service(db)
     try:
-        agent = await service.remove_agent(agent_id, (await _ensure_agent_access(db, agent_id, current_user.id)).project_id)
+        agent = await service.remove_agent(agent_id, agent.project_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     await db.commit()

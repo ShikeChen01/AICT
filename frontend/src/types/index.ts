@@ -505,7 +505,7 @@ export interface Repository {
 export interface RepositoryCreate {
   name: string;
   description?: string | null;
-  private?: boolean;
+  code_repo_url?: string | null;
 }
 
 export interface RepositoryImport {
@@ -847,18 +847,18 @@ export interface SandboxConfigUpdate {
   os_image?: string | null;
 }
 
-// ── Sandbox types (v3 — DB-backed sandboxes) ─────────────────────────────
+// ── Sandbox types (v3.1 — user-owned sandboxes) ──────────────────────────
 
 export interface Sandbox {
   id: string;
-  project_id: string;
+  user_id: string;
+  project_id: string | null;
   agent_id: string | null;
   agent_name: string | null;
-  agent_role: string | null;
   sandbox_config_id: string | null;
+  name: string | null;
+  description: string | null;
   orchestrator_sandbox_id: string;
-  os_image: string;
-  persistent: boolean;
   status: string;
   host: string | null;
   port: number;
@@ -883,13 +883,22 @@ export interface SandboxSnapshot {
   created_at: string | null;
 }
 
-export interface SandboxClaimRequest {
+export interface CreateSandboxRequest {
+  project_id: string;
+  config_id?: string | null;
+  name?: string | null;
+  description?: string | null;
+}
+
+export interface AssignSandboxRequest {
   agent_id: string;
 }
 
 export interface SandboxUpdateRequest {
-  persistent?: boolean;
-  sandbox_config_id?: string | null;
+  name?: string | null;
+  description?: string | null;
+  config_id?: string | null;
+  project_id?: string | null;
 }
 
 export interface SandboxSnapshotRequest {

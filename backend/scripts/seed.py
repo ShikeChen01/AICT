@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # Reuse the session URL resolver so it works in Cloud Run too
 os.environ.setdefault("PYTHONPATH", "/app")
 
-from backend.db.models import Base, Project, Agent
+from backend.db.models import Project, Agent
 from backend.services.agent_service import get_agent_service
 from backend.config import settings
 
@@ -49,8 +49,8 @@ async def seed(
     engine = create_async_engine(url, echo=False)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    # Use settings if not provided
-    actual_repo_url = repo_url or settings.code_repo_url or "https://github.com/placeholder/firstproject"
+    # Use settings if not provided; seeded template has no git repo by default
+    actual_repo_url = repo_url or settings.code_repo_url or ""
     actual_repo_path = repo_path or settings.code_repo_path or "/data/project"
     
     async with factory() as session:
@@ -86,7 +86,7 @@ async def seed(
         session.add(project)
         await session.flush()
         print(f"Created project: {project.name} ({project.id})")
-        print(f"  - Code repo URL: {project.code_repo_url}")
+        print(f"  - Code repo URL: {project.code_repo_url or '(none)'}")
         print(f"  - Code repo path: {project.code_repo_path}")
 
         # Create agents
@@ -118,7 +118,6 @@ async def _ensure_agents(session: AsyncSession, project: Project, agent_service)
             display_name="Manager",
             model=settings.manager_model_default,
             status="sleeping",
-            sandbox_persist=True,
         )
         session.add(manager)
         await session.flush()

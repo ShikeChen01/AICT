@@ -34,6 +34,7 @@ export function useScreenStream(sandboxId: string | null): ScreenStreamState {
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const prevUrlRef = useRef<string | null>(null);
+  const prevPrevUrlRef = useRef<string | null>(null); // double-buffer to avoid VideoFrame GC
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const keepaliveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -52,6 +53,10 @@ export function useScreenStream(sandboxId: string | null): ScreenStreamState {
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
+    }
+    if (prevPrevUrlRef.current) {
+      URL.revokeObjectURL(prevPrevUrlRef.current);
+      prevPrevUrlRef.current = null;
     }
     if (prevUrlRef.current) {
       URL.revokeObjectURL(prevUrlRef.current);
@@ -95,10 +100,14 @@ export function useScreenStream(sandboxId: string | null): ScreenStreamState {
         const blob = new Blob([event.data], { type: 'image/jpeg' });
         const newUrl = URL.createObjectURL(blob);
 
-        // Revoke the previous URL to prevent memory leaks
-        if (prevUrlRef.current) {
-          URL.revokeObjectURL(prevUrlRef.current);
+        // Double-buffer: revoke URL from two frames ago, not one.
+        // This gives the <img> element an extra frame to finish decoding
+        // before the underlying data is GC'd, preventing the
+        // "VideoFrame was garbage collected without being closed" warning.
+        if (prevPrevUrlRef.current) {
+          URL.revokeObjectURL(prevPrevUrlRef.current);
         }
+        prevPrevUrlRef.current = prevUrlRef.current;
         prevUrlRef.current = newUrl;
         setFrameUrl(newUrl);
       }

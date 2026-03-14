@@ -5,7 +5,7 @@
     "detailed_description": [
       "End the current session. Call this when you have completed all pending work,",
       "have no more actions to take, or have been explicitly asked to stop. Must be",
-      "called alone — no other tool calls in the same turn."
+      "called alone \u2014 no other tool calls in the same turn."
     ],
     "input_schema": {
       "type": "object",
@@ -21,7 +21,7 @@
     "detailed_description": [
       "Send a direct message to another agent or the user. Use for 1-on-1",
       "communication: task assignments, status updates, questions, or delivering",
-      "results. The target_agent_id must be a valid UUID — use list_agents to discover",
+      "results. The target_agent_id must be a valid UUID \u2014 use list_agents to discover",
       "agent IDs. To message the human user, use the user's agent UUID (provided in",
       "your context)."
     ],
@@ -99,7 +99,7 @@
       "Removes past session messages and older current session messages from the active",
       "context window. Call this AFTER update_memory to ensure important context is preserved.",
       "This tool is typically called in response to a context pressure warning.",
-      "Messages are not deleted — they remain accessible via read_history.",
+      "Messages are not deleted \u2014 they remain accessible via read_history.",
       "Use keep_recent to control how many recent message pairs to retain."
     ],
     "input_schema": {
@@ -173,7 +173,7 @@
     "name": "sleep",
     "description": "Sleep briefly and continue.",
     "detailed_description": [
-      "Pause execution for a specified number of seconds (0–3600). Use when waiting for",
+      "Pause execution for a specified number of seconds (0\u20133600). Use when waiting for",
       "an external process to complete, throttling operations, or when a deliberate",
       "delay is needed before checking status."
     ],
@@ -260,14 +260,14 @@
     "name": "execute_command",
     "description": "Execute shell command in your sandbox container.",
     "detailed_description": [
-      "*** PRIMARY TOOL — use creatively and boldly for any executable task. ***",
+      "*** PRIMARY TOOL \u2014 use creatively and boldly for any executable task. ***",
       "Runs a shell command inside your dedicated sandbox container (Ubuntu 22.04, full root access).",
       "This is your go-to tool for: running code, file operations, installing packages,",
       "running tests, git operations (git branch/checkout/commit/push/diff), HTTP requests",
       "(curl/wget), and more.",
       "",
       "Key behaviors:",
-      "- The sandbox persists across all calls — files, packages, env vars carry over.",
+      "- The sandbox persists across all calls \u2014 files, packages, env vars carry over.",
       "- Chain commands with && or write shell scripts for multi-step workflows.",
       "- If a command fails, read stderr carefully, fix the issue, and retry.",
       "- You can install any tool (apt-get / pip / npm); installs persist for the session.",
@@ -283,7 +283,7 @@
       "Timing:",
       "- Commands start executing immediately after sandbox_start_session returns.",
       "- Default timeout is 120s. For long builds, pass a higher timeout explicitly.",
-      "- If you see '[command timed out — no output received]', the sandbox may be",
+      "- If you see '[command timed out \u2014 no output received]', the sandbox may be",
       "  starting up or the command hung. Call sandbox_health() to diagnose, then retry."
     ],
     "input_schema": {
@@ -311,11 +311,11 @@
     "detailed_description": [
       "Allocate and start your dedicated sandbox container.",
       "Call this at the beginning of any session that needs execute_command, screenshot, or display access.",
-      "Idempotent — safe to call multiple times. Returns sandbox status and ID.",
+      "Idempotent \u2014 safe to call multiple times. Returns sandbox status and ID.",
       "",
       "Timing (measured on current hardware):",
       "- Cold start (new container): ~2-3 seconds. The tool BLOCKS until the container is",
-      "  healthy and accepting connections — you do NOT need to sleep or poll after it returns.",
+      "  healthy and accepting connections \u2014 you do NOT need to sleep or poll after it returns.",
       "- Warm reuse (idle container already in pool): ~0.1 seconds.",
       "",
       "After this returns, execute_command / sandbox_health / sandbox_screenshot are all",
@@ -358,7 +358,7 @@
       "Use when:",
       "- Verifying the sandbox is alive after a long-running command.",
       "- Diagnosing why execute_command returned no output (container may have crashed).",
-      "- NOT needed as a startup check — sandbox_start_session already waits for readiness."
+      "- NOT needed as a startup check \u2014 sandbox_start_session already waits for readiness."
     ],
     "input_schema": {
       "type": "object",
@@ -398,14 +398,17 @@
       "properties": {
         "x": {
           "type": "integer",
-          "description": "X coordinate (0–1024)"
+          "description": "X coordinate (0\u20131024)"
         },
         "y": {
           "type": "integer",
-          "description": "Y coordinate (0–768)"
+          "description": "Y coordinate (0\u2013768)"
         }
       },
-      "required": ["x", "y"]
+      "required": [
+        "x",
+        "y"
+      ]
     },
     "allowed_roles": [
       "*"
@@ -425,11 +428,11 @@
       "properties": {
         "x": {
           "type": "integer",
-          "description": "X coordinate (0–1024). Omit to click at current position."
+          "description": "X coordinate (0\u20131024). Omit to click at current position."
         },
         "y": {
           "type": "integer",
-          "description": "Y coordinate (0–768). Omit to click at current position."
+          "description": "Y coordinate (0\u2013768). Omit to click at current position."
         },
         "button": {
           "type": "integer",
@@ -439,7 +442,11 @@
         "click_type": {
           "type": "string",
           "description": "Click type: 'single' (default), 'double', or 'triple'",
-          "enum": ["single", "double", "triple"],
+          "enum": [
+            "single",
+            "double",
+            "triple"
+          ],
           "default": "single"
         }
       }
@@ -461,16 +468,21 @@
       "properties": {
         "x": {
           "type": "integer",
-          "description": "X coordinate (0–1024). Omit to scroll at current position."
+          "description": "X coordinate (0\u20131024). Omit to scroll at current position."
         },
         "y": {
           "type": "integer",
-          "description": "Y coordinate (0–768). Omit to scroll at current position."
+          "description": "Y coordinate (0\u2013768). Omit to scroll at current position."
         },
         "direction": {
           "type": "string",
           "description": "Scroll direction: 'up', 'down' (default), 'left', or 'right'",
-          "enum": ["up", "down", "left", "right"],
+          "enum": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ],
           "default": "down"
         },
         "clicks": {
@@ -560,7 +572,7 @@
     "description": "Create a kanban task.",
     "detailed_description": [
       "Create a new task on the project kanban board (manager only). Set critical",
-      "(1–10) and urgent (1–10) to help prioritize. Tasks start in 'backlog' status.",
+      "(1\u201310) and urgent (1\u201310) to help prioritize. Tasks start in 'backlog' status.",
       "After creation, use assign_task to hand it to an engineer."
     ],
     "input_schema": {
@@ -584,7 +596,7 @@
       ]
     },
     "allowed_roles": [
-      "manager"
+      "*"
     ]
   },
   {
@@ -611,7 +623,7 @@
       ]
     },
     "allowed_roles": [
-      "manager"
+      "*"
     ]
   },
   {
@@ -638,8 +650,7 @@
       ]
     },
     "allowed_roles": [
-      "manager",
-      "engineer"
+      "*"
     ]
   },
   {
@@ -662,7 +673,7 @@
       ]
     },
     "allowed_roles": [
-      "engineer"
+      "*"
     ]
   },
   {
@@ -689,8 +700,7 @@
       ]
     },
     "allowed_roles": [
-      "manager",
-      "cto"
+      "*"
     ]
   },
   {
@@ -716,7 +726,11 @@
         },
         "seniority": {
           "type": "string",
-          "enum": ["junior", "intermediate", "senior"]
+          "enum": [
+            "junior",
+            "intermediate",
+            "senior"
+          ]
         }
       },
       "required": [
@@ -724,8 +738,7 @@
       ]
     },
     "allowed_roles": [
-      "manager",
-      "cto"
+      "*"
     ]
   },
   {
@@ -741,8 +754,7 @@
       "properties": {}
     },
     "allowed_roles": [
-      "manager",
-      "cto"
+      "*"
     ]
   },
   {
@@ -750,7 +762,7 @@
     "description": "Permanently remove an engineer from the project.",
     "detailed_description": [
       "Permanently removes an engineer agent from the project (manager only). This is",
-      "NOT a temporary stop or interrupt — the agent is fully deleted: its worker is",
+      "NOT a temporary stop or interrupt \u2014 the agent is fully deleted: its worker is",
       "shut down, its sandbox is closed, its sessions and message history are erased,",
       "and its database record is removed. Any tasks the engineer had in progress are",
       "reset to backlog so they can be reassigned.",
@@ -773,9 +785,13 @@
           "description": "Optional reason for removal (logged for audit purposes)."
         }
       },
-      "required": ["agent_id"]
+      "required": [
+        "agent_id"
+      ]
     },
-    "allowed_roles": ["manager"]
+    "allowed_roles": [
+      "*"
+    ]
   },
   {
     "name": "describe_tool",
@@ -814,7 +830,9 @@
       "properties": {},
       "required": []
     },
-    "allowed_roles": ["*"]
+    "allowed_roles": [
+      "*"
+    ]
   },
   {
     "name": "write_architecture_doc",
@@ -824,17 +842,17 @@
       "Users see documents read-only on the Architecture page; it updates in real-time.",
       "",
       "IMPORTANT: you MUST pass doc_type and content together in the same call.",
-      "Do NOT call this tool without content — the content field is required and cannot be empty.",
+      "Do NOT call this tool without content \u2014 the content field is required and cannot be empty.",
       "Write the complete Markdown text in one call; each call is a full replace.",
       "",
       "Parameters:",
-      "  doc_type (required, string) — one of:",
+      "  doc_type (required, string) \u2014 one of:",
       "    'architecture_source_of_truth'  canonical system description",
       "    'arc42_lite'                    arc42-lite template",
       "    'c4_diagrams'                   C4 diagrams (Mermaid fenced blocks)",
       "    'adr/<slug>'                    individual ADR, e.g. 'adr/001-use-postgresql'",
-      "  content (required, string) — the full Markdown document text",
-      "  title   (optional, string) — display title shown as the tab label",
+      "  content (required, string) \u2014 the full Markdown document text",
+      "  title   (optional, string) \u2014 display title shown as the tab label",
       "",
       "When to call this:",
       "  - After agreeing on an architectural decision (write an ADR)",
@@ -850,16 +868,21 @@
         },
         "content": {
           "type": "string",
-          "description": "The complete Markdown content for the document. Must not be empty. This is a full replace — write the entire document text here."
+          "description": "The complete Markdown content for the document. Must not be empty. This is a full replace \u2014 write the entire document text here."
         },
         "title": {
           "type": "string",
           "description": "Optional display title for the document tab in the frontend."
         }
       },
-      "required": ["doc_type", "content"]
+      "required": [
+        "doc_type",
+        "content"
+      ]
     },
-    "allowed_roles": ["manager"]
+    "allowed_roles": [
+      "*"
+    ]
   },
   {
     "name": "thinking_done",
@@ -885,9 +908,13 @@
           "description": "Brief summary of the plan you saved to memory (1-3 sentences). Confirms what you are about to execute."
         }
       },
-      "required": ["summary"]
+      "required": [
+        "summary"
+      ]
     },
-    "allowed_roles": ["*"]
+    "allowed_roles": [
+      "*"
+    ]
   },
   {
     "name": "search_knowledge",
@@ -926,8 +953,12 @@
           "description": "Minimum relevance score 0.0-1.0 (default: 0.4). Lower = more results."
         }
       },
-      "required": ["query"]
+      "required": [
+        "query"
+      ]
     },
-    "allowed_roles": ["*"]
+    "allowed_roles": [
+      "*"
+    ]
   }
 ]

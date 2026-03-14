@@ -8,10 +8,12 @@
  *        has fresh data. Does NOT rely on the stale allBlocks snapshot.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, RotateCcw, Save, AlertCircle } from 'lucide-react';
 import type { PromptBlockConfig, PromptBlockConfigItem } from '../../types';
 import { saveAgentBlocks, resetAgentBlock, listAgentBlocks } from '../../api/client';
+
+const DRAFT_DEBOUNCE_MS = 250;
 
 interface BlockEditorPanelProps {
   agentId: string;
@@ -19,6 +21,8 @@ interface BlockEditorPanelProps {
   onClose: () => void;
   /** Called with the authoritative updated block list after save or reset. */
   onSaved: (updated: PromptBlockConfig[]) => void;
+  /** Called when draft content changes (debounced) so parent can update token counts. */
+  onDraftChange?: (content: string) => void;
 }
 
 export function BlockEditorPanel({
@@ -26,12 +30,14 @@ export function BlockEditorPanel({
   block,
   onClose,
   onSaved,
+  onDraftChange,
 }: BlockEditorPanelProps) {
   const [content, setContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const draftDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sync local content state whenever the target block changes
   useEffect(() => {
@@ -41,6 +47,22 @@ export function BlockEditorPanel({
       setError(null);
     }
   }, [block?.id, block?.content]);
+
+  // Debounced draft notification for live token counts (only when dirty)
+  useEffect(() => {
+    if (!onDraftChange || !block || content === block.content) return;
+    if (draftDebounceRef.current) clearTimeout(draftDebounceRef.current);
+    draftDebounceRef.current = setTimeout(() => {
+      draftDebounceRef.current = null;
+      onDraftChange(content);
+    }, DRAFT_DEBOUNCE_MS);
+    return () => {
+      if (draftDebounceRef.current) {
+        clearTimeout(draftDebounceRef.current);
+        draftDebounceRef.current = null;
+      }
+    };
+  }, [content, block, onDraftChange]);
 
   if (!block) return null;
 

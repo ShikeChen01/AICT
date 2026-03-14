@@ -74,10 +74,17 @@ class TestTaskUpdate:
 
 
 class TestProjectCreate:
-    def test_minimal(self):
+    def test_minimal_without_repo(self):
+        p = ProjectCreate(name="Test")
+        assert p.name == "Test"
+        assert p.description is None
+        assert p.code_repo_url is None
+
+    def test_minimal_with_repo(self):
         p = ProjectCreate(name="Test", code_repo_url="https://github.com/x/y")
         assert p.name == "Test"
         assert p.description is None
+        assert p.code_repo_url == "https://github.com/x/y"
 
     def test_full(self):
         p = ProjectCreate(
@@ -86,3 +93,4 @@ class TestProjectCreate:
             code_repo_url="https://github.com/x/y",
         )
         assert p.description == "A full project"
+        assert p.code_repo_url == "https://github.com/x/y"

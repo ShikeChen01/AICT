@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { Database, Plus, X, Settings2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Database, FileText, Plus, X, Settings2 } from 'lucide-react';
 
 import { AgentConfigPanel } from './AgentConfigPanel';
 import { AllocationEditor } from './AllocationEditor';
@@ -65,6 +65,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
   const [loadingAgents, setLoadingAgents] = useState(true);
   const [loadingBlocks, setLoadingBlocks] = useState(false);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
+  const [editingBlockDraftContent, setEditingBlockDraftContent] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savingBlocks, setSavingBlocks] = useState(false);
 
@@ -81,6 +82,9 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
   const [showAddBlock, setShowAddBlock] = useState(false);
   const [newBlockName, setNewBlockName] = useState('');
   const [newBlockContent, setNewBlockContent] = useState('');
+
+  // Collapsible: system prompt blocks (main + custom) — default open
+  const [systemBlocksOpen, setSystemBlocksOpen] = useState(true);
 
   const selectedAgent = useMemo(
     () => agents.find((a) => a.id === selectedAgentId) ?? null,
@@ -248,6 +252,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
 
   const handleEdit = useCallback((blockId: string) => {
     setEditingBlockId(blockId);
+    setEditingBlockDraftContent(null);
   }, []);
 
   const handleAgentUpdated = useCallback((updated: Agent) => {
@@ -304,10 +309,19 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
     [blocks]
   );
 
-  const totalSystemTokens = useMemo(
-    () => [...mainBlocks, ...customBlocks].filter((b) => b.enabled).reduce((sum, b) => sum + estimateTokens(b.content), 0),
-    [mainBlocks, customBlocks]
-  );
+  const totalSystemTokens = useMemo(() => {
+    const all = [...mainBlocks, ...customBlocks];
+    return all
+      .filter((b) => b.enabled)
+      .reduce(
+        (sum, b) =>
+          sum +
+          estimateTokens(
+            b.id === editingBlockId && editingBlockDraftContent !== null ? editingBlockDraftContent : b.content
+          ),
+        0
+      );
+  }, [mainBlocks, customBlocks, editingBlockId, editingBlockDraftContent]);
 
   // ── Loading / empty states ────────────────────────────────────────────────
 
@@ -388,13 +402,13 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
       </div>
 
       {/* ── Scrollable content area — whole page scrolls as one unit ── */}
-      <div ref={containerRef} id="prompt-builder-content" role="tabpanel" className="flex-1 min-h-0 overflow-y-auto">
-        <div className="flex min-h-full">
+      <div ref={containerRef} id="prompt-builder-content" role="tabpanel" className="flex-1 min-h-0 overflow-auto">
+        <div className="flex min-h-full max-h-[calc(100vh-6rem)]" style={{ minWidth: 'max(100%, 600px)' }}>
 
           {/* Left column: context budget — sticky sidebar */}
           <div
             className="flex-shrink-0 border-r border-[var(--border-color)] bg-[var(--surface-card)] self-start sticky top-0"
-            style={{ width: `${leftPct}%` }}
+            style={{ width: `${leftPct}%`, minWidth: 260 }}
           >
             <div className="p-3 space-y-3 pb-12 max-h-[calc(100vh-6rem)] overflow-y-auto">
             <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">
@@ -402,7 +416,12 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
             </h3>
 
             {meta ? (
-              <ContextBudgetChart meta={meta} />
+              <ContextBudgetChart
+                meta={meta}
+                overrideSystemPromptTokens={
+                  editingBlockId && editingBlockDraftContent !== null ? totalSystemTokens : undefined
+                }
+              />
             ) : (
               <div className="text-xs text-[var(--text-muted)]">Loading budget…</div>
             )}
@@ -435,21 +454,35 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
             style={{ height: 'calc(100vh - 6rem)' }}
           />
 
-          {/* Right column: block list + tool assembly — flows naturally, page scrolls */}
-          <div className="flex-1 min-w-0">
-            <div className="p-4 space-y-6 max-w-2xl pb-16">
-            {/* System Prompt Blocks section */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">
-                  System Prompt Blocks
-                </h3>
-                <span className="text-xs text-[var(--text-muted)] font-mono" title="Assembled tokens / measured allocation">
-                  ~{(totalSystemTokens / 1000).toFixed(1)}k
-                  {meta ? ` / ${(meta.system_prompt_tokens / 1000).toFixed(1)}k` : ''} tokens
+          {/* Right column: block list + tool assembly — own scroll like left column */}
+          <div className="flex-1 min-w-[320px] min-h-0 flex flex-col">
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <div className="p-4 space-y-6 max-w-2xl pb-16">
+            {/* System Prompt Blocks section — collapsible like Runtime Injections / Thinking Stages */}
+            <div className="border border-[var(--color-primary)]/20 rounded-lg overflow-hidden bg-[var(--color-primary)]/5">
+              <button
+                type="button"
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-[var(--color-primary)]/10 transition-colors"
+                onClick={() => setSystemBlocksOpen((o) => !o)}
+              >
+                {systemBlocksOpen ? (
+                  <ChevronDown className="w-4 h-4 text-[var(--color-primary)] flex-shrink-0" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-[var(--color-primary)] flex-shrink-0" />
+                )}
+                <FileText className="w-3.5 h-3.5 text-[var(--color-primary)] flex-shrink-0" />
+                <span className="text-sm font-semibold text-[var(--color-primary)]">System Prompt Blocks</span>
+                <span className="text-xs text-[var(--color-primary)] ml-1">
+                  ({mainBlocks.length + customBlocks.length})
                 </span>
-              </div>
+                <span className="ml-auto text-xs text-[var(--text-muted)] font-mono" title="Assembled tokens / measured allocation">
+                  ~{(totalSystemTokens / 1000).toFixed(1)}k
+                  {meta ? ` / ${(meta.system_prompt_tokens / 1000).toFixed(1)}k` : ''} tok
+                </span>
+              </button>
 
+              {systemBlocksOpen && (
+              <div className="border-t border-[var(--color-primary)]/20 space-y-3 px-3 pb-3 pt-2">
               {saveError && (
                 <div className="bg-[var(--color-danger-light)] border border-[var(--color-danger)]/20 text-[var(--color-danger)] text-xs rounded-lg px-3 py-2 flex items-center justify-between">
                   {saveError}
@@ -479,6 +512,11 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
                       block={block}
                       meta={meta?.block_registry[block.block_key]}
                       totalSystemTokens={totalSystemTokens}
+                      effectiveContent={
+                        block.id === editingBlockId && editingBlockDraftContent !== null
+                          ? editingBlockDraftContent
+                          : undefined
+                      }
                       isFirst={idx === 0}
                       isLast={idx === mainBlocks.length - 1}
                       mutationsDisabled={savingBlocks}
@@ -504,6 +542,11 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
                         block={block}
                         meta={undefined}
                         totalSystemTokens={totalSystemTokens}
+                        effectiveContent={
+                          block.id === editingBlockId && editingBlockDraftContent !== null
+                            ? editingBlockDraftContent
+                            : undefined
+                        }
                         isFirst={idx === 0}
                         isLast={idx === customBlocks.length - 1}
                         mutationsDisabled={savingBlocks}
@@ -597,6 +640,10 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
                 </div>
               )}
 
+              </div>
+              )}
+            </div>
+
               {!loadingBlocks && (
                 <RuntimeInjectionsGroup
                   blocks={blocks}
@@ -616,7 +663,6 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
                   onToggle={handleToggle}
                 />
               )}
-            </div>
 
             {/* Tool Assembly section */}
             {selectedAgent && selectedAgentId && (
@@ -631,6 +677,7 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
                 </div>
               </div>
             )}
+              </div>
             </div>
           </div>
         </div>
@@ -641,12 +688,17 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
         <BlockEditorPanel
           agentId={selectedAgentId}
           block={editingBlock}
-          onClose={() => setEditingBlockId(null)}
+          onClose={() => {
+            setEditingBlockId(null);
+            setEditingBlockDraftContent(null);
+          }}
           onSaved={(updated) => {
             setBlocks(updated);
             setEditingBlockId(null);
+            setEditingBlockDraftContent(null);
             refreshMeta(selectedAgentId, selectedAgent?.model);
           }}
+          onDraftChange={setEditingBlockDraftContent}
         />
       )}
 

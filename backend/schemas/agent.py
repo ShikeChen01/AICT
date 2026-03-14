@@ -20,15 +20,12 @@ class AgentResponse(BaseModel):
     template_id: UUID | None = None
     role: str
     display_name: str
-    tier: str | None = None
     model: str
     provider: str | None = None
     thinking_enabled: bool = False
     status: str
     current_task_id: UUID | None
     sandbox_id: str | None
-    sandbox_persist: bool
-    sandbox_config_id: UUID | None = None
     memory: dict | None = None
     created_at: datetime
     updated_at: datetime
@@ -80,7 +77,6 @@ class AgentContextResponse(BaseModel):
     template_id: UUID | None = None
     role: str
     display_name: str
-    tier: str | None = None
     model: str
     provider: str | None = None
     thinking_enabled: bool = False

@@ -100,3 +100,4 @@ v3/
 CLAUDE.md
 .firebase/
 v4/
+scripts/cloud/kubernet_diagnose.ps1

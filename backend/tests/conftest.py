@@ -149,7 +149,6 @@ async def sample_manager(session: AsyncSession, sample_project: Repository) -> A
         display_name="Manager",
         model="",
         status="sleeping",
-        sandbox_persist=True,
     )
     session.add(agent)
     await session.flush()
@@ -166,7 +165,6 @@ async def sample_cto(session: AsyncSession, sample_project: Repository) -> Agent
         display_name="CTO",
         model="",
         status="sleeping",
-        sandbox_persist=True,
     )
     session.add(agent)
     await session.flush()
@@ -183,7 +181,6 @@ async def sample_engineer(session: AsyncSession, sample_project: Repository) -> 
         display_name="Engineer-1",
         model="",
         status="sleeping",
-        sandbox_persist=False,
     )
     session.add(agent)
     await session.flush()

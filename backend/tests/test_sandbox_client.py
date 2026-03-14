@@ -1,6 +1,10 @@
 """
 Unit tests for backend.services.sandbox_client.
 
+v3.1: SandboxClient is now fully stateless. All methods take
+(host, port, auth_token) as parameters. No connection pool,
+register/unregister, or SandboxConnection.
+
 All network I/O (WebSocket + httpx) is mocked — no real VM required.
 """
 
@@ -11,12 +15,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.services.sandbox_client import (
-    SandboxClient,
-    SandboxConnection,
-    ShellResult,
-    get_sandbox_client,
-)
+from backend.services.sandbox_client import SandboxClient, ShellResult
+
+
+# Test constants
+_HOST = "127.0.0.1"
+_PORT = 30001
+_TOKEN = "tok"
+
+# Fixed marker so tests can construct known drain/end sentinels
+_TEST_MARKER = "a" * 16
+_DRAIN_SENTINEL = f"__AICT_DRAIN_{_TEST_MARKER}__"
+_END_SENTINEL = f"__AICT_CMD_DONE_{_TEST_MARKER}__"
+
 
 # ---------------------------------------------------------------------------
 # ShellResult
@@ -44,37 +55,16 @@ def test_shell_result_str_no_exit_code() -> None:
 
 
 # ---------------------------------------------------------------------------
-# SandboxClient — registration
+# SandboxClient — stateless design
 # ---------------------------------------------------------------------------
 
 
-def test_register_creates_connection() -> None:
+def test_sandbox_client_is_stateless() -> None:
+    """v3.1: SandboxClient has no connection pool or stateful methods."""
     client = SandboxClient()
-    client.register("sbox1", "10.0.0.1", 30001, "token-abc")
-    conn = client._connections["sbox1"]
-    assert conn.rest_base_url == "http://10.0.0.1:30001"
-    assert conn.auth_token == "token-abc"
-
-
-def test_unregister_removes_connection() -> None:
-    client = SandboxClient()
-    client.register("sbox1", "10.0.0.1", 30001, "tok")
-    # Patch asyncio.create_task so the async close() doesn't need a loop
-    with patch("backend.services.sandbox_client.asyncio.create_task"):
-        client.unregister("sbox1")
-    assert "sbox1" not in client._connections
-
-
-def test_unregister_missing_is_noop() -> None:
-    client = SandboxClient()
-    with patch("backend.services.sandbox_client.asyncio.create_task"):
-        client.unregister("nonexistent")  # must not raise
-
-
-def test_get_conn_raises_for_unknown_sandbox() -> None:
-    client = SandboxClient()
-    with pytest.raises(RuntimeError, match="No connection registered"):
-        client._get_conn("ghost")
+    assert not hasattr(client, "_connections")
+    assert not hasattr(client, "register")
+    assert not hasattr(client, "unregister")
 
 
 # ---------------------------------------------------------------------------
@@ -82,122 +72,170 @@ def test_get_conn_raises_for_unknown_sandbox() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_client_with_mock_http(sandbox_id: str = "sbox1") -> tuple[SandboxClient, MagicMock]:
-    """Return (SandboxClient, mock_http_client) with sbox1 registered."""
-    client = SandboxClient()
-    client.register(sandbox_id, "127.0.0.1", 30001, "token")
-
-    mock_response = MagicMock()
-    mock_response.raise_for_status = MagicMock()
-    mock_http = AsyncMock()
-    mock_http.get = AsyncMock(return_value=mock_response)
-    mock_http.post = AsyncMock(return_value=mock_response)
-    mock_http.is_closed = False
-
-    conn = client._connections[sandbox_id]
-    conn._http = mock_http
-    return client, mock_response
-
-
 @pytest.mark.asyncio
 async def test_health_check_calls_get() -> None:
-    client, mock_resp = _make_client_with_mock_http()
+    client = SandboxClient()
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
     mock_resp.json = MagicMock(return_value={"status": "ok", "uptime_seconds": 42.0})
 
-    result = await client.health_check("sbox1")
+    with patch("httpx.AsyncClient") as MockClient:
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+        mock_http.get = AsyncMock(return_value=mock_resp)
+        MockClient.return_value = mock_http
+
+        result = await client.health_check(_HOST, _PORT, _TOKEN)
 
     assert result["status"] == "ok"
-    conn = client._connections["sbox1"]
-    conn._http.get.assert_awaited_once_with("/health")
+    assert result["uptime_seconds"] == 42.0
 
 
 @pytest.mark.asyncio
 async def test_get_screenshot_returns_bytes() -> None:
-    client, mock_resp = _make_client_with_mock_http()
+    client = SandboxClient()
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
     mock_resp.content = b"JPEG_DATA"
 
-    result = await client.get_screenshot("sbox1")
+    with patch("httpx.AsyncClient") as MockClient:
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+        mock_http.get = AsyncMock(return_value=mock_resp)
+        MockClient.return_value = mock_http
+
+        result = await client.get_screenshot(_HOST, _PORT, _TOKEN)
 
     assert result == b"JPEG_DATA"
-    conn = client._connections["sbox1"]
-    conn._http.get.assert_awaited_once_with("/screenshot", timeout=20.0)
 
 
 @pytest.mark.asyncio
 async def test_mouse_move_posts_correct_payload() -> None:
-    client, mock_resp = _make_client_with_mock_http()
+    client = SandboxClient()
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
     mock_resp.json = MagicMock(return_value={"ok": True, "x": 100, "y": 200})
 
-    await client.mouse_move("sbox1", 100, 200)
+    with patch("httpx.AsyncClient") as MockClient:
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+        mock_http.post = AsyncMock(return_value=mock_resp)
+        MockClient.return_value = mock_http
 
-    conn = client._connections["sbox1"]
-    conn._http.post.assert_awaited_once_with("/mouse/move", json={"x": 100, "y": 200})
+        result = await client.mouse_move(_HOST, _PORT, _TOKEN, 100, 200)
+
+    assert result["ok"] is True
 
 
 @pytest.mark.asyncio
 async def test_mouse_location_calls_get() -> None:
-    client, mock_resp = _make_client_with_mock_http()
+    client = SandboxClient()
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
     mock_resp.json = MagicMock(return_value={"x": 50, "y": 75})
 
-    result = await client.mouse_location("sbox1")
+    with patch("httpx.AsyncClient") as MockClient:
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+        mock_http.get = AsyncMock(return_value=mock_resp)
+        MockClient.return_value = mock_http
+
+        result = await client.mouse_location(_HOST, _PORT, _TOKEN)
 
     assert result == {"x": 50, "y": 75}
 
 
 @pytest.mark.asyncio
 async def test_keyboard_press_with_keys() -> None:
-    client, mock_resp = _make_client_with_mock_http()
+    client = SandboxClient()
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
     mock_resp.json = MagicMock(return_value={"ok": True})
 
-    await client.keyboard_press("sbox1", keys="ctrl+c")
+    with patch("httpx.AsyncClient") as MockClient:
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+        mock_http.post = AsyncMock(return_value=mock_resp)
+        MockClient.return_value = mock_http
 
-    conn = client._connections["sbox1"]
-    conn._http.post.assert_awaited_once_with("/keyboard", json={"keys": "ctrl+c"})
+        result = await client.keyboard_press(_HOST, _PORT, _TOKEN, keys="ctrl+c")
+
+    assert result["ok"] is True
 
 
 @pytest.mark.asyncio
 async def test_keyboard_press_with_text() -> None:
-    client, mock_resp = _make_client_with_mock_http()
+    client = SandboxClient()
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
     mock_resp.json = MagicMock(return_value={"ok": True})
 
-    await client.keyboard_press("sbox1", text="hello world")
+    with patch("httpx.AsyncClient") as MockClient:
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+        mock_http.post = AsyncMock(return_value=mock_resp)
+        MockClient.return_value = mock_http
 
-    conn = client._connections["sbox1"]
-    conn._http.post.assert_awaited_once_with("/keyboard", json={"text": "hello world"})
+        result = await client.keyboard_press(_HOST, _PORT, _TOKEN, text="hello world")
+
+    assert result["ok"] is True
 
 
 @pytest.mark.asyncio
 async def test_start_recording() -> None:
-    client, mock_resp = _make_client_with_mock_http()
+    client = SandboxClient()
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
     mock_resp.json = MagicMock(return_value={"ok": True, "status": "started"})
 
-    result = await client.start_recording("sbox1")
+    with patch("httpx.AsyncClient") as MockClient:
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+        mock_http.post = AsyncMock(return_value=mock_resp)
+        MockClient.return_value = mock_http
+
+        result = await client.start_recording(_HOST, _PORT, _TOKEN)
 
     assert result["status"] == "started"
-    conn = client._connections["sbox1"]
-    conn._http.post.assert_awaited_once_with("/record/start", timeout=10.0)
 
 
 @pytest.mark.asyncio
 async def test_stop_recording_returns_bytes() -> None:
-    client, mock_resp = _make_client_with_mock_http()
+    client = SandboxClient()
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
     mock_resp.content = b"MP4_DATA"
 
-    result = await client.stop_recording("sbox1")
+    with patch("httpx.AsyncClient") as MockClient:
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+        mock_http.post = AsyncMock(return_value=mock_resp)
+        MockClient.return_value = mock_http
+
+        result = await client.stop_recording(_HOST, _PORT, _TOKEN)
 
     assert result == b"MP4_DATA"
-    conn = client._connections["sbox1"]
-    conn._http.post.assert_awaited_once_with("/record/stop", timeout=60.0)
 
 
 # ---------------------------------------------------------------------------
 # SandboxClient — shell execution (WebSocket mocked)
 # ---------------------------------------------------------------------------
-
-# Fixed marker so tests can construct known drain/end sentinels (client uses token_hex(8) -> 16 chars)
-_TEST_MARKER = "a" * 16
-_DRAIN_SENTINEL = f"__AICT_DRAIN_{_TEST_MARKER}__"
-_END_SENTINEL = f"__AICT_CMD_DONE_{_TEST_MARKER}__"
 
 
 def _make_fake_ws_drain_then_output(
@@ -217,7 +255,7 @@ def _make_fake_ws_drain_then_hang() -> "FakeWS":
 
 
 class FakeWS:
-    """WebSocket mock that uses recv() and a list of payloads (no shared iterator)."""
+    """WebSocket mock that uses recv() and a list of payloads."""
 
     def __init__(
         self,
@@ -250,19 +288,15 @@ class FakeWS:
 
 @pytest.mark.asyncio
 async def test_execute_shell_returns_output() -> None:
-    """
-    Shell execution: drain phase sees two sentinels, then read phase gets
-    command output and end sentinel. Exit code is parsed.
-    """
+    """Shell execution with drain + output + end sentinel."""
     client = SandboxClient()
-    client.register("sbox1", "127.0.0.1", 30001, "tok")
     fake_ws = _make_fake_ws_drain_then_output(b"hello from sandbox\n")
 
     with (
         patch("secrets.token_hex", return_value=_TEST_MARKER),
         patch("websockets.connect", return_value=fake_ws),
     ):
-        result = await client.execute_shell("sbox1", "echo hello", timeout=5.0)
+        result = await client.execute_shell(_HOST, _PORT, _TOKEN, "echo hello", timeout=5.0)
 
     assert isinstance(result, ShellResult)
     assert "hello from sandbox" in result.stdout
@@ -273,24 +307,21 @@ async def test_execute_shell_returns_output() -> None:
 async def test_execute_shell_timeout_returns_none_exit_code() -> None:
     """When shell times out (no end sentinel), exit_code is None."""
     client = SandboxClient()
-    client.register("sbox1", "127.0.0.1", 30001, "tok")
     fake_ws = _make_fake_ws_drain_then_hang()
 
     with (
         patch("secrets.token_hex", return_value=_TEST_MARKER),
         patch("websockets.connect", return_value=fake_ws),
     ):
-        result = await client.execute_shell("sbox1", "sleep 99", timeout=0.05)
+        result = await client.execute_shell(_HOST, _PORT, _TOKEN, "sleep 99", timeout=0.05)
 
     assert result.exit_code is None
 
 
 @pytest.mark.asyncio
 async def test_execute_shell_drain_waits_for_two_sentinels() -> None:
-    """Drain phase does not break after first sentinel (echo); waits for second (real echo)."""
+    """Drain phase does not break after first sentinel."""
     client = SandboxClient()
-    client.register("sbox1", "127.0.0.1", 30001, "tok")
-    # One recv with both sentinels (simulates echo then real output)
     drain_data = (f"x\n{_DRAIN_SENTINEL}\n{_DRAIN_SENTINEL}\n").encode()
     command_out = b"ok\n" + f"{_END_SENTINEL}:0\n".encode()
     fake_ws = FakeWS(recv_payloads=[drain_data, command_out])
@@ -299,7 +330,7 @@ async def test_execute_shell_drain_waits_for_two_sentinels() -> None:
         patch("secrets.token_hex", return_value=_TEST_MARKER),
         patch("websockets.connect", return_value=fake_ws),
     ):
-        result = await client.execute_shell("sbox1", "echo ok", timeout=5.0)
+        result = await client.execute_shell(_HOST, _PORT, _TOKEN, "echo ok", timeout=5.0)
 
     assert "ok" in result.stdout
     assert result.exit_code == 0
@@ -307,9 +338,8 @@ async def test_execute_shell_drain_waits_for_two_sentinels() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_shell_multiple_sequential_calls() -> None:
-    """Multiple execute_shell calls each get a new WS and return correct output."""
+    """Multiple calls each get a fresh WS."""
     client = SandboxClient()
-    client.register("sbox1", "127.0.0.1", 30001, "tok")
 
     def make_ws():
         return _make_fake_ws_drain_then_output(b"result\n")
@@ -318,8 +348,8 @@ async def test_execute_shell_multiple_sequential_calls() -> None:
         patch("secrets.token_hex", return_value=_TEST_MARKER),
         patch("websockets.connect", side_effect=lambda *a, **k: make_ws()),
     ):
-        r1 = await client.execute_shell("sbox1", "first", timeout=5.0)
-        r2 = await client.execute_shell("sbox1", "second", timeout=5.0)
+        r1 = await client.execute_shell(_HOST, _PORT, _TOKEN, "first", timeout=5.0)
+        r2 = await client.execute_shell(_HOST, _PORT, _TOKEN, "second", timeout=5.0)
 
     assert "result" in r1.stdout
     assert r1.exit_code == 0
@@ -329,10 +359,8 @@ async def test_execute_shell_multiple_sequential_calls() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_shell_truncation_preserves_sentinel() -> None:
-    """When output is truncated, we never drop the last chunk so end sentinel is still found."""
+    """When output is truncated, end sentinel is still found."""
     client = SandboxClient()
-    client.register("sbox1", "127.0.0.1", 30001, "tok")
-    # Small payloads so we can patch max bytes and still have sentinel in last chunk
     drain_data = (f"prompt\n{_DRAIN_SENTINEL}\n{_DRAIN_SENTINEL}\n").encode()
     big_chunk = b"x" * 60
     end_chunk = b"tail\n" + f"{_END_SENTINEL}:0\n".encode()
@@ -343,23 +371,7 @@ async def test_execute_shell_truncation_preserves_sentinel() -> None:
         patch("backend.services.sandbox_client._MAX_SHELL_OUTPUT_BYTES", 100),
         patch("websockets.connect", return_value=fake_ws),
     ):
-        result = await client.execute_shell("sbox1", "large", timeout=5.0)
+        result = await client.execute_shell(_HOST, _PORT, _TOKEN, "large", timeout=5.0)
 
     assert result.truncated is True
     assert result.exit_code == 0
-    assert "tail" in result.stdout
-
-
-# ---------------------------------------------------------------------------
-# get_sandbox_client singleton
-# ---------------------------------------------------------------------------
-
-
-def test_get_sandbox_client_returns_singleton() -> None:
-    import backend.services.sandbox_client as mod
-    # Reset singleton for isolation
-    mod._sandbox_client = None
-    c1 = get_sandbox_client()
-    c2 = get_sandbox_client()
-    assert c1 is c2
-    mod._sandbox_client = None  # clean up

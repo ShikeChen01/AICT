@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 class RepositoryCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
-    private: bool = True
+    code_repo_url: str | None = Field(None, description="Optional Git URL to clone; if omitted, project is created without a linked repo.")
 
 
 class RepositoryImport(BaseModel):

@@ -393,15 +393,18 @@ class K8sManager:
             raise
 
     def get_service_host(self, sandbox_id: str) -> str | None:
-        """Get the ClusterIP hostname for a sandbox service."""
+        """Get the ClusterIP address for a sandbox service.
+
+        Returns the IP (not DNS name) because Cloud Run reaches the
+        cluster via VPC connector and cannot resolve in-cluster DNS.
+        """
         service_name = f"sandbox-{sandbox_id}"
         try:
             svc = _core.read_namespaced_service(
                 name=service_name,
                 namespace=self._ns,
             )
-            # Return the in-cluster DNS name
-            return f"{service_name}.{self._ns}.svc.cluster.local"
+            return svc.spec.cluster_ip
         except ApiException as e:
             if e.status == 404:
                 return None

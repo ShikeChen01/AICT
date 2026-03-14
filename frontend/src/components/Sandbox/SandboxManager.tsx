@@ -13,9 +13,8 @@ import {
   destroySandbox,
   applySandboxConfig,
   listSandboxConfigs,
-  assignSandboxConfig,
-  claimSandbox,
-  releaseSandbox,
+  createAndAssignSandbox,
+  unassignSandbox,
   updateSandbox,
 } from '../../api/client';
 import type { SandboxConfig, Sandbox } from '../../types';
@@ -68,16 +67,6 @@ export function SandboxManager({ projectId }: SandboxManagerProps) {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  const handleTogglePersistence = async (sandboxId: string, current: boolean) => {
-    setActionInProgress(sandboxId);
-    try {
-      await updateSandbox(sandboxId, { persistent: !current });
-      await refresh();
-    } finally {
-      setActionInProgress(null);
-    }
-  };
-
   const handleRestart = async (sandboxId: string) => {
     setActionInProgress(sandboxId);
     try {
@@ -92,10 +81,11 @@ export function SandboxManager({ projectId }: SandboxManagerProps) {
     setActionInProgress(sandboxId);
     setConfirmReset(null);
     try {
-      await releaseSandbox(sandboxId);
+      await unassignSandbox(sandboxId);
       if (agentId) {
-        await claimSandbox(projectId, agentId);
+        await createAndAssignSandbox(projectId, agentId);
       }
+      await destroySandbox(sandboxId);
       await refresh();
     } finally {
       setActionInProgress(null);
@@ -112,11 +102,10 @@ export function SandboxManager({ projectId }: SandboxManagerProps) {
     }
   };
 
-  const handleAssignConfig = async (agentId: string | null, configId: string | null) => {
-    if (!agentId) return;
-    setActionInProgress(agentId);
+  const handleAssignConfig = async (sandboxId: string, configId: string | null) => {
+    setActionInProgress(sandboxId);
     try {
-      await assignSandboxConfig(agentId, configId);
+      await updateSandbox(sandboxId, { config_id: configId });
       await refresh();
     } finally {
       setActionInProgress(null);
@@ -162,18 +151,12 @@ export function SandboxManager({ projectId }: SandboxManagerProps) {
                   <span className="truncate text-sm font-medium text-[var(--text-primary)]">
                     {sb.agent_name ?? 'Unknown'}
                   </span>
-                  <Badge variant="default" className="text-[10px]">{sb.agent_role ?? 'engineer'}</Badge>
+                  <Badge variant="default" className="text-[10px]">{sb.status}</Badge>
                 </div>
                 <div className="mt-0.5 flex items-center gap-2 text-xs text-[var(--text-muted)]">
-                  <span className="font-mono text-[10px]">{sb.orchestrator_sandbox_id}</span>
-                  {sb.os_image && (
-                    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
-                      sb.os_image.startsWith('windows')
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'bg-orange-100 text-orange-700'
-                    }`}>
-                      {sb.os_image}
-                    </span>
+                  <span className="font-mono text-[10px]">{sb.orchestrator_sandbox_id.slice(0, 12)}</span>
+                  {sb.name && (
+                    <span className="text-[10px]">{sb.name}</span>
                   )}
                 </div>
               </div>
@@ -182,21 +165,6 @@ export function SandboxManager({ projectId }: SandboxManagerProps) {
               <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusColor(sb.status)}`}>
                 {sb.status ?? 'unknown'}
               </span>
-
-              {/* Persistent toggle */}
-              <button
-                type="button"
-                disabled={isActing}
-                onClick={() => handleTogglePersistence(sb.id, sb.persistent)}
-                className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
-                  sb.persistent
-                    ? 'bg-blue-100 text-blue-800 hover:bg-blue-200'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                } disabled:opacity-50`}
-                title={sb.persistent ? 'Sandbox is persistent — click to make ephemeral' : 'Sandbox is ephemeral — click to make persistent'}
-              >
-                {sb.persistent ? 'Persistent' : 'Ephemeral'}
-              </button>
 
               {/* Actions */}
               <div className="flex items-center gap-1.5">
@@ -280,7 +248,7 @@ export function SandboxManager({ projectId }: SandboxManagerProps) {
                   <label className="text-xs text-gray-500 whitespace-nowrap">Config:</label>
                   <select
                     value={sb.sandbox_config_id ?? ''}
-                    onChange={(e) => handleAssignConfig(sb.agent_id, e.target.value || null)}
+                    onChange={(e) => handleAssignConfig(sb.id, e.target.value || null)}
                     disabled={isActing}
                     className="max-w-[180px] rounded border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
                   >

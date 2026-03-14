@@ -302,7 +302,7 @@ async def get_prompt_meta(
             # Excludes conditional blocks (injected at runtime as messages, not system prompt)
             # and stage blocks (only one is active at a time, managed separately).
             repo = PromptBlockConfigRepository(db)
-            blocks = await repo.ensure_agent_blocks(agent_id, agent.role)
+            blocks = await repo.list_for_agent(agent_id)
             _STAGE_BLOCKS = frozenset({"thinking_stage", "execution_stage"})
             enabled_content = "\n\n".join(
                 b.content for b in blocks

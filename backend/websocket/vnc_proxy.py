@@ -80,8 +80,8 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
         try:
             orch = OrchestratorClient()
             data = await orch.get_sandbox_by_id(sandbox_id)
-            host = settings.sandbox_vm_internal_host or settings.sandbox_vm_host
-            port = data.get("host_port", 8080)
+            host = data.get("host")
+            port = data.get("port", data.get("host_port", 8080))
             auth_token = data.get("auth_token")
         except Exception as exc:
             logger.warning("VNC proxy: sandbox %s not found and orchestrator lookup failed: %s", sandbox_id, exc)

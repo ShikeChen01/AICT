@@ -49,7 +49,8 @@ import type {
   Sandbox,
   SandboxConnectionInfo,
   SandboxSnapshot,
-  SandboxClaimRequest,
+  CreateSandboxRequest,
+  AssignSandboxRequest,
   SandboxUpdateRequest,
   SandboxSnapshotRequest,
   SandboxRestoreRequest,
@@ -165,10 +166,19 @@ async function request<T>(
       // ignore parse error
     }
 
+    const detail = errorData?.detail;
+    const msg =
+      typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+          ? (detail as { msg?: string }[]).map((e) => e.msg).filter(Boolean).join('; ') || undefined
+          : undefined;
+    const message = msg ?? errorData?.message ?? `HTTP ${response.status}`;
+
     throw new APIClientError(
       response.status,
       errorData?.error_type ?? 'unknown_error',
-      errorData?.message ?? `HTTP ${response.status}`,
+      message,
       errorData?.detail
     );
   }
@@ -460,7 +470,7 @@ export async function getRepository(repositoryId: string): Promise<Repository> {
 export async function createRepository(data: {
   name: string;
   description?: string | null;
-  private?: boolean;
+  code_repo_url?: string | null;
 }): Promise<Repository> {
   return request<Repository>('POST', '/repositories', data);
 }
@@ -677,17 +687,39 @@ export async function listSandboxes(projectId: string): Promise<Sandbox[]> {
   return request<Sandbox[]>('GET', `/sandboxes?project_id=${projectId}`);
 }
 
-export async function claimSandbox(projectId: string, agentId: string): Promise<Sandbox> {
+export async function createSandbox(
+  projectId: string,
+  configId?: string | null,
+  name?: string | null,
+): Promise<Sandbox> {
   return request<Sandbox>(
     'POST',
-    `/sandboxes?project_id=${projectId}`,
-    { agent_id: agentId } as SandboxClaimRequest,
+    '/sandboxes',
+    { project_id: projectId, config_id: configId ?? null, name: name ?? null } as CreateSandboxRequest,
     120_000,
   );
 }
 
-export async function releaseSandbox(sandboxId: string): Promise<void> {
-  return request<void>('POST', `/sandboxes/${sandboxId}/release`);
+export async function assignSandbox(sandboxId: string, agentId: string): Promise<Sandbox> {
+  return request<Sandbox>(
+    'POST',
+    `/sandboxes/${sandboxId}/assign`,
+    { agent_id: agentId } as AssignSandboxRequest,
+  );
+}
+
+/** Convenience: create a sandbox and immediately assign it to an agent. */
+export async function createAndAssignSandbox(
+  projectId: string,
+  agentId: string,
+  configId?: string | null,
+): Promise<Sandbox> {
+  const sandbox = await createSandbox(projectId, configId);
+  return assignSandbox(sandbox.id, agentId);
+}
+
+export async function unassignSandbox(sandboxId: string): Promise<Sandbox> {
+  return request<Sandbox>('POST', `/sandboxes/${sandboxId}/unassign`);
 }
 
 export async function updateSandbox(sandboxId: string, data: SandboxUpdateRequest): Promise<Sandbox> {
@@ -776,6 +808,10 @@ export async function deleteSandboxConfig(configId: string): Promise<void> {
   return request<void>('DELETE', `/sandbox-configs/${configId}`);
 }
 
+/**
+ * @deprecated Use updateSandbox(sandboxId, { config_id }) instead.
+ * Kept temporarily for backward compat during migration.
+ */
 export async function assignSandboxConfig(agentId: string, configId: string | null): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>('POST', `/sandbox-configs/assign/${agentId}`, { config_id: configId });
 }

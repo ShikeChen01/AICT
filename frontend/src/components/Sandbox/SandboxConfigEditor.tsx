@@ -257,21 +257,15 @@ export function SandboxConfigEditor() {
                   osImages.map((img) => (
                     <option key={img.slug} value={img.slug}>
                       {img.display_name}
-                      {img.os_family === 'windows' ? ' (Windows)' : ''}
                       {img.default ? ' — Default' : ''}
                     </option>
                   ))
                 ) : (
-                  <>
-                    <option value="ubuntu-22.04">Ubuntu 22.04 LTS</option>
-                    <option value="ubuntu-24.04">Ubuntu 24.04 LTS</option>
-                    <option value="debian-12">Debian 12 (Bookworm)</option>
-                    <option value="windows-server-2022">Windows Server 2022</option>
-                  </>
+                  <option value="ubuntu-22.04">Ubuntu 22.04 LTS</option>
                 )}
               </select>
               <p className="text-xs text-gray-400 mt-1">
-                Base operating system for the sandbox VM. Windows sandboxes may take longer to start.
+                Base operating system for the sandbox container.
               </p>
             </div>
             <div>

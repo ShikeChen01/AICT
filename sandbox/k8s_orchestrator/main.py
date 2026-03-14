@@ -162,7 +162,8 @@ async def _wait_for_pod_ready(
 
 
 @app.get("/api/health")
-async def health(_: None = Depends(require_master_token)) -> JSONResponse:
+async def health() -> JSONResponse:
+    """Unauthenticated so K8s liveness/readiness probes can reach it."""
     sandboxes = list(_sandbox_cache.values())
     return JSONResponse({
         "status": "ok",
@@ -316,7 +317,7 @@ async def create_sandbox(
 
 
 class SessionStartRequest(BaseModel):
-    agent_id: str
+    agent_id: str | None = None
     persistent: bool = False
     setup_script: str | None = None
     os_image: str | None = None
@@ -343,8 +344,8 @@ async def session_start(
             detail=f"Unknown OS image '{os_image}'. Available: {list(config.OS_CATALOG.keys())}",
         )
 
-    # 1. Already assigned
-    existing_id = _agent_map.get(body.agent_id)
+    # 1. Already assigned (only check if agent_id provided)
+    existing_id = _agent_map.get(body.agent_id) if body.agent_id else None
     if existing_id and existing_id in _sandbox_cache:
         entry = _sandbox_cache[existing_id]
         if entry["status"] in ("assigned", "idle", "running", "starting"):
@@ -371,19 +372,22 @@ async def session_start(
         ):
             # Assign it
             entry["agent_id"] = body.agent_id
-            entry["status"] = "assigned"
+            entry["status"] = "assigned" if body.agent_id else "idle"
             if body.tenant_id:
                 entry["tenant_id"] = body.tenant_id
             if body.project_id:
                 entry["project_id"] = body.project_id
-            _agent_map[body.agent_id] = sid
+            if body.agent_id:
+                _agent_map[body.agent_id] = sid
 
             # Update K8s labels
-            _k8s.update_pod_labels(sid, {
-                LABEL_AGENT_ID: body.agent_id,
+            update_labels = {
+                **({LABEL_AGENT_ID: body.agent_id} if body.agent_id else {}),
                 **({LABEL_TENANT_ID: body.tenant_id} if body.tenant_id else {}),
                 **({LABEL_PROJECT_ID: body.project_id} if body.project_id else {}),
-            })
+            }
+            if update_labels:
+                _k8s.update_pod_labels(sid, update_labels)
 
             ready = await _wait_for_pod_ready(
                 sid, entry["auth_token"], timeout=10.0, poll_interval=1.0,
@@ -430,15 +434,14 @@ async def session_start(
         "tenant_id": body.tenant_id,
         "project_id": body.project_id,
         "auth_token": auth_token,
-        "status": "assigned",
+        "status": "assigned" if body.agent_id else "starting",
         "host": host,
         "port": config.CONTAINER_INTERNAL_PORT,
     }
     _sandbox_cache[sandbox_id] = entry
-    _agent_map[body.agent_id] = sandbox_id
-
-    # Update Pod labels with agent assignment
-    _k8s.update_pod_labels(sandbox_id, {LABEL_AGENT_ID: body.agent_id})
+    if body.agent_id:
+        _agent_map[body.agent_id] = sandbox_id
+        _k8s.update_pod_labels(sandbox_id, {LABEL_AGENT_ID: body.agent_id})
 
     # Wait for readiness (may take longer for Windows — Autopilot node provisioning)
     catalog_entry = config.OS_CATALOG[os_image]

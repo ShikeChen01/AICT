@@ -10,16 +10,12 @@ cryptography>=42.0.0,<44.0.0
 httpx>=0.26.0,<1.0.0
 websockets>=13.0,<14.0
 openai>=1.30.0,<3.0.0
+anthropic>=0.39.0,<1.0.0
 firebase-admin>=6.0.0
 google-cloud-logging>=3.0.0,<4.0.0
 
-# LangGraph & AI
-langgraph>=0.0.20
-langchain-core>=0.1.0
-langchain-openai>=0.0.5
-langchain-anthropic>=0.1.0
-langchain-google-genai>=1.0.0
-langgraph-checkpoint-postgres>=2.0.0
+# v3.1: LangGraph removed — agents use independent run loops.
+# psycopg2 retained for Alembic migrations with sync driver.
 psycopg2-binary>=2.9.9
 
 # RAG / Knowledge Base

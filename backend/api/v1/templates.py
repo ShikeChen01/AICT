@@ -181,7 +181,6 @@ async def delete_template(
 
 class SpawnFromTemplateRequest(BaseModel):
     display_name: str | None = Field(None, max_length=100)
-    sandbox_persist: bool = Field(default=False)
 
 
 @router.post("/templates/{template_id}/spawn", response_model=AgentResponse)
@@ -212,7 +211,6 @@ async def spawn_from_template(
             project_id=template.project_id,
             template_id=template_id,
             display_name=body.display_name if body else None,
-            sandbox_persist=body.sandbox_persist if body else False,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

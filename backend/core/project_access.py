@@ -25,7 +25,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.db.models import Repository, RepositoryMembership
+from backend.db.models import Repository, ProjectMembership
 from backend.db.repositories.membership import MembershipRepository
 
 # Production operators can disable the legacy null-owner bypass.
