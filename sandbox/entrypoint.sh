@@ -22,6 +22,58 @@ export DISPLAY="${DISPLAY_NUM}"
 # Start a minimal window manager so Chrome windows are properly composited
 echo "[sandbox] Starting openbox window manager..."
 openbox --sm-disable &
+sleep 0.3
+
+# ── Desktop environment ──────────────────────────────────────────────────────
+# Set a solid background so the sandbox doesn't look like a black void
+xsetroot -solid "#1e293b"
+
+# Generate a minimal welcome page the user sees on connect
+cat > /tmp/welcome.html <<'WELCOME'
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: system-ui, -apple-system, sans-serif;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+    color: #e2e8f0;
+  }
+  .card {
+    text-align: center;
+    padding: 3rem 4rem;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    backdrop-filter: blur(8px);
+  }
+  h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem; }
+  p  { font-size: 0.9rem; color: #94a3b8; }
+  .dot { display: inline-block; width: 8px; height: 8px;
+         background: #22c55e; border-radius: 50%; margin-right: 8px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1><span class="dot"></span>Sandbox Ready</h1>
+    <p>Your environment is running. Open any app or use the terminal.</p>
+  </div>
+</body>
+</html>
+WELCOME
+
+# Launch Chrome with the welcome page in kiosk-like mode (no toolbar clutter)
+google-chrome-stable \
+    --no-first-run --no-default-browser-check --disable-translate \
+    --window-size="${SCREEN_WIDTH:-1024},${SCREEN_HEIGHT:-768}" \
+    --window-position=0,0 \
+    --app="file:///tmp/welcome.html" \
+    &>/dev/null &
 
 # Start x11vnc — VNC server attached to the Xvfb display for remote desktop
 echo "[sandbox] Starting x11vnc on display ${DISPLAY_NUM}..."
