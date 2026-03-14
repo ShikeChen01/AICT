@@ -365,14 +365,56 @@ class PromptBlockConfigRepository(BaseRepository[PromptBlockConfig]):
             await self.session.flush()
         return block
 
+    async def deduplicate_agent_blocks(self, agent_id: UUID) -> list[PromptBlockConfig]:
+        """Remove duplicate blocks for an agent, keeping the first (oldest) per block_key.
+
+        Returns the deduplicated list.
+        """
+        blocks = await self.list_for_agent(agent_id)
+        seen: dict[str, PromptBlockConfig] = {}
+        duplicates: list[PromptBlockConfig] = []
+        for b in blocks:
+            if b.block_key not in seen:
+                seen[b.block_key] = b
+            else:
+                duplicates.append(b)
+        if duplicates:
+            for dup in duplicates:
+                await self.session.delete(dup)
+            await self.session.flush()
+        return list(seen.values())
+
     async def ensure_agent_blocks(self, agent_id: UUID, role: str) -> list[PromptBlockConfig]:
         """Return existing blocks for an agent, auto-seeding defaults if empty.
 
         Covers agents created before the prompt-block system was introduced.
+        Uses an advisory lock (PostgreSQL) to prevent concurrent seeding races
+        that would create duplicate blocks.
         """
         blocks = await self.list_for_agent(agent_id)
         if blocks:
+            # Deduplicate if prior races created duplicates
+            seen_keys: set[str] = set()
+            has_dups = False
+            for b in blocks:
+                if b.block_key in seen_keys:
+                    has_dups = True
+                    break
+                seen_keys.add(b.block_key)
+            if has_dups:
+                return await self.deduplicate_agent_blocks(agent_id)
             return blocks
+
+        # Acquire advisory lock to prevent concurrent seeding
+        dialect = self.session.bind.dialect.name if self.session.bind else ""
+        if dialect == "postgresql":
+            lock_key = int(hashlib.md5(agent_id.bytes).hexdigest()[:15], 16)
+            await self.session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+            # Re-check after lock — another transaction may have seeded while we waited
+            blocks = await self.list_for_agent(agent_id)
+            if blocks:
+                return blocks
+
         role_map = {"manager": "manager", "cto": "cto", "engineer": "worker"}
         base_role = role_map.get(role, "worker")
         return await self.bulk_replace_agent_blocks(agent_id, _build_block_defs_for_role(base_role))
