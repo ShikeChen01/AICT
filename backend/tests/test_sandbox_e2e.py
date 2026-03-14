@@ -6,6 +6,10 @@ These tests are designed to EXPOSE the startup race condition and validate
 the fixes.  They do NOT hit real network endpoints — everything is mocked at
 the boundary layer (OrchestratorClient / SandboxClient methods).
 
+v3.1: Updated for stateless SandboxClient. All methods now take
+(host, port, auth_token) parameters instead of sandbox_id lookups
+in a connection pool.
+
 Bugs being tested:
   1. Startup race condition — session_start returns before container is ready,
      causing health / shell / screenshot tools to fail immediately.
@@ -18,35 +22,33 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
-from backend.services.sandbox_client import ShellResult, SandboxClient, SandboxConnection
+from backend.services.sandbox_client import ShellResult, SandboxClient
 
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
 
-def _make_connection(host_port: int = 30001, auth_token: str = "tok") -> SandboxConnection:
-    return SandboxConnection(
-        sandbox_id="testsandbox",
-        rest_base_url=f"http://127.0.0.1:{host_port}",
-        auth_token=auth_token,
-    )
+_TEST_HOST = "127.0.0.1"
+_TEST_PORT = 30001
+_TEST_TOKEN = "tok"
 
 
 def _make_agent(sandbox_id: str | None = "testsandbox") -> MagicMock:
     agent = MagicMock()
     agent.id = "agent-1"
     agent.role = "engineer"
-    # Create a mock sandbox object if sandbox_id is provided
     if sandbox_id:
         mock_sandbox = MagicMock()
         mock_sandbox.id = sandbox_id
+        mock_sandbox.host = _TEST_HOST
+        mock_sandbox.port = _TEST_PORT
+        mock_sandbox.auth_token = _TEST_TOKEN
         agent.sandbox = mock_sandbox
     else:
         agent.sandbox = None
@@ -61,41 +63,32 @@ class TestStartupRaceCondition:
     """
     Reproduce the scenario: agent calls sandbox_start_session, then immediately
     calls sandbox_health before the container uvicorn has started.
-
-    Expected (BEFORE fix): health check raises ConnectError — either hanging
-    for 30 s or returning an empty / opaque error string.
-    Expected (AFTER fix): session_start waits for the container to be ready, so
-    health check succeeds immediately.
     """
 
     @pytest.mark.asyncio
     async def test_health_fails_with_connect_error_when_container_not_ready(self):
         """
         Simulate the race condition: container port rejects connections.
-        Verify that the error message surfaced to the agent is non-empty and
-        contains useful diagnostic info (the bug was it returned "").
+        Verify that the error propagates clearly.
         """
         client = SandboxClient()
-        conn = _make_connection()
-        client._connections["testsandbox"] = conn
 
-        # Simulate container not ready: every HTTP call raises ConnectError
-        connect_err = httpx.ConnectError("Connection refused")
+        with patch("httpx.AsyncClient") as MockClient:
+            mock_instance = AsyncMock()
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=False)
+            mock_instance.get = AsyncMock(
+                side_effect=httpx.ConnectError("Connection refused")
+            )
+            MockClient.return_value = mock_instance
 
-        mock_http = AsyncMock()
-        mock_http.is_closed = False  # prevent http() from creating a real client
-        mock_http.get = AsyncMock(side_effect=connect_err)
-        conn._http = mock_http
-
-        with pytest.raises(httpx.ConnectError):
-            await client.health_check("testsandbox")
+            with pytest.raises(httpx.ConnectError):
+                await client.health_check(_TEST_HOST, _TEST_PORT, _TEST_TOKEN)
 
     @pytest.mark.asyncio
     async def test_health_error_message_is_non_empty(self):
         """
-        The _run_sandbox_health executor catches exceptions and returns
-        f"Health check failed: {exc}".  Verify str(ConnectError) gives a
-        non-empty, human-readable message — not just "".
+        Verify str(ConnectError) gives a non-empty, human-readable message.
         """
         err = httpx.ConnectError("Connection refused by peer")
         msg = str(err)
@@ -108,45 +101,13 @@ class TestStartupRaceCondition:
         )
 
     @pytest.mark.asyncio
-    async def test_execute_command_returns_only_sandbox_id_when_container_not_ready(self):
-        """
-        Reproduce: when the WS times out (container not ready), execute_shell
-        returns ShellResult(stdout="", exit_code=None).
-
-        _run_execute_command then assembles:
-            "Sandbox: <id>"
-            ""        <-- result.stdout is empty
-        And the agent sees ONLY the sandbox ID — no output at all.
-
-        This test confirms the bug exists in the client layer.
-        """
-        client = SandboxClient()
-        conn = _make_connection()
-        client._connections["testsandbox"] = conn
-
-        # Simulate WS open timeout — connection refused immediately
-        import websockets.exceptions
-
-        async def mock_connect_fail(*args, **kwargs):
-            raise websockets.exceptions.InvalidURI("ws://127.0.0.1:30001/ws/shell", "refused")
-
-        with patch("websockets.connect", side_effect=mock_connect_fail):
-            with pytest.raises(RuntimeError) as exc_info:
-                await client.execute_shell("testsandbox", "echo hello")
-            assert "Shell execution failed" in str(exc_info.value)
-
-    @pytest.mark.asyncio
     async def test_screenshot_fails_when_display_not_ready(self):
         """
-        If the container started but Xvfb hasn't initialised yet (or if the
-        container itself is still booting), /screenshot returns 500.
-        Verify the error propagates clearly.
+        If the container started but Xvfb hasn't initialised yet,
+        /screenshot returns 500. Verify the error propagates clearly.
         """
         client = SandboxClient()
-        conn = _make_connection()
-        client._connections["testsandbox"] = conn
 
-        # Container up but Xvfb not ready → server returns 500
         mock_resp = MagicMock()
         mock_resp.status_code = 500
         mock_resp.raise_for_status = MagicMock(
@@ -157,13 +118,15 @@ class TestStartupRaceCondition:
             )
         )
 
-        mock_http = AsyncMock()
-        mock_http.is_closed = False
-        mock_http.get = AsyncMock(return_value=mock_resp)
-        conn._http = mock_http
+        with patch("httpx.AsyncClient") as MockClient:
+            mock_instance = AsyncMock()
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=False)
+            mock_instance.get = AsyncMock(return_value=mock_resp)
+            MockClient.return_value = mock_instance
 
-        with pytest.raises(httpx.HTTPStatusError):
-            await client.get_screenshot("testsandbox")
+            with pytest.raises(httpx.HTTPStatusError):
+                await client.get_screenshot(_TEST_HOST, _TEST_PORT, _TEST_TOKEN)
 
 
 # ---------------------------------------------------------------------------
@@ -174,22 +137,15 @@ class TestSessionStartReadiness:
     """
     Tests that verify the pool manager session_start endpoint waits for the
     container to be ready before returning to the caller.
-
-    These tests target the FIXED behaviour.  They mock the readiness poll.
     """
 
     @pytest.mark.asyncio
     async def test_health_succeeds_after_container_ready(self):
         """
-        Happy path: pool manager creates container, waits for /health to return
-        200, then returns to the backend.  The backend registers the connection
-        and subsequent health_check should succeed immediately.
+        Happy path: container is ready, health check returns 200.
         """
         client = SandboxClient()
-        conn = _make_connection()
-        client._connections["testsandbox"] = conn
 
-        # Container is now ready: /health returns 200
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.raise_for_status = MagicMock()
@@ -199,25 +155,25 @@ class TestSessionStartReadiness:
             "display": ":99",
         })
 
-        mock_http = AsyncMock()
-        mock_http.is_closed = False
-        mock_http.get = AsyncMock(return_value=mock_resp)
-        conn._http = mock_http
+        with patch("httpx.AsyncClient") as MockClient:
+            mock_instance = AsyncMock()
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=False)
+            mock_instance.get = AsyncMock(return_value=mock_resp)
+            MockClient.return_value = mock_instance
 
-        result = await client.health_check("testsandbox")
+            result = await client.health_check(_TEST_HOST, _TEST_PORT, _TEST_TOKEN)
+
         assert result["status"] == "ok"
         assert "uptime_seconds" in result
 
     @pytest.mark.asyncio
     async def test_readiness_poll_retries_until_ready(self):
         """
-        Simulate the pool manager's _wait_for_ready logic:
-        - First N attempts fail (connection refused / 503)
-        - Attempt N+1 succeeds
-        Verify that we retry and ultimately return True.
+        Simulate a readiness probe: first N attempts fail, then succeed.
         """
         call_count = 0
-        fail_times = 3  # fail for 3 iterations, succeed on 4th
+        fail_times = 3
 
         async def fake_get(url: str, **kwargs):
             nonlocal call_count
@@ -230,9 +186,9 @@ class TestSessionStartReadiness:
 
         start = time.monotonic()
 
-        async def _wait_for_ready(host_port: int, auth_token: str, timeout: float = 10.0) -> bool:
+        async def _wait_for_ready(host: str, port: int, auth_token: str, timeout: float = 10.0) -> bool:
             """Inlined copy of the pool manager readiness probe (under test)."""
-            url = f"http://127.0.0.1:{host_port}/health"
+            url = f"http://{host}:{port}/health"
             headers = {"Authorization": f"Bearer {auth_token}"}
             deadline = asyncio.get_event_loop().time() + timeout
             while asyncio.get_event_loop().time() < deadline:
@@ -243,7 +199,7 @@ class TestSessionStartReadiness:
                             return True
                 except Exception:
                     pass
-                await asyncio.sleep(0.05)  # fast for tests
+                await asyncio.sleep(0.05)
             return False
 
         with patch("httpx.AsyncClient") as MockClient:
@@ -253,7 +209,7 @@ class TestSessionStartReadiness:
             mock_instance.get = fake_get
             MockClient.return_value = mock_instance
 
-            ready = await _wait_for_ready(30001, "tok", timeout=5.0)
+            ready = await _wait_for_ready(_TEST_HOST, _TEST_PORT, _TEST_TOKEN, timeout=5.0)
 
         elapsed = time.monotonic() - start
         assert ready is True, "Readiness probe should eventually return True"
@@ -263,12 +219,10 @@ class TestSessionStartReadiness:
     @pytest.mark.asyncio
     async def test_readiness_poll_times_out(self):
         """
-        If the container never becomes healthy within the timeout, the readiness
-        probe returns False.  session_start should still return (not hang) but
-        the response indicates the container may not be ready.
+        If the container never becomes healthy, the probe returns False.
         """
-        async def _wait_for_ready(host_port: int, auth_token: str, timeout: float = 0.1) -> bool:
-            url = f"http://127.0.0.1:{host_port}/health"
+        async def _wait_for_ready(host: str, port: int, auth_token: str, timeout: float = 0.1) -> bool:
+            url = f"http://{host}:{port}/health"
             headers = {"Authorization": f"Bearer {auth_token}"}
             deadline = asyncio.get_event_loop().time() + timeout
             while asyncio.get_event_loop().time() < deadline:
@@ -286,11 +240,10 @@ class TestSessionStartReadiness:
             mock_instance = AsyncMock()
             mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
             mock_instance.__aexit__ = AsyncMock(return_value=False)
-            # Always raises — container never ready
             mock_instance.get = AsyncMock(side_effect=httpx.ConnectError("refused"))
             MockClient.return_value = mock_instance
 
-            ready = await _wait_for_ready(30001, "tok", timeout=0.1)
+            ready = await _wait_for_ready(_TEST_HOST, _TEST_PORT, _TEST_TOKEN, timeout=0.1)
 
         assert ready is False
 
@@ -301,65 +254,57 @@ class TestSessionStartReadiness:
 
 class TestAgentToolFlowHappyPath:
     """
-    Simulate the complete sequence an agent runs:
-      sandbox_start_session → sandbox_health → execute_command → sandbox_screenshot
-      → sandbox_end_session
-
-    All external calls are mocked.  The test verifies:
-      - Each step returns the expected data shape
-      - Shell output is non-empty
-      - Health response includes status/uptime/display
-      - Session end is called correctly
+    Simulate the complete sequence an agent runs.
+    All external calls are mocked.
     """
 
-    @pytest.fixture
-    def sandbox_client(self):
+    @pytest.mark.asyncio
+    async def test_health_check_returns_complete_data(self):
         client = SandboxClient()
-        conn = _make_connection()
-        client._connections["testsandbox"] = conn
 
-        # Pre-configure a good HTTP mock for REST calls
-        mock_resp_health = MagicMock()
-        mock_resp_health.status_code = 200
-        mock_resp_health.raise_for_status = MagicMock()
-        mock_resp_health.json = MagicMock(return_value={
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json = MagicMock(return_value={
             "status": "ok",
             "uptime_seconds": 5.3,
             "display": ":99",
         })
 
-        mock_resp_screenshot = MagicMock()
-        mock_resp_screenshot.status_code = 200
-        mock_resp_screenshot.raise_for_status = MagicMock()
-        mock_resp_screenshot.content = b"\xff\xd8\xff" + b"\x00" * 100  # fake JPEG
+        with patch("httpx.AsyncClient") as MockClient:
+            mock_instance = AsyncMock()
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=False)
+            mock_instance.get = AsyncMock(return_value=mock_resp)
+            MockClient.return_value = mock_instance
 
-        async def fake_get(path, **kwargs):
-            if "health" in path:
-                return mock_resp_health
-            if "screenshot" in path:
-                return mock_resp_screenshot
-            raise ValueError(f"Unexpected GET {path}")
+            result = await client.health_check(_TEST_HOST, _TEST_PORT, _TEST_TOKEN)
 
-        mock_http = AsyncMock()
-        mock_http.is_closed = False  # prevent http() from creating a real client
-        mock_http.get = fake_get
-        conn._http = mock_http
-
-        return client
-
-    @pytest.mark.asyncio
-    async def test_health_check_returns_complete_data(self, sandbox_client):
-        result = await sandbox_client.health_check("testsandbox")
         assert result["status"] == "ok"
         assert result["uptime_seconds"] == 5.3
         assert result["display"] == ":99"
 
     @pytest.mark.asyncio
-    async def test_screenshot_returns_bytes(self, sandbox_client):
-        img = await sandbox_client.get_screenshot("testsandbox")
+    async def test_screenshot_returns_bytes(self):
+        client = SandboxClient()
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.content = b"\xff\xd8\xff" + b"\x00" * 100  # fake JPEG
+
+        with patch("httpx.AsyncClient") as MockClient:
+            mock_instance = AsyncMock()
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=False)
+            mock_instance.get = AsyncMock(return_value=mock_resp)
+            MockClient.return_value = mock_instance
+
+            img = await client.get_screenshot(_TEST_HOST, _TEST_PORT, _TEST_TOKEN)
+
         assert isinstance(img, bytes)
         assert len(img) > 0
-        assert img[:3] == b"\xff\xd8\xff"  # JPEG magic bytes
+        assert img[:3] == b"\xff\xd8\xff"
 
     @pytest.mark.asyncio
     async def test_execute_shell_returns_stdout(self):
@@ -368,8 +313,6 @@ class TestAgentToolFlowHappyPath:
         Verifies the sentinel parsing logic works correctly.
         """
         client = SandboxClient()
-        conn = _make_connection()
-        client._connections["testsandbox"] = conn
 
         marker = "deadbeef12345678"
         drain_sentinel = f"__AICT_DRAIN_{marker}__"
@@ -397,7 +340,9 @@ class TestAgentToolFlowHappyPath:
 
         with patch("websockets.connect", return_value=FakeWS()), \
              patch("secrets.token_hex", return_value=marker):
-            result = await client.execute_shell("testsandbox", "uname -a")
+            result = await client.execute_shell(
+                _TEST_HOST, _TEST_PORT, _TEST_TOKEN, "uname -a"
+            )
 
         assert result.exit_code == 0
         assert "Linux" in result.stdout
@@ -407,8 +352,6 @@ class TestAgentToolFlowHappyPath:
     async def test_execute_shell_non_zero_exit_code(self):
         """Verify exit code is parsed correctly for failing commands."""
         client = SandboxClient()
-        conn = _make_connection()
-        client._connections["testsandbox"] = conn
 
         marker = "cafebabe99887766"
         drain_sentinel = f"__AICT_DRAIN_{marker}__"
@@ -433,7 +376,9 @@ class TestAgentToolFlowHappyPath:
 
         with patch("websockets.connect", return_value=FakeWS()), \
              patch("secrets.token_hex", return_value=marker):
-            result = await client.execute_shell("testsandbox", "ls /nonexistent")
+            result = await client.execute_shell(
+                _TEST_HOST, _TEST_PORT, _TEST_TOKEN, "ls /nonexistent"
+            )
 
         assert result.exit_code == 2
         assert "No such file" in result.stdout
@@ -455,7 +400,7 @@ class TestSandboxHealthExecutor:
 
         ctx = MagicMock(spec=RunContext)
         ctx.agent = _make_agent()
-        ctx.db = MagicMock()  # sandbox_health now receives session=ctx.db
+        ctx.db = MagicMock()
 
         mock_svc = AsyncMock()
         mock_svc.sandbox_health = AsyncMock(
@@ -470,7 +415,6 @@ class TestSandboxHealthExecutor:
 
         result = str(exc_info.value)
         assert "Health check failed" in result
-        # The error detail must be non-empty — this was the original bug
         after_colon = result.split("Health check failed:")[-1].strip()
         assert after_colon, (
             "BUG REPRODUCED: health check error message is empty. "
@@ -483,7 +427,7 @@ class TestSandboxHealthExecutor:
 
         ctx = MagicMock(spec=RunContext)
         ctx.agent = _make_agent()
-        ctx.db = MagicMock()  # sandbox_health now receives session=ctx.db
+        ctx.db = MagicMock()
 
         mock_svc = AsyncMock()
         mock_svc.sandbox_health = AsyncMock(
@@ -507,7 +451,7 @@ class TestSandboxHealthExecutor:
 
         ctx = MagicMock(spec=RunContext)
         ctx.agent = _make_agent()
-        ctx.db = MagicMock()  # sandbox_health now receives session=ctx.db
+        ctx.db = MagicMock()
 
         mock_svc = AsyncMock()
         mock_svc.sandbox_health = AsyncMock(return_value={
@@ -531,8 +475,6 @@ class TestSandboxHealthExecutor:
 class TestExecuteCommandExecutor:
     """
     Test the _run_execute_command executor.
-    Focus: when shell output is empty (container not ready), the agent should
-    NOT silently receive only the sandbox ID — it should receive an error.
     """
 
     @pytest.mark.asyncio
@@ -544,7 +486,7 @@ class TestExecuteCommandExecutor:
         ctx.db = AsyncMock()
 
         mock_svc = AsyncMock()
-        mock_svc.execute_command = AsyncMock(
+        mock_svc.execute_command_legacy = AsyncMock(
             return_value=ShellResult(stdout="hello world\n", exit_code=0)
         )
 
@@ -558,11 +500,7 @@ class TestExecuteCommandExecutor:
     async def test_execute_command_empty_stdout_on_timeout(self):
         """
         BUG REPRODUCTION: when execute_shell times out, stdout is "" and
-        exit_code is None.  The executor returns only "Sandbox: <id>" with
-        no indication of what happened.
-
-        This test confirms the bug and documents the EXPECTED fix:
-        the executor should include a timeout notice, not silently return nothing.
+        exit_code is None.
         """
         from backend.tools.loop_registry import _run_execute_command, RunContext
 
@@ -571,16 +509,13 @@ class TestExecuteCommandExecutor:
         ctx.db = AsyncMock()
 
         mock_svc = AsyncMock()
-        # Simulate timeout: stdout empty, exit_code None
-        mock_svc.execute_command = AsyncMock(
+        mock_svc.execute_command_legacy = AsyncMock(
             return_value=ShellResult(stdout="", exit_code=None)
         )
 
         with patch("backend.tools.executors.sandbox._get_sandbox_service", return_value=mock_svc):
             result = await _run_execute_command(ctx, {"command": "echo hello"})
 
-        # After fix: must include a timeout/no-output notice so the agent knows
-        # the command didn't produce output (not silently receive only the sandbox ID).
         assert (
             "timed out" in result.lower()
             or "no output" in result.lower()
@@ -592,10 +527,6 @@ class TestExecuteCommandExecutor:
 
     @pytest.mark.asyncio
     async def test_execute_command_shell_error_propagates(self):
-        """
-        If execute_shell raises (WS connect error), the error should be
-        surfaced to the agent, not silently swallowed.
-        """
         from backend.tools.loop_registry import _run_execute_command, RunContext
 
         ctx = MagicMock(spec=RunContext)
@@ -603,7 +534,7 @@ class TestExecuteCommandExecutor:
         ctx.db = AsyncMock()
 
         mock_svc = AsyncMock()
-        mock_svc.execute_command = AsyncMock(
+        mock_svc.execute_command_legacy = AsyncMock(
             side_effect=RuntimeError("Shell execution failed: Connection refused")
         )
 

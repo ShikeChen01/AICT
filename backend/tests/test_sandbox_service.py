@@ -49,7 +49,7 @@ async def test_orchestrator_client_claim() -> None:
         mock_http.post = AsyncMock(return_value=_mock_http_response(expected))
         mock_cls.return_value = mock_http
 
-        result = await client.claim()
+        result = await client.claim("abc123", agent_id="agent-001")
 
     assert result["sandbox_id"] == "abc123"
     assert result["host_port"] == 30001

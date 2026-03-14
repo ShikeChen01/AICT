@@ -93,7 +93,7 @@ async def test_execute_command_tool_uses_vm_sandbox(sample_engineer, session) ->
 
     with patch("backend.tools.executors.sandbox._get_sandbox_service") as mock_f:
         mock_svc = MagicMock()
-        mock_svc.execute_command = AsyncMock(return_value=shell_result)
+        mock_svc.execute_command_legacy = AsyncMock(return_value=shell_result)
         mock_f.return_value = mock_svc
 
         result = await _run_execute_command(ctx, {"command": "pwd"})
@@ -142,7 +142,7 @@ async def test_execute_command_tool_reports_sandbox_output(sample_engineer, sess
 
     with patch("backend.tools.executors.sandbox._get_sandbox_service") as mock_f:
         mock_svc = MagicMock()
-        mock_svc.execute_command = AsyncMock(return_value=shell_result)
+        mock_svc.execute_command_legacy = AsyncMock(return_value=shell_result)
         mock_f.return_value = mock_svc
 
         result = await _run_execute_command(ctx, {"command": "pwd"})
