@@ -484,6 +484,9 @@ class PromptBlockConfig(Base):
     __table_args__ = (
         Index("ix_prompt_block_configs_template", "template_id", "position"),
         Index("ix_prompt_block_configs_agent", "agent_id", "position"),
+        # Prevent duplicate blocks per agent or template (race condition guard)
+        Index("uq_prompt_block_configs_agent_key", "agent_id", "block_key", unique=True),
+        Index("uq_prompt_block_configs_template_key", "template_id", "block_key", unique=True),
     )
 
 

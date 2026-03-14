@@ -89,7 +89,6 @@ class BlockMeta:
 BLOCK_REGISTRY: dict[str, BlockMeta] = {
     "rules":                BlockMeta("rules", "system", None, "never"),
     "history_rules":        BlockMeta("history_rules", "system", None, "never"),
-    "incoming_msg_rules":       BlockMeta("incoming_msg_rules", "system", None, "never"),
     "incoming_message_rules":   BlockMeta("incoming_message_rules", "system", None, "never"),
     "tool_result_rules":    BlockMeta("tool_result_rules", "system", None, "never"),
     "tool_io":              BlockMeta("tool_io", "system", None, "never"),
