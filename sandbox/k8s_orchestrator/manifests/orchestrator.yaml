@@ -79,19 +79,16 @@ metadata:
   namespace: sandbox-system
   labels:
     app: sandbox-orchestrator
-  annotations:
-    # Internal LB gets a stable VPC IP that Cloud Run can reach
-    # via its VPC connector — unlike ClusterIP, which requires
-    # in-cluster DNS resolution that Cloud Run doesn't have.
-    cloud.google.com/load-balancer-type: "Internal"
+  annotations: {}
 spec:
-  type: LoadBalancer
+  type: NodePort
   selector:
     app: sandbox-orchestrator
   ports:
     - name: http
       port: 9090
       targetPort: 9090
+      nodePort: 30090
 
 ---
 

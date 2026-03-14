@@ -48,46 +48,12 @@ OS_CATALOG: dict[str, dict] = {
         },
         "default": True,
     },
-    "ubuntu-24.04": {
-        "display_name": "Ubuntu 24.04 LTS",
-        "image": f"{REGISTRY_BASE}/sandbox-ubuntu-24.04:latest",
-        "os_family": "linux",
-        "node_selector": {"kubernetes.io/os": "linux"},
-        "tolerations": [],
-        "resources": {
-            "requests": {"cpu": "250m", "memory": "256Mi"},
-            "limits": {"cpu": "1000m", "memory": "1Gi"},
-        },
-    },
-    "debian-12": {
-        "display_name": "Debian 12 (Bookworm)",
-        "image": f"{REGISTRY_BASE}/sandbox-debian-12:latest",
-        "os_family": "linux",
-        "node_selector": {"kubernetes.io/os": "linux"},
-        "tolerations": [],
-        "resources": {
-            "requests": {"cpu": "250m", "memory": "256Mi"},
-            "limits": {"cpu": "1000m", "memory": "1Gi"},
-        },
-    },
-    "windows-server-2022": {
-        "display_name": "Windows Server 2022",
-        "image": f"{REGISTRY_BASE}/sandbox-windows-2022:latest",
-        "os_family": "windows",
-        "node_selector": {"kubernetes.io/os": "windows"},
-        "tolerations": [
-            {
-                "key": "node.kubernetes.io/os",
-                "operator": "Equal",
-                "value": "windows",
-                "effect": "NoSchedule",
-            },
-        ],
-        "resources": {
-            "requests": {"cpu": "500m", "memory": "2Gi"},
-            "limits": {"cpu": "2000m", "memory": "4Gi"},
-        },
-    },
+    # ── Future OS images (uncomment when images are built & pushed) ────
+    # "ubuntu-24.04": { ... },
+    # "debian-12": { ... },
+    # Windows 10/11 desktop is not feasible on GKE (only Server LTSC
+    # containers are supported). A desktop GUI would require a full
+    # Compute Engine VM with RDP, not a K8s container.
 }
 
 DEFAULT_OS_IMAGE: str = os.environ.get("DEFAULT_OS_IMAGE", "ubuntu-22.04")
