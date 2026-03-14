@@ -89,8 +89,8 @@ async def _verify_ws_sandbox_access(token: str, sandbox_id: str) -> bool:
     """
     Return True iff the token is valid AND the caller has access to sandbox_id.
 
-    Resolves the sandbox and its agent (if linked), then delegates to project access check.
-    Falls back to True (token-only) if no sandbox is found yet.
+    Access is granted if the user owns the sandbox OR is a member of the
+    project the sandbox is attached to.
     """
     if not token:
         return False
@@ -105,6 +105,12 @@ async def _verify_ws_sandbox_access(token: str, sandbox_id: str) -> bool:
         return False
 
     async with AsyncSessionLocal() as db:
+        # Resolve user from Firebase UID
+        user_result = await db.execute(select(User).where(User.firebase_uid == firebase_uid))
+        user = user_result.scalar_one_or_none()
+        if user is None:
+            return False
+
         # Look up sandbox by orchestrator_sandbox_id (the public sandbox ID)
         sandbox_result = await db.execute(
             select(Sandbox).where(Sandbox.orchestrator_sandbox_id == sandbox_id)
@@ -115,12 +121,15 @@ async def _verify_ws_sandbox_access(token: str, sandbox_id: str) -> bool:
         # Sandbox not found yet — allow if token is valid
         return True
 
-    # Sandbox found; check agent's project access
-    if sandbox.agent_id is None:
-        # Sandbox not yet assigned to an agent — allow if token is valid
+    # Owner always has access
+    if sandbox.user_id == user.id:
         return True
 
-    return await _verify_ws_project_access(token, sandbox.project_id)
+    # Project member has access if sandbox is attached to a project
+    if sandbox.project_id:
+        return await _verify_ws_project_access(token, sandbox.project_id)
+
+    return False
 
 
 # ---- /ws  main event stream -------------------------------------------------

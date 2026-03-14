@@ -100,6 +100,7 @@ class User(Base):
     projects = relationship("Project", back_populates="owner")
     memberships = relationship("ProjectMembership", back_populates="user", cascade="all, delete-orphan")
     sandbox_configs = relationship("SandboxConfig", back_populates="user", cascade="all, delete-orphan")
+    sandboxes = relationship("Sandbox", foreign_keys="Sandbox.user_id", cascade="all, delete-orphan")
 
 
 # ── Sandbox Configs (user-owned blueprints) ────────────────────────
@@ -139,19 +140,24 @@ class SandboxConfig(Base):
 
 
 class Sandbox(Base):
-    """Runtime sandbox instance.
+    """Runtime sandbox instance — user-owned.
 
     Tracks the lifecycle of a sandbox container from provisioning to release.
     Created from a SandboxConfig blueprint — runtime state only; no duplication
-    of config fields.  Can be assigned to an agent or left in a pool.
+    of config fields.  Owned by a user; optionally attached to a project and/or
+    assigned to an agent.
     """
 
     __tablename__ = "sandboxes"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
-    project_id = Column(Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(Uuid, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     agent_id = Column(Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     sandbox_config_id = Column(Uuid, ForeignKey("sandbox_configs.id", ondelete="SET NULL"), nullable=True)
+
+    name = Column(String(100), nullable=True)
+    description = Column(Text, nullable=True)
 
     orchestrator_sandbox_id = Column(String(255), nullable=False, unique=True)
     status = Column(String(50), nullable=False, default="provisioning")
@@ -164,10 +170,16 @@ class Sandbox(Base):
     last_health_at = Column(DateTime(timezone=True), nullable=True)
     released_at = Column(DateTime(timezone=True), nullable=True)
 
+    user = relationship("User", foreign_keys=[user_id])
     project = relationship("Project")
     agent = relationship("Agent", back_populates="sandbox")
     config = relationship("SandboxConfig", back_populates="sandboxes")
     snapshots = relationship("SandboxSnapshot", back_populates="sandbox", cascade="all, delete-orphan")
+    file_saves = relationship("SandboxFileSave", back_populates="sandbox")
+
+    __table_args__ = (
+        Index("ix_sandboxes_user_status", "user_id", "status"),
+    )
 
 
 class SandboxSnapshot(Base):
@@ -201,6 +213,32 @@ class SandboxUsageEvent(Base):
     pod_seconds = Column(Float, nullable=False, default=0)
     cost_usd = Column(Float, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class SandboxFileSave(Base):
+    """Archived workspace files from a sandbox, stored in object storage (GCS).
+
+    Users can save their sandbox workspace for later browsing (read-only) or
+    restoration into a future sandbox (read-write).
+    """
+
+    __tablename__ = "sandbox_file_saves"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id = Column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    sandbox_id = Column(Uuid, ForeignKey("sandboxes.id", ondelete="SET NULL"), nullable=True)
+    label = Column(String(200), nullable=True)
+    storage_path = Column(Text, nullable=False)
+    size_bytes = Column(BigInteger, nullable=True)
+    file_count = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    user = relationship("User")
+    sandbox = relationship("Sandbox", back_populates="file_saves")
+
+    __table_args__ = (
+        Index("ix_sandbox_file_saves_user", "user_id", "created_at"),
+    )
 
 
 # ── Projects ───────────────────────────────────────────────────────
@@ -306,6 +344,33 @@ class ProjectSettings(Base):
     project = relationship("Project", back_populates="project_settings")
 
 
+class ProjectDefaults(Base):
+    """Per-project defaults for agent seeding and sandbox configuration.
+
+    Replaces the hardcoded manager+CTO auto-creation with a single
+    user-configurable default template for new agents.
+    """
+
+    __tablename__ = "project_defaults"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        Uuid,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
+    default_template_id = Column(
+        Uuid,
+        ForeignKey("agent_templates.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    project = relationship("Project")
+    default_template = relationship("AgentTemplate")
+
+
 # ── Project Secrets ─────────────────────────────────────────────────
 
 
@@ -332,7 +397,10 @@ class ProjectSecret(Base):
 # ── Agent Templates ─────────────────────────────────────────────────
 
 
-VALID_BASE_ROLES = ("manager", "cto", "worker", "custom")
+# v3.1: base_role is no longer restricted — kept as documentation of known values.
+KNOWN_BASE_ROLES = ("manager", "cto", "worker", "custom")
+# Backward compat alias
+VALID_BASE_ROLES = KNOWN_BASE_ROLES
 
 
 class AgentTemplate(Base):
@@ -495,7 +563,10 @@ class ToolConfig(Base):
 # ── Agents ──────────────────────────────────────────────────────────
 
 
-VALID_ROLES = ("manager", "cto", "engineer", "worker")
+# v3.1: role is now a free-form user label, not a system enum.
+# Kept as documentation of historically known values and for backward compat.
+KNOWN_ROLES = ("manager", "cto", "engineer", "worker")
+VALID_ROLES = KNOWN_ROLES  # backward compat alias
 VALID_STATUSES = ("sleeping", "active", "busy")
 
 

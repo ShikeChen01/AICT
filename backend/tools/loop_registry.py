@@ -170,15 +170,19 @@ _TOOLS: list[LoopTool] = [
 # ---------------------------------------------------------------------------
 
 def _role_has_tool(tool: LoopTool, role: str) -> bool:
-    return "*" in tool.allowed_roles or role in tool.allowed_roles
+    """Deprecated: always returns True. Role-based gating removed in v3.1.
+
+    Kept for backward compatibility. All tools are now available to all agents.
+    Per-agent customization is handled via get_tool_defs_for_agent() (DB-based).
+    """
+    return True
 
 
 async def _run_describe_tool(ctx: RunContext, tool_input: dict) -> str:
     tool_name = tool_input.get("tool_name")
     if not tool_name:
-        available = [t for t in _TOOLS if _role_has_tool(t, ctx.agent.role)]
         lines = ["Available tools:\n"]
-        for t in available:
+        for t in _TOOLS:
             lines.append(f"  - {t.name}: {t.description}")
         lines.append("\nCall describe_tool(tool_name) for detailed usage information.")
         return "\n".join(lines)
@@ -186,8 +190,6 @@ async def _run_describe_tool(ctx: RunContext, tool_input: dict) -> str:
     tool = next((t for t in _TOOLS if t.name == tool_name), None)
     if tool is None:
         return f"Unknown tool: '{tool_name}'. Call describe_tool() with no arguments to see available tools."
-    if not _role_has_tool(tool, ctx.agent.role):
-        return f"Tool '{tool_name}' exists but is not available to your role ({ctx.agent.role})."
 
     detail = _TOOL_DETAILS.get(tool_name, "No detailed description available.")
     props = tool.input_schema.get("properties", {})
@@ -205,9 +207,6 @@ async def _run_describe_tool(ctx: RunContext, tool_input: dict) -> str:
     else:
         lines.append("Parameters: none")
 
-    roles = tool.allowed_roles
-    role_text = "all roles" if "*" in roles else ", ".join(roles)
-    lines.append(f"\nAvailable to: {role_text}")
     return "\n".join(lines)
 
 
@@ -224,7 +223,11 @@ _TOOL_EXECUTORS["describe_tool"] = _run_describe_tool
 
 
 def get_tool_defs_for_role(role: str) -> list[dict]:
-    """Return the LLM tool-definition list for the given agent role (from static JSON).
+    """Return all available LLM tool-definition list (from static JSON).
+
+    DEPRECATED: Role-based filtering removed in v3.1. The role parameter is kept
+    for backward compatibility but is ignored. All tools are now available to all agents.
+    Per-agent customization is handled via get_tool_defs_for_agent() (DB-based).
 
     Used during thinking phase and as fallback. For the main agent loop,
     prefer get_tool_defs_for_agent() which reads from DB (user-customized).
@@ -232,7 +235,6 @@ def get_tool_defs_for_role(role: str) -> list[dict]:
     return [
         {"name": t.name, "description": t.description, "input_schema": t.input_schema}
         for t in _TOOLS
-        if _role_has_tool(t, role)
     ]
 
 
@@ -241,13 +243,17 @@ async def get_tool_defs_for_agent(agent_id, role: str, db) -> list[dict]:
 
     Falls back to static JSON definitions for any tool not found in DB.
     Only enabled tools are returned. Ordered by position.
+
+    Role-based gating removed in v3.1. The base_role now comes from agent template,
+    not from agent.role field. If agent.role is unmapped, provides all tools via DB config.
     """
     from uuid import UUID
     from backend.db.repositories.tool_configs import ToolConfigRepository
 
     repo = ToolConfigRepository(db)
-    role_map = {"manager": "manager", "cto": "cto", "engineer": "worker"}
-    base_role = role_map.get(role, role if role in ("manager", "cto", "worker", "custom") else "worker")
+    # Base role now comes from template, not from role_map.
+    # If role doesn't map to a known base role, default to providing all tools.
+    base_role = role if role in ("manager", "cto", "worker", "custom") else "worker"
     db_tools = await repo.ensure_agent_tools(agent_id, base_role)
 
     result = []
@@ -284,7 +290,10 @@ def validate_tool_input(tool_name: str, tool_input: dict) -> None:
 
 
 def get_handlers_for_role(role: str) -> dict[str, ToolExecutor]:
-    """Return a name→executor map for all dispatchable tools for the given role.
+    """Return a name→executor map for all dispatchable tools.
+
+    DEPRECATED: Role-based filtering removed in v3.1. The role parameter is kept
+    for backward compatibility but is ignored. All tools are now available to all agents.
 
     'end' and 'thinking_done' are excluded — the loop handles them separately.
     """
@@ -292,7 +301,7 @@ def get_handlers_for_role(role: str) -> dict[str, ToolExecutor]:
     return {
         t.name: t.execute
         for t in _TOOLS
-        if t.name not in excluded and t.execute is not None and _role_has_tool(t, role)
+        if t.name not in excluded and t.execute is not None
     }
 
 
@@ -311,11 +320,12 @@ def get_thinking_phase_tool_defs(role: str) -> list[dict]:
     """Return tool defs for the thinking phase (restricted tool set).
 
     Only planning tools + thinking_done are available during Stage 1.
+    Role-based filtering removed in v3.1; the role parameter is kept for backward compatibility.
     """
     return [
         {"name": t.name, "description": t.description, "input_schema": t.input_schema}
         for t in _TOOLS
-        if t.name in _THINKING_PHASE_TOOL_NAMES and _role_has_tool(t, role)
+        if t.name in _THINKING_PHASE_TOOL_NAMES
     ]
 
 

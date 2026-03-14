@@ -1,41 +1,43 @@
 """
-Orchestrator tests — updated for v3.
+Orchestrator tests — updated for v3.1.
 
-The legacy Ticket model was removed in v2 (Agent 1). This file was previously
-skipped entirely because it tried to import the removed model. Tests have been
-rewritten to cover the current OrchestratorService API.
+v3.1: sandbox persistence is no longer role-based. The sandbox_should_persist()
+function has been removed. Sandboxes are user-owned resources with explicit
+lifecycle management.
 
-v3 note: sandbox persistence policy is enforced by role; managers and CTOs
-get persistent sandboxes, engineers and workers do not.
+These tests now cover the OrchestratorService's simplified API.
 """
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 
-# ── Sandbox policy tests (no DB needed) ──────────────────────────────────────
+class TestOrchestratorServiceSimplified:
+    """Verify the simplified OrchestratorService behaves correctly."""
 
-class TestSandboxPolicy:
+    def test_shutdown_graph_runtime_is_noop(self):
+        from backend.services.orchestrator import shutdown_graph_runtime
+        # Should not raise — it's a no-op after graph removal
+        shutdown_graph_runtime()
 
-    def test_manager_gets_persistent_sandbox(self):
-        from backend.services.orchestrator import sandbox_should_persist
-        assert sandbox_should_persist("manager") is True
+    @pytest.mark.asyncio
+    async def test_orchestrator_service_instantiates(self):
+        from backend.services.orchestrator import OrchestratorService
+        svc = OrchestratorService()
+        assert svc is not None
 
-    def test_cto_gets_persistent_sandbox(self):
-        from backend.services.orchestrator import sandbox_should_persist
-        assert sandbox_should_persist("cto") is True
+    @pytest.mark.asyncio
+    async def test_close_if_ephemeral_is_noop(self):
+        """close_if_ephemeral was kept for backward compat but does nothing."""
+        from backend.services.orchestrator import OrchestratorService
 
-    def test_engineer_gets_ephemeral_sandbox(self):
-        from backend.services.orchestrator import sandbox_should_persist
-        assert sandbox_should_persist("engineer") is False
+        svc = OrchestratorService()
+        agent = MagicMock()
+        agent.id = "test-agent-id"
+        session = MagicMock()
 
-    def test_worker_gets_ephemeral_sandbox(self):
-        from backend.services.orchestrator import sandbox_should_persist
-        assert sandbox_should_persist("worker") is False
-
-    def test_invalid_role_raises(self):
-        from backend.services.orchestrator import sandbox_should_persist
-        from backend.core.exceptions import InvalidAgentRole
-        with pytest.raises(InvalidAgentRole):
-            sandbox_should_persist("overlord")
+        # Should not raise
+        await svc.close_if_ephemeral(session, agent)

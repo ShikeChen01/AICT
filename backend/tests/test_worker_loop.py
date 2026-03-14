@@ -109,13 +109,14 @@ def test_tool_defs_include_sandbox_tools_for_all_roles() -> None:
         assert "think" in tool_names
 
 
-def test_tool_defs_include_spawn_engineer_for_manager_and_cto() -> None:
+def test_tool_defs_include_spawn_engineer_for_all_roles() -> None:
+    """v3.1: All roles get all tools — role gating removed."""
     manager_tools = {tool["name"] for tool in get_tool_defs_for_role("manager")}
     cto_tools = {tool["name"] for tool in get_tool_defs_for_role("cto")}
     engineer_tools = {tool["name"] for tool in get_tool_defs_for_role("engineer")}
     assert "spawn_engineer" in manager_tools
     assert "spawn_engineer" in cto_tools
-    assert "spawn_engineer" not in engineer_tools
+    assert "spawn_engineer" in engineer_tools
 
 
 @pytest.mark.asyncio

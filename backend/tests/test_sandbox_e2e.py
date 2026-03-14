@@ -4,7 +4,7 @@ sandbox tools in sequence.
 
 These tests are designed to EXPOSE the startup race condition and validate
 the fixes.  They do NOT hit real network endpoints — everything is mocked at
-the boundary layer (PoolManagerClient / SandboxClient methods).
+the boundary layer (OrchestratorClient / SandboxClient methods).
 
 Bugs being tested:
   1. Startup race condition — session_start returns before container is ready,

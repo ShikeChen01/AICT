@@ -1,5 +1,8 @@
 """
 Tests for SQLAlchemy models — creation, defaults, relationships, constraints.
+
+v3.1: Removed sandbox_should_persist assertions. Sandbox persistence is now
+a user-level property, not role-derived.
 """
 
 import uuid
@@ -64,28 +67,21 @@ async def test_create_agent_defaults(session: AsyncSession, sample_project: Proj
     session.add(agent)
     await session.flush()
 
-    from backend.services.orchestrator import sandbox_should_persist
-
     assert agent.id is not None
     assert agent.status == "sleeping"
-    assert sandbox_should_persist(agent.role) is False
     assert agent.current_task_id is None
     assert agent.sandbox is None
 
 
 @pytest.mark.asyncio
 async def test_gm_agent_fields(sample_gm: Agent):
-    from backend.services.orchestrator import sandbox_should_persist
-    assert sample_gm.role == "manager"  # sample_gm is alias for sample_manager
-    assert sandbox_should_persist(sample_gm.role) is True
+    assert sample_gm.role == "manager"
     assert sample_gm.display_name == "Manager"
 
 
 @pytest.mark.asyncio
 async def test_om_agent_fields(sample_om: Agent):
-    from backend.services.orchestrator import sandbox_should_persist
-    assert sample_om.role == "cto"  # sample_om is alias for sample_cto
-    assert sandbox_should_persist(sample_om.role) is True
+    assert sample_om.role == "cto"
 
 
 @pytest.mark.asyncio
