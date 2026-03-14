@@ -24,11 +24,9 @@ echo "[sandbox] Starting openbox window manager..."
 openbox --sm-disable &
 sleep 0.3
 
-# ── Desktop environment ──────────────────────────────────────────────────────
-# Set a solid background so the sandbox doesn't look like a black void
-xsetroot -solid "#1e293b"
+# ── Desktop environment (non-fatal — failures here must not kill the server) ──
+xsetroot -solid "#1e293b" 2>/dev/null || true
 
-# Generate a minimal welcome page the user sees on connect
 cat > /tmp/welcome.html <<'WELCOME'
 <!DOCTYPE html>
 <html>
@@ -67,8 +65,8 @@ cat > /tmp/welcome.html <<'WELCOME'
 </html>
 WELCOME
 
-# Launch Chrome with the welcome page in kiosk-like mode (no toolbar clutter)
 google-chrome-stable \
+    --no-sandbox --disable-gpu --disable-dev-shm-usage \
     --no-first-run --no-default-browser-check --disable-translate \
     --window-size="${SCREEN_WIDTH:-1024},${SCREEN_HEIGHT:-768}" \
     --window-position=0,0 \

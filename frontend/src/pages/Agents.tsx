@@ -274,10 +274,17 @@ function AgentTree({ agents, selectedId, onSelect, onStop, onWake, onDelete }: A
 
             return (
               <div key={agent.id} style={{ paddingLeft: `${indent * 12 + 8}px` }}>
-                <button
-                  type="button"
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => onSelect(agent.id)}
-                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors group
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onSelect(agent.id);
+                    }
+                  }}
+                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors group cursor-pointer
                     ${isSelected
                       ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
                       : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]'
@@ -325,7 +332,7 @@ function AgentTree({ agents, selectedId, onSelect, onStop, onWake, onDelete }: A
                       </button>
                     )}
                   </div>
-                </button>
+                </div>
               </div>
             );
           })}
