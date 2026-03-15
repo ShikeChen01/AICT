@@ -28,6 +28,7 @@ import {
   Upload,
   Monitor,
   BookOpen,
+  ArrowRight,
 } from 'lucide-react';
 import {
   getProject,
@@ -46,7 +47,7 @@ import type {
   ProjectUsageResponse,
 } from '../types';
 import { Button, Card, Input, Textarea } from '../components/ui';
-import { SandboxManager } from '../components/Sandbox/SandboxManager';
+
 import { KnowledgeBase } from '../components/Knowledge/KnowledgeBase';
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -779,17 +780,24 @@ export function SettingsPage() {
           </div>
         </form>
 
-        {/* ── 9. Sandbox Management (outside form — has its own actions) ── */}
+        {/* ── 9. Sandbox Management — link to dedicated page ── */}
         <Card className="mt-8 p-6">
           <div className="flex items-center gap-2 mb-1">
             <Monitor className="w-5 h-5 text-[var(--text-muted)]" />
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">Sandboxes</h2>
           </div>
           <p className="text-sm text-[var(--text-muted)] mb-4">
-            Manage sandbox containers for this project's agents. Persistent sandboxes
-            survive session restarts — agents can install and use GUI applications long-term.
+            Manage sandbox containers with live screen previews, interactive remote desktop,
+            snapshots, and configuration management.
           </p>
-          <SandboxManager projectId={projectId!} />
+          <Button
+            variant="outline"
+            onClick={() => navigate(`/project/${projectId}/sandbox`)}
+            className="inline-flex items-center gap-2"
+          >
+            Open Sandbox Manager
+            <ArrowRight className="w-4 h-4" />
+          </Button>
         </Card>
 
         {/* ── 10. Knowledge Base (RAG — Feature 1.6) ── */}

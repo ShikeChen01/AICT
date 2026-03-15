@@ -14,8 +14,9 @@ import { AppLayout } from '../components/Layout';
 import { AgentStream } from '../components/AgentChat/AgentStream';
 import { VncView } from '../components/ScreenStream';
 import { useAgents, useMessages } from '../hooks';
+import { listSandboxes } from '../api/client';
 import { cn } from '../components/ui';
-import type { Agent } from '../types';
+import type { Agent, Sandbox } from '../types';
 
 const STATUS_COLORS: Record<string, string> = {
   idle: 'bg-[var(--text-muted)]',
@@ -180,6 +181,21 @@ function CoPilotContent({ projectId }: { projectId: string }) {
   const hasSandbox = Boolean(selectedAgent?.sandbox_id);
   const buffer = selectedAgentId ? getBuffer(selectedAgentId) : { agentId: '', sessionId: null, chunks: [], isStreaming: false, lastActivity: 0 };
 
+  // Resolve orchestrator_sandbox_id for VNC connection
+  const [sandboxMap, setSandboxMap] = useState<Record<string, string>>({});
+  useEffect(() => {
+    listSandboxes(projectId)
+      .then((sbs: Sandbox[]) => {
+        const map: Record<string, string> = {};
+        for (const sb of sbs) {
+          if (sb.agent_id) map[sb.agent_id] = sb.orchestrator_sandbox_id;
+        }
+        setSandboxMap(map);
+      })
+      .catch(() => {});
+  }, [projectId, agents]);
+  const resolvedSandboxId = selectedAgent ? (sandboxMap[selectedAgent.id] ?? selectedAgent.sandbox_id) : null;
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* Connection status */}
@@ -220,8 +236,8 @@ function CoPilotContent({ projectId }: { projectId: string }) {
       <div className="flex flex-1 min-h-0">
         {/* VNC View (left - main area) */}
         <div className="flex-1 min-w-0 min-h-0 bg-[var(--surface-muted)]">
-          {hasSandbox && selectedAgent ? (
-            <VncView sandboxId={selectedAgent.sandbox_id} />
+          {hasSandbox && selectedAgent && resolvedSandboxId ? (
+            <VncView sandboxId={resolvedSandboxId} />
           ) : (
             <div className="flex items-center justify-center h-full text-[var(--text-muted)] gap-3">
               <MonitorOff className="w-8 h-8" />

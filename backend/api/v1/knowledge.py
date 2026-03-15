@@ -16,7 +16,7 @@ import logging
 import time
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
@@ -195,13 +195,14 @@ async def get_knowledge_document(
     "/{project_id}/documents/{document_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a knowledge document and its chunks",
+    response_class=Response,
 )
 async def delete_knowledge_document(
     project_id: UUID,
     document_id: UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> None:
+) -> Response:
     await require_project_access(db, project_id, current_user.id)
     repo = KnowledgeRepository(db)
     deleted = await repo.delete_document(project_id, document_id)
@@ -212,6 +213,7 @@ async def delete_knowledge_document(
         "knowledge.delete: doc=%s project=%s user=%s",
         document_id, project_id, current_user.id,
     )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ── Search (UI helper) ───────────────────────────────────────────────────────

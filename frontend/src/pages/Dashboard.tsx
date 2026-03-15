@@ -473,13 +473,17 @@ function SandboxThumbnail({ sandbox, onClick }: { sandbox: Sandbox; onClick: () 
     <button
       type="button"
       onClick={onClick}
-      className="relative rounded-lg border border-[var(--border-color)] bg-black/80 overflow-hidden aspect-video hover:border-[var(--color-primary)]/50 transition-all group"
+      className="relative rounded-lg border border-[var(--border-color)] overflow-hidden aspect-video hover:border-[var(--color-primary)]/50 transition-all group"
+      style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)' }}
     >
       {frameUrl ? (
         <img src={frameUrl} alt={`${sandbox.agent_name ?? 'Unknown'} sandbox`} className="w-full h-full object-cover" />
       ) : (
-        <div className="w-full h-full flex items-center justify-center">
-          <Monitor className="w-6 h-6 text-[var(--text-faint)]" />
+        <div className="w-full h-full flex flex-col items-center justify-center gap-1.5">
+          <Monitor className="w-6 h-6 text-slate-500" />
+          <span className="text-[9px] text-slate-500 font-medium">
+            {isConnected ? 'Waiting for display…' : 'Connecting…'}
+          </span>
         </div>
       )}
 
