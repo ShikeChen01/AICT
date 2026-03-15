@@ -224,7 +224,6 @@ async def screen_stream_endpoint(
         await websocket.close(code=4001, reason="Invalid token")
         return
 
-    # Sandbox ownership guard (code review critical #1)
     if not await _verify_ws_sandbox_access(token, sandbox_id):
         await websocket.close(code=4003, reason="Access denied to sandbox")
         return

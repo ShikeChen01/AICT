@@ -61,11 +61,12 @@ const DEFAULT_SCREEN_PCT = 60;
 // ── VNC View Wrapper (resolves orchestrator_sandbox_id) ──────────────────
 
 interface VncViewWrapperProps {
+  projectId: string;
   agentId: string;
   sandboxId: string;
 }
 
-function VncViewWrapper({ agentId, sandboxId }: VncViewWrapperProps) {
+function VncViewWrapper({ projectId, agentId, sandboxId }: VncViewWrapperProps) {
   const [orchestratorSandboxId, setOrchestratorSandboxId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -73,15 +74,6 @@ function VncViewWrapper({ agentId, sandboxId }: VncViewWrapperProps) {
     let mounted = true;
     const resolve = async () => {
       try {
-        // The sandbox_id field on agent is the orchestrator_sandbox_id short form
-        // Use it directly if available, otherwise fetch sandboxes to find it
-        const projectId = new URLSearchParams(window.location.search).get('pid');
-        if (!projectId) {
-          setOrchestratorSandboxId(sandboxId);
-          setLoading(false);
-          return;
-        }
-
         // Try to find the sandbox's orchestrator_sandbox_id via listSandboxes
         try {
           const sandboxes = await listSandboxes(projectId);
@@ -104,7 +96,7 @@ function VncViewWrapper({ agentId, sandboxId }: VncViewWrapperProps) {
     };
     resolve();
     return () => { mounted = false; };
-  }, [agentId, sandboxId]);
+  }, [projectId, agentId, sandboxId]);
 
   if (loading) {
     return (
@@ -304,9 +296,9 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
           style={{ width: `${leftPct}%` }}
         >
           {/* VNC Screen */}
-          <div className="min-h-0 bg-black relative" style={{ height: `${screenPct}%` }}>
+          <div className="min-h-0 relative" style={{ height: `${screenPct}%`, background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)' }}>
             {hasSandbox && selectedAgent?.sandbox_id ? (
-              <VncViewWrapper agentId={selectedAgent.id} sandboxId={selectedAgent.sandbox_id} />
+              <VncViewWrapper projectId={projectId} agentId={selectedAgent.id} sandboxId={selectedAgent.sandbox_id} />
             ) : (
               <div className="flex items-center justify-center h-full text-[var(--text-muted)] gap-2">
                 <MonitorOff className="w-6 h-6" />

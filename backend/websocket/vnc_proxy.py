@@ -48,14 +48,8 @@ async def _safe_close_viewer(ws: WebSocket, code: int, reason: str) -> None:
         pass
 
 
-async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
-    """
-    Bidirectionally relay VNC/RFB protocol bytes between a frontend
-    noVNC WebSocket and a sandbox container's /ws/vnc endpoint.
-    """
-    from backend.config import settings
-
-    # Look up sandbox connection info from the database
+async def _resolve_sandbox_connection(sandbox_id: str) -> tuple[str | None, int, str | None]:
+    """Look up sandbox host/port/auth_token, applying dev tunnel if needed."""
     from backend.db.session import AsyncSessionLocal
     from backend.db.models import Sandbox
     from sqlalchemy import select
@@ -72,10 +66,9 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
                 port = sandbox.port
                 auth_token = sandbox.auth_token
     except Exception as exc:
-        logger.warning("VNC proxy: sandbox %s DB lookup failed: %s", sandbox_id, exc)
+        logger.warning("Sandbox %s DB lookup failed: %s", sandbox_id, exc)
 
     if not host or not auth_token:
-        # Fallback: try the orchestrator directly
         from backend.services.sandbox_service import OrchestratorClient
         try:
             orch = OrchestratorClient()
@@ -84,9 +77,33 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
             port = data.get("port", data.get("host_port", 8080))
             auth_token = data.get("auth_token")
         except Exception as exc:
-            logger.warning("VNC proxy: sandbox %s not found and orchestrator lookup failed: %s", sandbox_id, exc)
-            await _safe_close_viewer(viewer_ws, 4004, "Sandbox not registered")
-            return
+            logger.warning("Sandbox %s orchestrator lookup failed: %s", sandbox_id, exc)
+
+    if not host or not auth_token:
+        return (None, port or 8080, None)
+
+    # In dev mode, ClusterIPs are unreachable — tunnel through kubectl port-forward
+    import os
+    if os.getenv("ENV", "").lower() == "development":
+        from backend.services.sandbox_tunnel import get_tunnel_manager
+        try:
+            tunnel_host, tunnel_port = await get_tunnel_manager().get_host_port(sandbox_id, port or 8080)
+            logger.info("Using dev tunnel for sandbox %s: %s:%d", sandbox_id, tunnel_host, tunnel_port)
+            return (tunnel_host, tunnel_port, auth_token)
+        except Exception as exc:
+            logger.warning("Dev tunnel failed for sandbox %s, falling back to direct: %s: %s", sandbox_id, type(exc).__name__, exc)
+
+    return (host, port or 8080, auth_token)
+
+
+async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
+    """
+    Bidirectionally relay VNC/RFB protocol bytes between a frontend
+    noVNC WebSocket and a sandbox container's /ws/vnc endpoint.
+    """
+    from backend.config import settings
+
+    host, port, auth_token = await _resolve_sandbox_connection(sandbox_id)
 
     if not host or not auth_token:
         await _safe_close_viewer(viewer_ws, 4004, "Sandbox not registered")

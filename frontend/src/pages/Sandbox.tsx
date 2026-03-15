@@ -227,7 +227,9 @@ function SandboxContent({ projectId }: { projectId: string }) {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-xl font-bold text-[var(--text-primary)]">Sandboxes</h1>
-              <p className="text-sm text-[var(--text-muted)] mt-0.5">{sandboxes.length} running · Click to enter remote desktop</p>
+              <p className="text-sm text-[var(--text-muted)] mt-0.5">
+                {sandboxes.length} sandbox{sandboxes.length !== 1 ? 'es' : ''} · Click to enter remote desktop
+              </p>
             </div>
             {agentsWithoutSandbox.length > 0 && (
               <StartSandboxDropdown projectId={projectId} agents={agentsWithoutSandbox} onStarted={fetchData} />
@@ -320,20 +322,24 @@ function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: S
   return (
     <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] overflow-hidden hover:border-[var(--border-color-hover)] transition-colors group">
       {/* Stream preview */}
-      <button type="button" onClick={onExpand} className="relative w-full aspect-video bg-black/90 cursor-pointer">
+      <button type="button" onClick={onExpand} className="relative w-full aspect-video cursor-pointer overflow-hidden"
+        style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)' }}>
         {frameUrl ? (
-          <img src={frameUrl} alt={`${sandbox.agent_name ?? 'Unknown'} sandbox`} className="w-full h-full object-cover" />
+          <img src={frameUrl} alt={`${sandbox.agent_name ?? 'Sandbox'} display`} className="w-full h-full object-cover" />
         ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <Monitor className="w-8 h-8 text-[var(--text-faint)]" />
+          <div className="w-full h-full flex flex-col items-center justify-center gap-2">
+            <Monitor className="w-8 h-8 text-slate-500" />
+            <span className="text-[10px] text-slate-500 font-medium">
+              {isConnected ? 'Waiting for display…' : 'Connecting…'}
+            </span>
           </div>
         )}
         {/* Hover overlay */}
-        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-          <Maximize2 className="w-6 h-6 text-white" />
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+          <Maximize2 className="w-6 h-6 text-white/90" />
         </div>
         {/* Connection dot */}
-        <div className={`absolute top-2 right-2 w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-gray-500'}`} />
+        <div className={`absolute top-2 right-2 w-2.5 h-2.5 rounded-full ring-2 ring-black/20 ${isConnected ? 'bg-green-400' : 'bg-gray-500 animate-pulse'}`} />
       </button>
 
       {/* Info bar */}
@@ -447,14 +453,17 @@ function StartSandboxDropdown({ projectId, agents, onStarted }: { projectId: str
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
+  const [startError, setStartError] = useState<string | null>(null);
+
   const handleStart = async (agentId: string) => {
     setStarting(true);
+    setStartError(null);
     try {
       await createAndAssignSandbox(projectId, agentId);
       onStarted();
     } catch (err) {
       console.error('Failed to start sandbox:', err);
-      alert(err instanceof Error ? err.message : 'Failed to start sandbox');
+      setStartError(err instanceof Error ? err.message : 'Failed to start sandbox');
     } finally {
       setStarting(false);
       setOpen(false);
@@ -464,11 +473,11 @@ function StartSandboxDropdown({ projectId, agents, onStarted }: { projectId: str
   return (
     <div ref={ref} className="relative">
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={() => { setOpen(o => !o); setStartError(null); }}
         className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] transition-colors"
       >
         <Power className="w-4 h-4" />
-        Start Sandbox
+        {starting ? 'Starting…' : 'Start Sandbox'}
         <ChevronDown className="w-3 h-3" />
       </button>
       {open && (
@@ -484,6 +493,20 @@ function StartSandboxDropdown({ projectId, agents, onStarted }: { projectId: str
               <span className="text-[var(--text-muted)] ml-2 capitalize">({a.role})</span>
             </button>
           ))}
+        </div>
+      )}
+      {startError && (
+        <div className="absolute right-0 mt-1 w-72 rounded-lg border border-red-500/30 bg-red-950/80 shadow-lg z-20 p-3">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-red-300">Failed to start sandbox</p>
+              <p className="text-[10px] text-red-400/70 mt-1 break-words">{startError}</p>
+            </div>
+            <button onClick={() => setStartError(null)} className="text-red-400/60 hover:text-red-300 shrink-0">
+              <X className="w-3 h-3" />
+            </button>
+          </div>
         </div>
       )}
     </div>

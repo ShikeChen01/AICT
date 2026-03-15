@@ -92,40 +92,12 @@ class ScreenStreamProxy:
         retry_delay = 2.0  # seconds, doubles each attempt
 
         for attempt in range(max_retries):
-            # Look up sandbox connection info from the database
-            from backend.db.session import AsyncSessionLocal
-            from backend.db.models import Sandbox
-            from sqlalchemy import select
+            from backend.websocket.vnc_proxy import _resolve_sandbox_connection
 
-            host = port = auth_token = None
-            try:
-                async with AsyncSessionLocal() as db:
-                    result = await db.execute(
-                        select(Sandbox).where(Sandbox.orchestrator_sandbox_id == sandbox_id)
-                    )
-                    sandbox = result.scalar_one_or_none()
-                    if sandbox:
-                        host = sandbox.host
-                        port = sandbox.port
-                        auth_token = sandbox.auth_token
-            except Exception as exc:
-                logger.warning("Cannot look up sandbox %s from DB: %s", sandbox_id, exc)
-
+            host, port, auth_token = await _resolve_sandbox_connection(sandbox_id)
             if not host or not auth_token:
-                # Fallback: try the orchestrator directly
-                from backend.services.sandbox_service import OrchestratorClient
-                from backend.config import settings
-                try:
-                    orch = OrchestratorClient()
-                    data = await orch.get_sandbox_by_id(sandbox_id)
-                    host = data.get("host")
-                    port = data.get("port", data.get("host_port", 8080))
-                    auth_token = data.get("auth_token")
-                except Exception as exc:
-                    logger.warning("Cannot relay screen stream: sandbox %s lookup failed: %s", sandbox_id, exc)
-                    return
-                if not auth_token:
-                    return
+                logger.warning("Cannot resolve sandbox %s connection info", sandbox_id)
+                return
 
             ws_url = f"ws://{host}:{port}/ws/screen?token={auth_token}"
 
@@ -157,10 +129,11 @@ class ScreenStreamProxy:
                 return
             except Exception as exc:
                 logger.warning(
-                    "Screen stream relay error for sandbox %s (attempt %d/%d): %s",
+                    "Screen stream relay error for sandbox %s (attempt %d/%d): %s: %s",
                     sandbox_id,
                     attempt + 1,
                     max_retries,
+                    type(exc).__name__,
                     exc,
                 )
                 # Check if there are still viewers before retrying

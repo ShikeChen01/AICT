@@ -692,21 +692,37 @@ class SandboxService:
     # Path 2: Sandbox manipulation (shell, VNC, input)
     # ══════════════════════════════════════════════════════════════════
 
+    async def _resolve_host_port(self, sandbox: Sandbox) -> tuple[str, int]:
+        """Return (host, port) for reaching a sandbox, using dev tunnel if needed."""
+        import os
+        if os.getenv("ENV", "").lower() == "development":
+            from backend.services.sandbox_tunnel import get_tunnel_manager
+            try:
+                return await get_tunnel_manager().get_host_port(
+                    sandbox.orchestrator_sandbox_id, sandbox.port or 8080,
+                )
+            except Exception as exc:
+                logger.warning("Dev tunnel failed for sandbox %s: %s", sandbox.orchestrator_sandbox_id, exc)
+        return (sandbox.host, sandbox.port)
+
     async def execute_command(
         self, sandbox: Sandbox, command: str, timeout: int = 120
     ) -> ShellResult:
+        host, port = await self._resolve_host_port(sandbox)
         return await self._client.execute_shell(
-            sandbox.host, sandbox.port, sandbox.auth_token, command, timeout
+            host, port, sandbox.auth_token, command, timeout
         )
 
     async def take_screenshot(self, sandbox: Sandbox) -> bytes:
+        host, port = await self._resolve_host_port(sandbox)
         return await self._client.get_screenshot(
-            sandbox.host, sandbox.port, sandbox.auth_token
+            host, port, sandbox.auth_token
         )
 
     async def mouse_move(self, sandbox: Sandbox, x: int, y: int) -> dict:
+        host, port = await self._resolve_host_port(sandbox)
         return await self._client.mouse_move(
-            sandbox.host, sandbox.port, sandbox.auth_token, x, y
+            host, port, sandbox.auth_token, x, y
         )
 
     async def mouse_click(
@@ -717,8 +733,9 @@ class SandboxService:
         button: int = 1,
         click_type: str = "single",
     ) -> dict:
+        host, port = await self._resolve_host_port(sandbox)
         return await self._client.mouse_click(
-            sandbox.host, sandbox.port, sandbox.auth_token,
+            host, port, sandbox.auth_token,
             x=x, y=y, button=button, click_type=click_type,
         )
 
@@ -730,14 +747,16 @@ class SandboxService:
         direction: str = "down",
         clicks: int = 3,
     ) -> dict:
+        host, port = await self._resolve_host_port(sandbox)
         return await self._client.mouse_scroll(
-            sandbox.host, sandbox.port, sandbox.auth_token,
+            host, port, sandbox.auth_token,
             x=x, y=y, direction=direction, clicks=clicks,
         )
 
     async def mouse_location(self, sandbox: Sandbox) -> dict:
+        host, port = await self._resolve_host_port(sandbox)
         return await self._client.mouse_location(
-            sandbox.host, sandbox.port, sandbox.auth_token
+            host, port, sandbox.auth_token
         )
 
     async def keyboard_press(
@@ -746,23 +765,27 @@ class SandboxService:
         keys: str | None = None,
         text: str | None = None,
     ) -> dict:
+        host, port = await self._resolve_host_port(sandbox)
         return await self._client.keyboard_press(
-            sandbox.host, sandbox.port, sandbox.auth_token, keys=keys, text=text
+            host, port, sandbox.auth_token, keys=keys, text=text
         )
 
     async def start_recording(self, sandbox: Sandbox) -> dict:
+        host, port = await self._resolve_host_port(sandbox)
         return await self._client.start_recording(
-            sandbox.host, sandbox.port, sandbox.auth_token
+            host, port, sandbox.auth_token
         )
 
     async def stop_recording(self, sandbox: Sandbox) -> bytes:
+        host, port = await self._resolve_host_port(sandbox)
         return await self._client.stop_recording(
-            sandbox.host, sandbox.port, sandbox.auth_token
+            host, port, sandbox.auth_token
         )
 
     async def sandbox_health(self, sandbox: Sandbox) -> dict:
+        host, port = await self._resolve_host_port(sandbox)
         return await self._client.health_check(
-            sandbox.host, sandbox.port, sandbox.auth_token
+            host, port, sandbox.auth_token
         )
 
     # ══════════════════════════════════════════════════════════════════

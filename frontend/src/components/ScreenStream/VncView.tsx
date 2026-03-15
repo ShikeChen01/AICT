@@ -244,18 +244,46 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
         className="relative flex-1 min-h-0 overflow-hidden"
       />
 
-      {/* Overlay message when disconnected */}
-      {status === 'disconnected' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-          <span className="text-sm text-gray-400">
-            {reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS
-              ? 'Connection lost. Reload the page to retry.'
-              : 'Connecting to sandbox display...'}
-          </span>
-          {disconnectReason && (
-            <span className="max-w-md text-center text-xs text-amber-400" title={disconnectReason}>
-              {disconnectReason}
-            </span>
+      {/* Overlay message when not connected */}
+      {status !== 'connected' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gradient-to-b from-[#0f172a] to-[#1e293b]">
+          {status === 'connecting' ? (
+            <>
+              <div className="w-10 h-10 rounded-full border-2 border-blue-500/30 border-t-blue-400 animate-spin" />
+              <span className="text-sm text-gray-300 font-medium">Connecting to sandbox display…</span>
+              {reconnectAttemptRef.current > 0 && (
+                <span className="text-xs text-gray-500">
+                  Attempt {reconnectAttemptRef.current}/{MAX_RECONNECT_ATTEMPTS}
+                </span>
+              )}
+            </>
+          ) : reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS ? (
+            <>
+              <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
+                <span className="text-red-400 text-lg">✕</span>
+              </div>
+              <span className="text-sm text-gray-300 font-medium">Connection lost</span>
+              <span className="text-xs text-gray-500 max-w-sm text-center">
+                Could not reach the sandbox after {MAX_RECONNECT_ATTEMPTS} attempts.
+                The sandbox may still be starting up.
+              </span>
+              <button
+                onClick={() => { reconnectAttemptRef.current = 0; connect(); }}
+                className="mt-2 px-4 py-1.5 rounded-md text-xs font-medium bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition-colors"
+              >
+                Retry Connection
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="w-10 h-10 rounded-full border-2 border-gray-600/30 border-t-gray-400 animate-spin" />
+              <span className="text-sm text-gray-300 font-medium">Waiting for sandbox…</span>
+              {disconnectReason && (
+                <span className="max-w-sm text-center text-xs text-amber-400/80">
+                  {disconnectReason}
+                </span>
+              )}
+            </>
           )}
         </div>
       )}
