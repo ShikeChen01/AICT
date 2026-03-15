@@ -24,7 +24,7 @@ if (Test-Path ".env.development") {
 
 if (-not $Region) {
     $Region = $env:GCLOUD_REGION
-    if (-not $Region) { $Region = "us-east1" }
+    if (-not $Region) { $Region = "us-central1" }
 }
 $ProjectId = $env:GCLOUD_PROJECT_ID
 if (-not $ProjectId -and $env:GCLOUD_ARTIFACT_REGISTRY_URL) {

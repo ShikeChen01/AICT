@@ -91,7 +91,6 @@ class AgentService:
             template_id=template.id,
             role=role_label,
             display_name=display_name,
-            tier=None,  # deprecated; template.name differentiates agent types
             model=template.model,
             provider=template.provider or infer_provider(template.model),
             thinking_enabled=template.thinking_enabled,

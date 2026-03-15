@@ -71,7 +71,38 @@ def _make_agent(sandbox_id: str | None = "sbox-1") -> MagicMock:
     agent.sandbox_id = sandbox_id
     agent.role = "engineer"
     agent.id = "agent-uuid-001"
+    if sandbox_id:
+        agent.sandbox = _make_mock_sandbox(sandbox_id)
+    else:
+        agent.sandbox = None
     return agent
+
+
+def _make_mock_sandbox(sandbox_id: str = "sbox-1") -> MagicMock:
+    """Create a mock Sandbox object for tests that need ctx.agent.sandbox."""
+    sb = MagicMock()
+    sb.id = sandbox_id
+    sb.orchestrator_sandbox_id = sandbox_id
+    sb.host = "10.0.0.1"
+    sb.port = 8080
+    sb.auth_token = "tok-test"
+    return sb
+
+
+def _set_agent_sandbox(agent, sandbox_id: str | None) -> None:
+    """Set the sandbox relationship on an agent (real ORM or mock) for tests."""
+    from sqlalchemy.orm.attributes import set_committed_value
+    if sandbox_id:
+        mock_sb = _make_mock_sandbox(sandbox_id)
+        if hasattr(agent, "_sa_instance_state"):
+            set_committed_value(agent, "sandbox", mock_sb)
+        else:
+            agent.sandbox = mock_sb
+    else:
+        if hasattr(agent, "_sa_instance_state"):
+            set_committed_value(agent, "sandbox", None)
+        else:
+            agent.sandbox = None
 
 
 def _patch_sandbox_service():
@@ -222,7 +253,7 @@ async def test_execute_command(session, sample_engineer) -> None:
     """Agent calls execute_command when sandbox already exists — no broadcast."""
     from backend.services.sandbox_client import ShellResult
 
-    sample_engineer.sandbox_id = "vm-sbox-01"
+    _set_agent_sandbox(sample_engineer, "vm-sbox-01")
     shell_result = ShellResult(stdout="total 0\n", exit_code=0)
     ctx = _make_ctx(sample_engineer, MagicMock(), session)
 
@@ -245,7 +276,7 @@ async def test_execute_command_creates_sandbox_and_broadcasts(session, sample_en
     frontend via WebSocket."""
     from backend.services.sandbox_client import ShellResult
 
-    sample_engineer.sandbox_id = None  # No sandbox yet
+    _set_agent_sandbox(sample_engineer, None)
     shell_result = ShellResult(stdout="hello\n", exit_code=0)
     # Use a mock DB so we can assert flush/commit calls
     mock_db = _make_mock_db()
@@ -257,9 +288,8 @@ async def test_execute_command_creates_sandbox_and_broadcasts(session, sample_en
         mock_svc = MagicMock()
 
         async def _execute_side_effect(db, agent, cmd, timeout=120):
-            # Simulate sandbox_service.execute_command creating a sandbox:
-            # ensure_running_sandbox sets agent.sandbox_id as a side effect
-            agent.sandbox_id = "new-sbox-99"
+            from sqlalchemy.orm.attributes import set_committed_value
+            set_committed_value(agent, "sandbox", _make_mock_sandbox("new-sbox-99"))
             return shell_result
 
         mock_svc.execute_command_legacy = AsyncMock(side_effect=_execute_side_effect)
@@ -281,7 +311,7 @@ async def test_execute_command_broadcast_failure_does_not_crash(session, sample_
     normally — the broadcast is best-effort."""
     from backend.services.sandbox_client import ShellResult
 
-    sample_engineer.sandbox_id = None
+    _set_agent_sandbox(sample_engineer, None)
     shell_result = ShellResult(stdout="ok\n", exit_code=0)
     ctx = _make_ctx(sample_engineer, MagicMock(), session)
 
@@ -315,7 +345,7 @@ async def test_start_sandbox(session, sample_engineer) -> None:
     is flushed (not committed), and WS broadcast fires."""
     from backend.services.sandbox_service import SandboxMetadata
 
-    sample_engineer.sandbox_id = None
+    _set_agent_sandbox(sample_engineer, None)
     fake_meta = SandboxMetadata(
         sandbox_id="vm-sbox-02",
         agent_id=str(sample_engineer.id),
@@ -450,7 +480,7 @@ async def test_sandbox_start_session_uses_flush_not_commit(session, sample_engin
 async def test_sandbox_end_session_with_active_sandbox(session, sample_engineer) -> None:
     """Agent ends an active sandbox — close_sandbox is called, then
     _flush_and_broadcast_sandbox fires to persist the cleared sandbox_id."""
-    sample_engineer.sandbox_id = "sbox-active"
+    _set_agent_sandbox(sample_engineer, "sbox-active")
     mock_db = _make_mock_db()
     ctx = _make_ctx(sample_engineer, MagicMock(), mock_db)
 
@@ -474,7 +504,7 @@ async def test_sandbox_end_session_with_active_sandbox(session, sample_engineer)
 async def test_sandbox_end_session_no_sandbox(session, sample_engineer) -> None:
     """Agent tries to end a sandbox but none exists — returns a message,
     does NOT call _flush_and_broadcast_sandbox."""
-    sample_engineer.sandbox_id = None
+    _set_agent_sandbox(sample_engineer, None)
     ctx = _make_ctx(sample_engineer, MagicMock(), session)
 
     with _patch_sandbox_service() as mock_f:
@@ -491,7 +521,7 @@ async def test_sandbox_end_session_no_sandbox(session, sample_engineer) -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_health(session, sample_engineer) -> None:
-    sample_engineer.sandbox_id = "sbox-h"
+    _set_agent_sandbox(sample_engineer, "sbox-h")
     ctx = _make_ctx(sample_engineer, MagicMock(), session)
 
     with _patch_sandbox_service() as mock_f:
@@ -513,7 +543,7 @@ async def test_sandbox_health(session, sample_engineer) -> None:
 async def test_sandbox_health_passes_sandbox_object(session, sample_engineer) -> None:
     """v3.1: run_sandbox_health passes ctx.agent.sandbox (a Sandbox object)
     to the service layer, not the Agent or a DB session."""
-    sample_engineer.sandbox_id = "sbox-rereg"
+    _set_agent_sandbox(sample_engineer, "sbox-rereg")
     mock_db = _make_mock_db()
     ctx = _make_ctx(sample_engineer, MagicMock(), mock_db)
 
@@ -566,7 +596,7 @@ async def test_sandbox_health_service_calls_client() -> None:
 async def test_sandbox_screenshot(session, sample_engineer) -> None:
     from backend.tools.executors.sandbox import ScreenshotResult
 
-    sample_engineer.sandbox_id = "sbox-scr"
+    _set_agent_sandbox(sample_engineer, "sbox-scr")
     ctx = _make_ctx(sample_engineer, MagicMock(), session)
     fake_bytes = b"FAKE_JPEG_DATA"
 
@@ -589,7 +619,7 @@ async def test_sandbox_screenshot(session, sample_engineer) -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_mouse_move(session, sample_engineer) -> None:
-    sample_engineer.sandbox_id = "sbox-m"
+    _set_agent_sandbox(sample_engineer, "sbox-m")
     ctx = _make_ctx(sample_engineer, MagicMock(), session)
 
     with _patch_sandbox_service() as mock_f:
@@ -601,7 +631,7 @@ async def test_sandbox_mouse_move(session, sample_engineer) -> None:
 
     assert "50" in result
     assert "100" in result
-    mock_svc.mouse_move.assert_awaited_once_with(sample_engineer, 50, 100)
+    mock_svc.mouse_move.assert_awaited_once_with(sample_engineer.sandbox, 50, 100)
 
 
 # ---------------------------------------------------------------------------
@@ -611,7 +641,7 @@ async def test_sandbox_mouse_move(session, sample_engineer) -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_mouse_location(session, sample_engineer) -> None:
-    sample_engineer.sandbox_id = "sbox-ml"
+    _set_agent_sandbox(sample_engineer, "sbox-ml")
     ctx = _make_ctx(sample_engineer, MagicMock(), session)
 
     with _patch_sandbox_service() as mock_f:
@@ -632,7 +662,7 @@ async def test_sandbox_mouse_location(session, sample_engineer) -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_keyboard_press_with_keys(session, sample_engineer) -> None:
-    sample_engineer.sandbox_id = "sbox-k"
+    _set_agent_sandbox(sample_engineer, "sbox-k")
     ctx = _make_ctx(sample_engineer, MagicMock(), session)
 
     with _patch_sandbox_service() as mock_f:
@@ -644,7 +674,7 @@ async def test_sandbox_keyboard_press_with_keys(session, sample_engineer) -> Non
 
     assert "ctrl+c" in result
     mock_svc.keyboard_press.assert_awaited_once_with(
-        sample_engineer, keys="ctrl+c", text=None
+        sample_engineer.sandbox, keys="ctrl+c", text=None
     )
 
 
@@ -652,7 +682,7 @@ async def test_sandbox_keyboard_press_with_keys(session, sample_engineer) -> Non
 async def test_sandbox_keyboard_press_missing_input(session, sample_engineer) -> None:
     from backend.tools.result import ToolExecutionError
 
-    sample_engineer.sandbox_id = "sbox-k"
+    _set_agent_sandbox(sample_engineer, "sbox-k")
     ctx = _make_ctx(sample_engineer, MagicMock(), session)
 
     with _patch_sandbox_service() as mock_f:
@@ -668,7 +698,7 @@ async def test_sandbox_keyboard_press_missing_input(session, sample_engineer) ->
 
 @pytest.mark.asyncio
 async def test_sandbox_record_screen_start(session, sample_engineer) -> None:
-    sample_engineer.sandbox_id = "sbox-r"
+    _set_agent_sandbox(sample_engineer, "sbox-r")
     ctx = _make_ctx(sample_engineer, MagicMock(), session)
 
     with _patch_sandbox_service() as mock_f:
@@ -683,7 +713,7 @@ async def test_sandbox_record_screen_start(session, sample_engineer) -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_end_record_screen(session, sample_engineer) -> None:
-    sample_engineer.sandbox_id = "sbox-r"
+    _set_agent_sandbox(sample_engineer, "sbox-r")
     ctx = _make_ctx(sample_engineer, MagicMock(), session)
     fake_video = b"MP4_DATA_HERE"
 

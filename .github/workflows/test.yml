@@ -87,6 +87,7 @@ jobs:
       - name: Run migrations
         run: alembic -c backend/alembic.ini upgrade head
         env:
+          PYTHONPATH: '.'
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
       - name: Run integration tests
@@ -190,6 +191,7 @@ jobs:
       - name: Run migrations
         run: alembic -c backend/alembic.ini upgrade head
         env:
+          PYTHONPATH: '.'
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
       - name: Seed test data
@@ -283,6 +285,7 @@ jobs:
       - name: Run migrations
         run: alembic -c backend/alembic.ini upgrade head
         env:
+          PYTHONPATH: '.'
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
       - name: Run build verification tests
@@ -372,6 +375,7 @@ jobs:
       - name: Run migrations
         run: alembic -c backend/alembic.ini upgrade head
         env:
+          PYTHONPATH: '.'
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
 
       - name: Run GitHub integration tests

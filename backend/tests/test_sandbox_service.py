@@ -170,12 +170,12 @@ def _make_mock_sandbox():
 async def test_take_screenshot_returns_bytes() -> None:
     sb = _make_mock_sandbox()
 
-    with patch("backend.services.sandbox_service.get_sandbox_client") as mock_gc:
-        mock_client = MagicMock()
-        mock_client.get_screenshot = AsyncMock(return_value=b"JPEG_BYTES")
-        mock_gc.return_value = mock_client
+    svc = SandboxService()
+    mock_client = MagicMock()
+    mock_client.get_screenshot = AsyncMock(return_value=b"JPEG_BYTES")
+    svc._client = mock_client
 
-        svc = SandboxService()
+    with patch.object(svc, "_resolve_host_port", new_callable=AsyncMock, return_value=(sb.host, sb.port)):
         result = await svc.take_screenshot(sb)
 
     assert result == b"JPEG_BYTES"
@@ -185,12 +185,12 @@ async def test_take_screenshot_returns_bytes() -> None:
 async def test_mouse_move() -> None:
     sb = _make_mock_sandbox()
 
-    with patch("backend.services.sandbox_service.get_sandbox_client") as mock_gc:
-        mock_client = MagicMock()
-        mock_client.mouse_move = AsyncMock(return_value={"ok": True, "x": 10, "y": 20})
-        mock_gc.return_value = mock_client
+    svc = SandboxService()
+    mock_client = MagicMock()
+    mock_client.mouse_move = AsyncMock(return_value={"ok": True, "x": 10, "y": 20})
+    svc._client = mock_client
 
-        svc = SandboxService()
+    with patch.object(svc, "_resolve_host_port", new_callable=AsyncMock, return_value=(sb.host, sb.port)):
         result = await svc.mouse_move(sb, 10, 20)
 
     assert result["ok"] is True
@@ -200,12 +200,12 @@ async def test_mouse_move() -> None:
 async def test_keyboard_press_keys() -> None:
     sb = _make_mock_sandbox()
 
-    with patch("backend.services.sandbox_service.get_sandbox_client") as mock_gc:
-        mock_client = MagicMock()
-        mock_client.keyboard_press = AsyncMock(return_value={"ok": True})
-        mock_gc.return_value = mock_client
+    svc = SandboxService()
+    mock_client = MagicMock()
+    mock_client.keyboard_press = AsyncMock(return_value={"ok": True})
+    svc._client = mock_client
 
-        svc = SandboxService()
+    with patch.object(svc, "_resolve_host_port", new_callable=AsyncMock, return_value=(sb.host, sb.port)):
         await svc.keyboard_press(sb, keys="Return")
 
 
@@ -213,13 +213,13 @@ async def test_keyboard_press_keys() -> None:
 async def test_start_and_stop_recording() -> None:
     sb = _make_mock_sandbox()
 
-    with patch("backend.services.sandbox_service.get_sandbox_client") as mock_gc:
-        mock_client = MagicMock()
-        mock_client.start_recording = AsyncMock(return_value={"ok": True, "status": "started"})
-        mock_client.stop_recording = AsyncMock(return_value=b"MP4_DATA")
-        mock_gc.return_value = mock_client
+    svc = SandboxService()
+    mock_client = MagicMock()
+    mock_client.start_recording = AsyncMock(return_value={"ok": True, "status": "started"})
+    mock_client.stop_recording = AsyncMock(return_value=b"MP4_DATA")
+    svc._client = mock_client
 
-        svc = SandboxService()
+    with patch.object(svc, "_resolve_host_port", new_callable=AsyncMock, return_value=(sb.host, sb.port)):
         start_result = await svc.start_recording(sb)
         stop_result = await svc.stop_recording(sb)
 
@@ -231,12 +231,12 @@ async def test_start_and_stop_recording() -> None:
 async def test_sandbox_health() -> None:
     sb = _make_mock_sandbox()
 
-    with patch("backend.services.sandbox_service.get_sandbox_client") as mock_gc:
-        mock_client = MagicMock()
-        mock_client.health_check = AsyncMock(return_value={"status": "ok", "uptime_seconds": 10.0})
-        mock_gc.return_value = mock_client
+    svc = SandboxService()
+    mock_client = MagicMock()
+    mock_client.health_check = AsyncMock(return_value={"status": "ok", "uptime_seconds": 10.0})
+    svc._client = mock_client
 
-        svc = SandboxService()
+    with patch.object(svc, "_resolve_host_port", new_callable=AsyncMock, return_value=(sb.host, sb.port)):
         result = await svc.sandbox_health(sb)
 
     assert result["status"] == "ok"

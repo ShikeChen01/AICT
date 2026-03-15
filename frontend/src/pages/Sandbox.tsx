@@ -29,7 +29,6 @@ import {
   listSandboxes,
   listSandboxConfigs,
   createAndAssignSandbox,
-  createSandbox,
   unassignSandbox,
   restartSandbox,
   destroySandbox,

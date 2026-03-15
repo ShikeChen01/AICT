@@ -19,6 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from backend.db.models import Agent, Base, Project, Repository, Task
 
+# Mark the FastAPI app as ready so the readiness gate middleware doesn't
+# return 503 for every request in tests.
+from backend.main import app as _app, _get_startup_state as _get_state
+_get_state(_app).ready = True
+
 # Use PostgreSQL when INTEGRATION_TEST=1, else SQLite for fast unit tests
 USE_POSTGRES = os.getenv("INTEGRATION_TEST") == "1"
 
@@ -139,10 +144,21 @@ async def sample_project(session: AsyncSession) -> Repository:
     return project
 
 
+async def _create_agent(session: AsyncSession, **kwargs) -> Agent:
+    """Create an agent and eagerly set lazy relationships to avoid MissingGreenlet."""
+    agent = Agent(**kwargs)
+    session.add(agent)
+    await session.flush()
+    from sqlalchemy.orm.attributes import set_committed_value
+    set_committed_value(agent, "sandbox", None)
+    return agent
+
+
 @pytest_asyncio.fixture
 async def sample_manager(session: AsyncSession, sample_project: Repository) -> Agent:
     """Manager agent (GM)."""
-    agent = Agent(
+    return await _create_agent(
+        session,
         id=uuid.uuid4(),
         project_id=sample_project.id,
         role="manager",
@@ -150,15 +166,13 @@ async def sample_manager(session: AsyncSession, sample_project: Repository) -> A
         model="",
         status="sleeping",
     )
-    session.add(agent)
-    await session.flush()
-    return agent
 
 
 @pytest_asyncio.fixture
 async def sample_cto(session: AsyncSession, sample_project: Repository) -> Agent:
     """CTO agent."""
-    agent = Agent(
+    return await _create_agent(
+        session,
         id=uuid.uuid4(),
         project_id=sample_project.id,
         role="cto",
@@ -166,15 +180,13 @@ async def sample_cto(session: AsyncSession, sample_project: Repository) -> Agent
         model="",
         status="sleeping",
     )
-    session.add(agent)
-    await session.flush()
-    return agent
 
 
 @pytest_asyncio.fixture
 async def sample_engineer(session: AsyncSession, sample_project: Repository) -> Agent:
     """Create an Engineer agent."""
-    agent = Agent(
+    return await _create_agent(
+        session,
         id=uuid.uuid4(),
         project_id=sample_project.id,
         role="engineer",
@@ -182,9 +194,6 @@ async def sample_engineer(session: AsyncSession, sample_project: Repository) -> 
         model="",
         status="sleeping",
     )
-    session.add(agent)
-    await session.flush()
-    return agent
 
 
 @pytest_asyncio.fixture

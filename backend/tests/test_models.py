@@ -70,7 +70,11 @@ async def test_create_agent_defaults(session: AsyncSession, sample_project: Proj
     assert agent.id is not None
     assert agent.status == "sleeping"
     assert agent.current_task_id is None
-    assert agent.sandbox is None
+    # Check sandbox via query to avoid lazy-load MissingGreenlet
+    from sqlalchemy import select as sa_select
+    from backend.db.models import Sandbox
+    sb_result = await session.execute(sa_select(Sandbox).where(Sandbox.agent_id == agent.id))
+    assert sb_result.scalar_one_or_none() is None
 
 
 @pytest.mark.asyncio

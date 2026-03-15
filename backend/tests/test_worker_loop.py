@@ -87,7 +87,10 @@ def test_parse_tool_uuid_optional_allows_none_or_empty() -> None:
 async def test_execute_command_tool_uses_vm_sandbox(sample_engineer, session) -> None:
     from backend.services.sandbox_client import ShellResult
 
-    sample_engineer.sandbox_id = "vm-sbox-test"
+    from sqlalchemy.orm.attributes import set_committed_value
+    mock_sb = MagicMock()
+    mock_sb.id = "vm-sbox-test"
+    set_committed_value(sample_engineer, "sandbox", mock_sb)
     shell_result = ShellResult(stdout="/home/user\n", exit_code=0)
     ctx = _make_ctx(session, sample_engineer)
 
@@ -136,7 +139,10 @@ async def test_ensure_agent_tools_backfills_new_defaults(sample_manager, session
 async def test_execute_command_tool_reports_sandbox_output(sample_engineer, session) -> None:
     from backend.services.sandbox_client import ShellResult
 
-    sample_engineer.sandbox_id = "sandbox-exec"
+    from sqlalchemy.orm.attributes import set_committed_value
+    mock_sb = MagicMock()
+    mock_sb.id = "sandbox-exec"
+    set_committed_value(sample_engineer, "sandbox", mock_sb)
     shell_result = ShellResult(stdout="/home/user/project\n", exit_code=0)
     ctx = _make_ctx(session, sample_engineer)
 

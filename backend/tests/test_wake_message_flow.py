@@ -259,7 +259,6 @@ class TestModelResolution:
             display_name="CTO-Override",
             model="claude-4-6-sonnet-latest",
             status="sleeping",
-            sandbox_persist=False,
         )
         session.add(cto)
         await session.flush()
@@ -275,16 +274,14 @@ class TestModelResolution:
     async def test_engineer_with_empty_model_uses_config_default(
         self, sample_project, session, monkeypatch,
     ):
-        """An engineer with model='' should resolve from seniority config."""
+        """An engineer with model='' should resolve to junior model default."""
         engineer = Agent(
             id=uuid4(),
             project_id=sample_project.id,
             role="engineer",
             display_name="Eng-EmptyModel",
             model="",
-            tier="intermediate",
             status="sleeping",
-            sandbox_persist=False,
         )
         session.add(engineer)
         await session.flush()
@@ -294,8 +291,8 @@ class TestModelResolution:
             user_message="hello",
         )
         resolved = llm_mock.await_args.kwargs["model"]
-        assert resolved == settings.engineer_intermediate_model, (
-            f"Expected default '{settings.engineer_intermediate_model}', got '{resolved}'"
+        assert resolved == settings.engineer_junior_model, (
+            f"Expected default '{settings.engineer_junior_model}', got '{resolved}'"
         )
 
     @pytest.mark.asyncio
@@ -310,7 +307,6 @@ class TestModelResolution:
             display_name="CTO-EmptyModel",
             model="",
             status="sleeping",
-            sandbox_persist=False,
         )
         session.add(cto)
         await session.flush()

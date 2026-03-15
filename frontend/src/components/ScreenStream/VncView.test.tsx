@@ -250,7 +250,7 @@ describe('VncView', () => {
       rfbState.instances[0].listeners['disconnect']?.forEach((h) => h());
     });
 
-    expect(screen.getByText(/Connecting to sandbox display/)).toBeInTheDocument();
+    expect(screen.getByText(/Waiting for sandbox/)).toBeInTheDocument();
   });
 
   it('noVNC RFB is created with the container element', async () => {

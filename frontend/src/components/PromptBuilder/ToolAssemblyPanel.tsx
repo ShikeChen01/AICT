@@ -210,7 +210,7 @@ export function ToolAssemblyPanel({
   const handleSyncServer = useCallback(async (serverId: string) => {
     setSyncingServerId(serverId);
     try {
-      const result = await syncMcpServer(serverId);
+      await syncMcpServer(serverId);
       // Refresh tools + servers to pick up newly discovered tools.
       const [updatedTools, updatedServers] = await Promise.all([
         listAgentTools(agentId),

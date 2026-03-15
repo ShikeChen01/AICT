@@ -368,6 +368,7 @@ function DashboardContent({ projectId, projectName }: DashboardContentProps) {
                 <SandboxThumbnail
                   key={sb.id}
                   sandbox={sb}
+                  agents={agents}
                   onClick={() => navigate(`/project/${projectId}/sandbox`)}
                 />
               ))}
@@ -465,9 +466,10 @@ function StatCard({ icon, label, value, sub, accent, progress }: StatCardProps) 
 
 // ── Sandbox Thumbnail ──────────────────────────────────────────────────────
 
-function SandboxThumbnail({ sandbox, onClick }: { sandbox: Sandbox; onClick: () => void }) {
+function SandboxThumbnail({ sandbox, agents, onClick }: { sandbox: Sandbox; agents: Agent[]; onClick: () => void }) {
   const { frameUrl, isConnected } = useScreenStream(sandbox.orchestrator_sandbox_id);
-  const roleColor = ROLE_COLORS[sandbox.agent_role ?? 'engineer'] ?? '#64748b';
+  const agentRole = sandbox.agent_id ? agents.find(a => a.id === sandbox.agent_id)?.role : undefined;
+  const roleColor = ROLE_COLORS[agentRole ?? 'engineer'] ?? '#64748b';
 
   return (
     <button

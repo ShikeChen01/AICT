@@ -183,9 +183,10 @@ class TaskService:
         task = await self.get(task_id)
         previous_agent_id = task.assigned_agent_id
 
-        # Validate agent exists
+        # Validate agent exists (eagerly load sandbox to avoid MissingGreenlet)
+        from sqlalchemy.orm import selectinload
         result = await self.session.execute(
-            select(Agent).where(Agent.id == agent_id)
+            select(Agent).options(selectinload(Agent.sandbox)).where(Agent.id == agent_id)
         )
         agent = result.scalar_one_or_none()
         if not agent:
