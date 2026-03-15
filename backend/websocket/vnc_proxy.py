@@ -49,10 +49,15 @@ async def _safe_close_viewer(ws: WebSocket, code: int, reason: str) -> None:
 
 
 async def _resolve_sandbox_connection(sandbox_id: str) -> tuple[str | None, int, str | None]:
-    """Look up sandbox host/port/auth_token, applying dev tunnel if needed."""
+    """Look up sandbox host/port/auth_token, applying dev tunnel if needed.
+
+    Accepts either an orchestrator_sandbox_id or a DB UUID — the frontend may
+    pass either depending on the component.
+    """
     from backend.db.session import AsyncSessionLocal
     from backend.db.models import Sandbox
     from sqlalchemy import select
+    import uuid as _uuid
 
     host = port = auth_token = None
     try:
@@ -61,6 +66,15 @@ async def _resolve_sandbox_connection(sandbox_id: str) -> tuple[str | None, int,
                 select(Sandbox).where(Sandbox.orchestrator_sandbox_id == sandbox_id)
             )
             sandbox = result.scalar_one_or_none()
+            if sandbox is None:
+                try:
+                    _uuid.UUID(sandbox_id)
+                    result = await db.execute(
+                        select(Sandbox).where(Sandbox.id == sandbox_id)
+                    )
+                    sandbox = result.scalar_one_or_none()
+                except ValueError:
+                    pass
             if sandbox:
                 host = sandbox.host
                 port = sandbox.port

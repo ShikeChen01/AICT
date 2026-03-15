@@ -111,11 +111,21 @@ async def _verify_ws_sandbox_access(token: str, sandbox_id: str) -> bool:
         if user is None:
             return False
 
-        # Look up sandbox by orchestrator_sandbox_id (the public sandbox ID)
+        # Look up sandbox by orchestrator_sandbox_id or DB UUID
         sandbox_result = await db.execute(
             select(Sandbox).where(Sandbox.orchestrator_sandbox_id == sandbox_id)
         )
         sandbox = sandbox_result.scalar_one_or_none()
+        if sandbox is None:
+            import uuid as _uuid
+            try:
+                _uuid.UUID(sandbox_id)
+                sandbox_result = await db.execute(
+                    select(Sandbox).where(Sandbox.id == sandbox_id)
+                )
+                sandbox = sandbox_result.scalar_one_or_none()
+            except ValueError:
+                pass
 
     if sandbox is None:
         # Sandbox not found yet — allow if token is valid
