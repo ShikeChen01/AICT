@@ -14,6 +14,21 @@ This starts:
 - Backend at `http://localhost:8000`
 - Frontend at `http://localhost:3000`
 
+**Run everything locally (SQL + backend + frontend):**
+
+```powershell
+.\scripts\local\run-all.ps1
+```
+
+This starts:
+
+- Local PostgreSQL in Docker (if not already running)
+- Runs migrations against the local DB
+- Backend at `http://localhost:8000` (using local DB)
+- Frontend at `http://localhost:3000`
+
+Requires Docker for Postgres. Use this when you want a fully local stack without the shared dev DB.
+
 **Run backend only (uses `.env.development`, typically pointed at the shared dev VM DB):**
 
 ```powershell

@@ -87,6 +87,8 @@ $yamlLines = @(
     "CLONE_CODE_REPO_ON_STARTUP: 'true'"
     "MAX_ENGINEERS: '5'"
     "SECRET_ENCRYPTION_KEY: '$($env:SECRET_ENCRYPTION_KEY)'"
+    "ALLOWED_ORIGINS: 'https://aict-487016.web.app,http://localhost:3000,http://localhost:5173,http://localhost:8000'"
+    "VOYAGE_API_KEY: '$($env:VOYAGE_API_KEY)'"
 )
 [System.IO.File]::WriteAllLines($EnvFile, $yamlLines)
 
