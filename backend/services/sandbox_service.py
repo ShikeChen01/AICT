@@ -695,7 +695,7 @@ class SandboxService:
     async def _resolve_host_port(self, sandbox: Sandbox) -> tuple[str, int]:
         """Return (host, port) for reaching a sandbox, using dev tunnel if needed."""
         import os
-        if os.getenv("ENV", "").lower() == "development":
+        if os.getenv("ENV", "").lower() == "development" and not os.getenv("K_SERVICE"):
             from backend.services.sandbox_tunnel import get_tunnel_manager
             try:
                 return await get_tunnel_manager().get_host_port(

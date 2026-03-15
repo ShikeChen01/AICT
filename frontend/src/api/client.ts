@@ -929,9 +929,10 @@ export { APIClientError };
 export async function testLogin(email: string, password: string): Promise<{ token: string }> {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), 10_000);
+  const base = BACKEND_URL ?? '';
   let response: Response;
   try {
-    response = await fetch('/testfads89213xlogin', {
+    response = await fetch(`${base}/testfads89213xlogin`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),

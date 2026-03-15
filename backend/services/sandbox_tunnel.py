@@ -27,6 +27,9 @@ _SANDBOX_NAMESPACE = "sandboxes"
 
 
 def _is_dev_mode() -> bool:
+    """True when running locally (not on Cloud Run) with ENV=development."""
+    if os.getenv("K_SERVICE"):
+        return False
     return os.getenv("ENV", "").lower() == "development"
 
 

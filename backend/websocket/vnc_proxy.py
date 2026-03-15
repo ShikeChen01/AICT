@@ -96,9 +96,10 @@ async def _resolve_sandbox_connection(sandbox_id: str) -> tuple[str | None, int,
     if not host or not auth_token:
         return (None, port or 8080, None)
 
-    # In dev mode, ClusterIPs are unreachable — tunnel through kubectl port-forward
+    # In local dev mode, ClusterIPs are unreachable — tunnel through kubectl port-forward.
+    # On Cloud Run (K_SERVICE is set), skip tunneling — VPC connector handles it.
     import os
-    if os.getenv("ENV", "").lower() == "development":
+    if os.getenv("ENV", "").lower() == "development" and not os.getenv("K_SERVICE"):
         from backend.services.sandbox_tunnel import get_tunnel_manager
         try:
             tunnel_host, tunnel_port = await get_tunnel_manager().get_host_port(sandbox_id, port or 8080)

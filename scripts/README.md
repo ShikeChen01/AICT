@@ -5,7 +5,7 @@
 **Start full dev environment (backend + frontend):**
 
 ```powershell
-cd c:\Personal-Project\AICT\AICT
+cd <your-workspace-root>
 .\scripts\local\start.ps1
 ```
 

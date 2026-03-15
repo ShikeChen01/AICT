@@ -385,7 +385,7 @@ class AgentService:
             update(Task)
             .where(
                 Task.assigned_agent_id == agent_id,
-                Task.status.in_(("todo", "in_progress")),
+                Task.status.in_(("backlog", "assigned", "in_progress")),
             )
             .values(assigned_agent_id=None, status="backlog")
         )

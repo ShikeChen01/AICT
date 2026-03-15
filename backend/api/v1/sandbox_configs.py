@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.auth import get_current_user
+from backend.core.project_access import require_project_access
 from backend.db.models import Agent, SandboxConfig, User
 from backend.db.session import get_db
 
@@ -90,7 +91,7 @@ async def create_config(
         name=body.name,
         description=body.description,
         setup_script=body.setup_script,
-        os_image=body.os_image,
+        os_image=body.os_image or "ubuntu-22.04",
     )
     db.add(config)
     try:
@@ -172,6 +173,8 @@ async def assign_config_to_agent(
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+
+    await require_project_access(db, agent.project_id, current_user.id)
 
     if body.config_id is not None:
         # Verify the config exists and belongs to this user

@@ -75,7 +75,6 @@ def _estimate_tool_schema_tokens(items: list) -> int:
 
 
 async def _get_agent_with_access(db: AsyncSession, agent_id: UUID, user_id: UUID | None) -> Agent:
-    from sqlalchemy import select
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
@@ -148,17 +147,7 @@ async def bulk_save_agent_tools(
     user_id = current_user.id if isinstance(current_user, User) else None
     agent = await _get_agent_with_access(db, agent_id, user_id)
 
-    # Validate tool schema budget
-    new_total_tokens = sum(
-        len(json.dumps({
-            "name": item.tool_name,
-            "description": item.description,
-            "input_schema": {},  # schema doesn't change; use existing
-        })) // _CHARS_PER_TOKEN
-        for item in body.tools
-        if item.enabled
-    )
-    # Load current input_schema from DB for accurate token count
+    # Validate tool schema budget using actual input_schema from DB
     repo = ToolConfigRepository(db)
     existing = {tc.tool_name: tc for tc in await repo.list_for_agent(agent_id)}
     new_total_tokens = 0

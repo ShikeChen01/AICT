@@ -283,7 +283,7 @@ jobs:
             --set-env-vars="SANDBOX_ORCHESTRATOR_TOKEN=${{ secrets.SANDBOX_ORCHESTRATOR_TOKEN }}" \
             --set-env-vars="SECRET_ENCRYPTION_KEY=${{ secrets.SECRET_ENCRYPTION_KEY }}" \
             --set-env-vars="VOYAGE_API_KEY=${{ secrets.VOYAGE_API_KEY }}" \
-            --set-env-vars="^;;^ALLOWED_ORIGINS=https://aict-487016.web.app,http://localhost:5173,http://localhost:8000" \
+            --set-env-vars="^;;^ALLOWED_ORIGINS=https://aict-487016.web.app,http://localhost:3000,http://localhost:5173,http://localhost:8000" \
             --set-env-vars="PROVISION_REPOS_ON_STARTUP=false" \
             --set-env-vars="CLONE_CODE_REPO_ON_STARTUP=false" \
             --set-env-vars="MAX_ENGINEERS=5" \
