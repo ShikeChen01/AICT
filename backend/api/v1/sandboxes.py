@@ -21,6 +21,7 @@ from backend.core.project_access import require_project_access
 from backend.db.models import Sandbox, SandboxConfig, SandboxSnapshot, User
 from backend.db.session import get_db
 from backend.services.sandbox_service import (
+    CapacityExhaustedError,
     SandboxAlreadyAssigned,
     SandboxLimitReached,
     SandboxOwnershipError,
@@ -47,6 +48,7 @@ class SandboxResponse(BaseModel):
     name: str | None = None
     description: str | None = None
     orchestrator_sandbox_id: str
+    unit_type: str = "headless"  # v4: "headless" | "desktop"
     status: str
     host: str | None
     port: int
@@ -59,6 +61,7 @@ class CreateSandboxRequest(BaseModel):
     name: str | None = Field(None, max_length=100)
     description: str | None = None
     project_id: UUID | None = None
+    requires_desktop: bool = False  # v4: request a desktop VM instead of headless container
 
 
 class UpdateSandboxRequest(BaseModel):
@@ -120,6 +123,7 @@ def _sandbox_to_response(sb: Sandbox) -> dict:
         "name": sb.name,
         "description": sb.description,
         "orchestrator_sandbox_id": sb.orchestrator_sandbox_id,
+        "unit_type": getattr(sb, "unit_type", "headless"),
         "status": sb.status,
         "host": sb.host,
         "port": sb.port or 8080,
@@ -222,12 +226,22 @@ async def create_sandbox(
             name=body.name,
             description=body.description,
             project_id=body.project_id,
+            requires_desktop=body.requires_desktop,
         )
         await db.commit()
     except SandboxLimitReached as exc:
         raise HTTPException(
             status_code=429,
             detail=f"Sandbox limit reached ({exc.current_count}/{exc.limit})",
+        ) from exc
+    except CapacityExhaustedError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "capacity_exhausted",
+                "message": "No capacity available to create this sandbox",
+                **exc.detail,
+            },
         ) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -492,3 +506,76 @@ async def list_sandbox_images(
                 "resources": {"requests": {"cpu": "250m", "memory": "256Mi"}},
             },
         ]
+
+
+# ── v4: Promote / Demote / Capacity ────────────────────────────────────────
+
+
+@router.post("/{sandbox_id}/promote", response_model=SandboxResponse)
+async def promote_sandbox(
+    sandbox_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Promote a headless sandbox to desktop (Docker → QEMU sub-VM).
+
+    Preserves working directory via file migration. Requires available
+    desktop capacity in the Grand-VM budget.
+    """
+    sandbox = await _require_sandbox_owner(db, sandbox_id, current_user.id)
+    svc = _get_sandbox_service()
+    try:
+        sandbox = await svc.promote_to_desktop(db, sandbox)
+        await db.commit()
+    except CapacityExhaustedError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "capacity_exhausted",
+                "message": "No desktop capacity available for promotion",
+                **exc.detail,
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await db.refresh(sandbox, ["agent", "config"])
+    return _sandbox_to_response(sandbox)
+
+
+@router.post("/{sandbox_id}/demote", response_model=SandboxResponse)
+async def demote_sandbox(
+    sandbox_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Demote a desktop sandbox to headless (QEMU sub-VM → Docker container).
+
+    Preserves working directory. Frees desktop resources back to the budget.
+    """
+    sandbox = await _require_sandbox_owner(db, sandbox_id, current_user.id)
+    svc = _get_sandbox_service()
+    try:
+        sandbox = await svc.demote_to_headless(db, sandbox)
+        await db.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await db.refresh(sandbox, ["agent", "config"])
+    return _sandbox_to_response(sandbox)
+
+
+@router.get("/capacity")
+async def get_capacity_status(
+    current_user: User = Depends(get_current_user),
+):
+    """Get current Grand-VM capacity budget snapshot.
+
+    Returns CPU/RAM/disk usage, headless/desktop counts, and whether
+    new units of each type can be provisioned.
+    """
+    svc = _get_sandbox_service()
+    try:
+        return await svc.capacity_status()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc

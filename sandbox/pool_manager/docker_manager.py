@@ -118,6 +118,51 @@ class DockerManager:
         except NotFound:
             pass
 
+    # ── Snapshot operations ────────────────────────────────────────────────────
+
+    def commit_container(self, sandbox_id: str, snapshot_name: str) -> str:
+        """Commit the current container state to a new image. Returns image tag."""
+        try:
+            c = self._client.containers.get(f"sandbox-{sandbox_id}")
+            c.commit(repository=snapshot_name, tag="latest")
+            return f"{snapshot_name}:latest"
+        except NotFound:
+            raise RuntimeError(f"Container sandbox-{sandbox_id} not found for snapshot")
+
+    def restore_from_snapshot(
+        self,
+        sandbox_id: str,
+        snapshot_name: str,
+        host_port: int,
+        auth_token: str,
+        volume_name: str,
+    ) -> str:
+        """Restore a container from a previously committed snapshot image."""
+        self.destroy_container(sandbox_id)
+        # Create from the snapshot image instead of the default base
+        container = self._client.containers.run(
+            image=f"{snapshot_name}:latest" if ":" not in snapshot_name else snapshot_name,
+            name=f"sandbox-{sandbox_id}",
+            detach=True,
+            cgroup_parent=CGROUP_PARENT,
+            cpu_shares=CONTAINER_CPU_SHARES,
+            mem_limit=CONTAINER_MEMORY,
+            ports={f"{CONTAINER_INTERNAL_PORT}/tcp": host_port},
+            volumes={volume_name: {"bind": "/workspace", "mode": "rw"}} if volume_name else {},
+            environment={"AUTH_TOKEN": auth_token},
+            restart_policy={"Name": "no"},
+        )
+        return container.id
+
+    def list_snapshots(self, sandbox_id: str) -> list[dict]:
+        """List snapshot images for a given sandbox."""
+        prefix = f"sandbox-snap-{sandbox_id}"
+        images = self._client.images.list(name=prefix)
+        return [
+            {"name": img.tags[0] if img.tags else img.short_id, "id": img.short_id}
+            for img in images
+        ]
+
     # ── Stats ─────────────────────────────────────────────────────────────────
 
     def get_container_memory_mb(self, sandbox_id: str) -> float | None:

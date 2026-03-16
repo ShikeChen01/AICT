@@ -1,37 +1,39 @@
-"""Port allocator for mapping container port 8080 to a VM host port."""
+"""Port allocator — v4 split ranges for headless and desktop units.
+
+Headless containers: 30001–30050
+Desktop sub-VMs:     30051–30100
+"""
 
 from __future__ import annotations
 
 import threading
 from typing import Optional
 
-from config import PORT_RANGE_END, PORT_RANGE_START
+import config
 
 
 class PortAllocator:
-    """Thread-safe port range allocator."""
+    """Thread-safe port range allocator with per-type pools."""
 
-    def __init__(
-        self,
-        start: int = PORT_RANGE_START,
-        end: int = PORT_RANGE_END,
-    ) -> None:
-        self._start = start
-        self._end = end
-        self._used: set[int] = set()
+    def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._used: set[int] = set()
 
-    def allocate(self) -> Optional[int]:
-        """Return the next free port, or None if the range is exhausted."""
+    def allocate(self, unit_type: str = "headless") -> Optional[int]:
+        """Return the next free port for the given unit type."""
+        if unit_type == "desktop":
+            start, end = config.DESKTOP_PORT_START, config.DESKTOP_PORT_END
+        else:
+            start, end = config.HEADLESS_PORT_START, config.HEADLESS_PORT_END
+
         with self._lock:
-            for port in range(self._start, self._end + 1):
+            for port in range(start, end + 1):
                 if port not in self._used:
                     self._used.add(port)
                     return port
         return None
 
     def release(self, port: int) -> None:
-        """Mark a port as free."""
         with self._lock:
             self._used.discard(port)
 

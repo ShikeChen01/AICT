@@ -125,6 +125,7 @@ class SandboxConfig(Base):
     os_image = Column(String(100), nullable=False, default="ubuntu-22.04")
     setup_script = Column(Text, nullable=False, default="")
     persistent = Column(Boolean, nullable=False, default=False)
+    requires_desktop = Column(Boolean, nullable=False, default=False)  # v4: request QEMU desktop sub-VM
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
@@ -160,6 +161,7 @@ class Sandbox(Base):
     description = Column(Text, nullable=True)
 
     orchestrator_sandbox_id = Column(String(255), nullable=False, unique=True)
+    unit_type = Column(String(20), nullable=False, default="headless")  # v4: "headless" | "desktop"
     status = Column(String(50), nullable=False, default="provisioning")
     host = Column(String(255), nullable=True)
     port = Column(Integer, default=8080)

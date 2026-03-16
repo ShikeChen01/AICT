@@ -103,8 +103,20 @@ class SandboxMetadata:
 
 # ── Orchestrator Client ───────────────────────────────────────────────────
 
+class CapacityExhaustedError(Exception):
+    """Pool manager reported capacity exhaustion."""
+
+    def __init__(self, detail: dict):
+        self.detail = detail
+        resource = detail.get("resource", "unknown")
+        super().__init__(f"Capacity exhausted: {resource}")
+
+
 class OrchestratorClient:
-    """Async REST client for the sandbox orchestrator (GKE or legacy VM).
+    """Async REST client for the sandbox orchestrator (Grand-VM pool manager).
+
+    v4: Supports dual-backend (headless Docker + desktop QEMU) with
+    promote/demote, capacity status, and requires_desktop routing.
 
     This class is a thin HTTP wrapper — it knows nothing about DB models
     or business rules.
@@ -218,13 +230,21 @@ class OrchestratorClient:
         self,
         *,
         persistent: bool = False,
+        requires_desktop: bool = False,
         setup_script: str | None = None,
         os_image: str | None = None,
         project_id: str | None = None,
         agent_id: str | None = None,
     ) -> dict:
-        """Ask the orchestrator to provision a new sandbox."""
-        body: dict = {"persistent": persistent}
+        """Ask the orchestrator to provision a new sandbox.
+
+        v4: `requires_desktop=True` routes to QEMU sub-VM instead of Docker.
+        Raises CapacityExhaustedError on 503 with structured capacity data.
+        """
+        body: dict = {
+            "persistent": persistent,
+            "requires_desktop": requires_desktop,
+        }
         if agent_id:
             body["agent_id"] = agent_id
         if setup_script:
@@ -241,6 +261,12 @@ class OrchestratorClient:
                 json=body,
                 headers=self._headers,
             )
+            if resp.status_code == 503:
+                try:
+                    detail = resp.json()
+                except Exception:
+                    detail = {"error": "capacity_exhausted"}
+                raise CapacityExhaustedError(detail)
             resp.raise_for_status()
             return resp.json()
 
@@ -324,6 +350,69 @@ class OrchestratorClient:
             resp.raise_for_status()
             return resp.json()
 
+    # ── v4: Promote / Demote ──────────────────────────────────────────
+
+    async def promote(self, unit_id: str) -> dict:
+        """Promote a headless unit to desktop (Docker → QEMU).
+
+        Raises CapacityExhaustedError if desktop budget is full.
+        """
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{self._base}/session/promote/{unit_id}",
+                headers=self._headers,
+            )
+            if resp.status_code == 503:
+                try:
+                    detail = resp.json()
+                except Exception:
+                    detail = {"error": "capacity_exhausted"}
+                raise CapacityExhaustedError(detail)
+            resp.raise_for_status()
+            return resp.json()
+
+    async def demote(self, unit_id: str) -> dict:
+        """Demote a desktop unit to headless (QEMU → Docker)."""
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{self._base}/session/demote/{unit_id}",
+                headers=self._headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    # ── v4: Capacity status ──────────────────────────────────────────
+
+    async def capacity_status(self) -> dict:
+        """Get Grand-VM capacity budget snapshot."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{self._base}/status",
+                headers=self._headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def list_units(self) -> list[dict]:
+        """Get all active units from pool manager."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{self._base}/units",
+                headers=self._headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def touch_sandbox(self, sandbox_id: str) -> dict:
+        """Touch a sandbox to reset its idle timer (v4 idle reaping)."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{self._base}/sandbox/{sandbox_id}/touch",
+                headers=self._headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -331,14 +420,15 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _resolve_config(config: SandboxConfig | None) -> tuple[str, str | None, bool]:
-    """Extract (os_image, setup_script, persistent) from a SandboxConfig."""
+def _resolve_config(config: SandboxConfig | None) -> tuple[str, str | None, bool, bool]:
+    """Extract (os_image, setup_script, persistent, requires_desktop) from a SandboxConfig."""
     if not config:
-        return DEFAULT_OS_IMAGE, None, False
+        return DEFAULT_OS_IMAGE, None, False, False
     return (
         config.os_image or DEFAULT_OS_IMAGE,
         config.setup_script or None,
         bool(config.persistent),
+        bool(getattr(config, "requires_desktop", False)),
     )
 
 
@@ -374,6 +464,7 @@ class SandboxService:
         name: str | None = None,
         description: str | None = None,
         project_id: UUID | None = None,
+        requires_desktop: bool = False,
     ) -> Sandbox:
         """Create a new user-owned sandbox.
 
@@ -396,12 +487,15 @@ class SandboxService:
         config: SandboxConfig | None = None
         if config_id:
             config = await db.get(SandboxConfig, config_id)
-        os_image, setup_script, persistent = _resolve_config(config)
+        os_image, setup_script, persistent, config_requires_desktop = _resolve_config(config)
+        # Explicit parameter wins; otherwise fall back to config
+        effective_desktop = requires_desktop or config_requires_desktop
 
         # ── Provision via orchestrator ────────────────────────────────
         try:
             data = await self._orchestrator.session_start(
                 persistent=persistent,
+                requires_desktop=effective_desktop,
                 setup_script=setup_script,
                 os_image=os_image,
                 project_id=str(project_id) if project_id else None,
@@ -425,6 +519,7 @@ class SandboxService:
             logger.error("Orchestrator returned no host for sandbox %s", orch_id)
         port = data.get("host_port", 8080)
         auth_token = data["auth_token"]
+        unit_type = data.get("unit_type", "desktop" if effective_desktop else "headless")
 
         # ── Create DB row ─────────────────────────────────────────────
         sandbox = Sandbox(
@@ -435,6 +530,7 @@ class SandboxService:
             name=name or f"sandbox-{orch_id[:8]}",
             description=description,
             orchestrator_sandbox_id=orch_id,
+            unit_type=unit_type,
             status="ready",
             host=host,
             port=port,
@@ -643,6 +739,53 @@ class SandboxService:
         return await self._orchestrator.run_setup(
             sandbox.orchestrator_sandbox_id, config.setup_script
         )
+
+    # ══════════════════════════════════════════════════════════════════
+    # v4: Promote / Demote / Capacity
+    # ══════════════════════════════════════════════════════════════════
+
+    async def promote_to_desktop(
+        self, db: AsyncSession, sandbox: Sandbox
+    ) -> Sandbox:
+        """Promote a headless sandbox to desktop (Docker → QEMU).
+
+        The pool manager handles the full migration: reserve budget, create VM,
+        migrate files, destroy container. We just forward the request and update
+        the DB record.
+        """
+        if sandbox.unit_type == "desktop":
+            raise ValueError("Sandbox is already a desktop unit")
+
+        data = await self._orchestrator.promote(sandbox.orchestrator_sandbox_id)
+        new_id = data.get("new_unit_id", sandbox.orchestrator_sandbox_id)
+        sandbox.orchestrator_sandbox_id = new_id
+        sandbox.unit_type = "desktop"
+        sandbox.host = data.get("host", sandbox.host)
+        sandbox.port = data.get("host_port", sandbox.port)
+        sandbox.auth_token = data.get("auth_token", sandbox.auth_token)
+        await db.flush()
+        return sandbox
+
+    async def demote_to_headless(
+        self, db: AsyncSession, sandbox: Sandbox
+    ) -> Sandbox:
+        """Demote a desktop sandbox to headless (QEMU → Docker)."""
+        if sandbox.unit_type == "headless":
+            raise ValueError("Sandbox is already a headless unit")
+
+        data = await self._orchestrator.demote(sandbox.orchestrator_sandbox_id)
+        new_id = data.get("new_unit_id", sandbox.orchestrator_sandbox_id)
+        sandbox.orchestrator_sandbox_id = new_id
+        sandbox.unit_type = "headless"
+        sandbox.host = data.get("host", sandbox.host)
+        sandbox.port = data.get("host_port", sandbox.port)
+        sandbox.auth_token = data.get("auth_token", sandbox.auth_token)
+        await db.flush()
+        return sandbox
+
+    async def capacity_status(self) -> dict:
+        """Get current Grand-VM capacity budget snapshot."""
+        return await self._orchestrator.capacity_status()
 
     # ── Snapshots ─────────────────────────────────────────────────────
 

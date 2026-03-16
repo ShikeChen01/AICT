@@ -1,100 +1,144 @@
-"""Background health monitor — pings each container and manages unhealthy ones."""
+"""Health monitor — v4 dual-backend (Docker + QEMU) with idle reaping.
+
+Two independent background loops:
+  1. Health check (every 30s): ping each unit, restart on 3 consecutive failures.
+  2. Idle sweep (every 10 min): destroy temporary units idle > 5 min.
+"""
 
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
 import httpx
 
-from config import (
-    ASSIGNED_TTL_SECONDS,
-    HEALTH_CHECK_FAIL_THRESHOLD,
-    HEALTH_CHECK_INTERVAL_SECONDS,
-    IDLE_TTL_SECONDS,
-)
-from docker_manager import DockerManager
-from models import PoolState, SandboxState
-from port_allocator import PortAllocator
+import config
+from capacity_budget import CapacityBudget
+from models import PoolState, UnitState, UnitStatus, UnitType
+
+if TYPE_CHECKING:
+    from docker_manager import DockerManager
+    from vm_manager import VMManager
 
 
 class HealthMonitor:
-    def __init__(self, pool: PoolState, docker: DockerManager, ports: PortAllocator) -> None:
+    """Background health checking and idle reaping for both compute backends."""
+
+    def __init__(
+        self,
+        pool: PoolState,
+        docker: "DockerManager",
+        vm: "VMManager | None",
+        ports: "PortAllocator",
+        budget: CapacityBudget,
+    ) -> None:
+        from port_allocator import PortAllocator
+
         self._pool = pool
         self._docker = docker
-        self._ports = ports
-        self._task: asyncio.Task | None = None
+        self._vm = vm
+        self._ports: PortAllocator = ports
+        self._budget = budget
+        self._health_task: asyncio.Task | None = None
+        self._sweep_task: asyncio.Task | None = None
 
     def start(self) -> None:
-        self._task = asyncio.get_event_loop().create_task(self._loop())
+        loop = asyncio.get_event_loop()
+        self._health_task = loop.create_task(self._health_loop())
+        self._sweep_task = loop.create_task(self._sweep_loop())
 
     def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
+        for task in (self._health_task, self._sweep_task):
+            if task:
+                task.cancel()
 
-    async def _loop(self) -> None:
+    # ── Health check loop ─────────────────────────────────────────────────────
+
+    async def _health_loop(self) -> None:
         while True:
-            await asyncio.sleep(HEALTH_CHECK_INTERVAL_SECONDS)
+            await asyncio.sleep(config.HEALTH_CHECK_INTERVAL_SECONDS)
             try:
-                await self._check_all()
+                await self._check_all_health()
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
-                print(f"[health-monitor] ERROR: {exc}")
+                print(f"[health-monitor] ERROR in health loop: {exc}")
 
-    async def _check_all(self) -> None:
-        sandboxes = self._pool.all()
-        for s in sandboxes:
-            await self._check_one(s)
+    async def _check_all_health(self) -> None:
+        for u in self._pool.all():
+            if u.status in (UnitStatus.RESETTING.value, UnitStatus.PROMOTING.value, UnitStatus.DEMOTING.value):
+                continue
 
-    async def _check_one(self, s: SandboxState) -> None:
-        # "resetting" slots are between destroy and recreate — Docker doesn't
-        # have a running container to ping yet.  Skip and let the background
-        # reset task in main.py drive the transition to "idle".
-        if s.status == "resetting":
-            return
+            if u.status == UnitStatus.UNHEALTHY.value:
+                print(f"[health-monitor] Evicting permanently unhealthy unit {u.unit_id} ({u.unit_type})")
+                await self._evict(u)
+                continue
 
-        # "unhealthy" sandboxes already failed restart — evict them so we
-        # don't spin in a tight restart loop.
-        if s.status == "unhealthy":
-            print(f"[health-monitor] Evicting permanently unhealthy sandbox {s.sandbox_id}")
-            await self._evict(s)
-            return
+            # Zombie guard: assigned > ASSIGNED_TTL without commands
+            if (
+                u.status == UnitStatus.ASSIGNED.value
+                and not u.persistent
+                and u.idle_seconds() > config.ASSIGNED_TTL_SECONDS
+            ):
+                print(
+                    f"[health-monitor] Releasing zombie unit {u.unit_id} "
+                    f"(idle {u.idle_seconds():.0f}s > {config.ASSIGNED_TTL_SECONDS}s)"
+                )
+                self._pool.mark_resetting(u.unit_id)
+                asyncio.create_task(self._reset_unit(u))
+                continue
 
-        # TTL-based idle cleanup — skip for persistent sandboxes (they live indefinitely)
-        if s.status == "idle" and not s.persistent and s.idle_seconds() > IDLE_TTL_SECONDS:
-            print(f"[health-monitor] Evicting idle sandbox {s.sandbox_id} (TTL exceeded)")
-            await self._evict(s)
-            return
+            healthy = await self._ping(u)
+            if healthy:
+                if u.health_failures > 0:
+                    u.health_failures = 0
+                    self._pool.update(u)
+                continue
 
-        # Zombie assigned-sandbox guard — skip for persistent sandboxes
-        if s.status == "assigned" and not s.persistent and s.idle_seconds() > ASSIGNED_TTL_SECONDS:
+            u.health_failures += 1
             print(
-                f"[health-monitor] Releasing zombie assigned sandbox {s.sandbox_id} "
-                f"(idle for {s.idle_seconds():.0f}s > ASSIGNED_TTL={ASSIGNED_TTL_SECONDS}s)"
+                f"[health-monitor] Unit {u.unit_id} ({u.unit_type}) health failure "
+                f"{u.health_failures}/{config.HEALTH_CHECK_FAIL_THRESHOLD}"
             )
-            self._pool.mark_resetting(s.sandbox_id)
-            asyncio.create_task(self._reset_and_idle(s))
-            return
 
-        # Health ping
-        healthy = await self._ping(s)
-        if healthy:
-            s.health_failures = 0
-            self._pool.update(s)
-            return
+            if u.health_failures >= config.HEALTH_CHECK_FAIL_THRESHOLD:
+                u.status = UnitStatus.UNHEALTHY.value
+                self._pool.update(u)
+                await self._restart(u)
 
-        s.health_failures += 1
-        print(
-            f"[health-monitor] Sandbox {s.sandbox_id} health failure "
-            f"{s.health_failures}/{HEALTH_CHECK_FAIL_THRESHOLD}"
-        )
+    # ── Idle sweep loop ───────────────────────────────────────────────────────
 
-        if s.health_failures >= HEALTH_CHECK_FAIL_THRESHOLD:
-            s.status = "unhealthy"
-            self._pool.update(s)
-            await self._restart(s)
+    async def _sweep_loop(self) -> None:
+        while True:
+            await asyncio.sleep(config.SWEEP_INTERVAL_SECONDS)
+            try:
+                await self._sweep_idle()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[health-monitor] ERROR in sweep loop: {exc}")
 
-    async def _ping(self, s: SandboxState) -> bool:
-        url = f"http://127.0.0.1:{s.host_port}/health"
-        headers = {"Authorization": f"Bearer {s.auth_token}"}
+    async def _sweep_idle(self) -> None:
+        """Destroy temporary units that have been idle beyond the threshold."""
+        for u in self._pool.all():
+            if u.persistent:
+                continue
+            if u.status not in (UnitStatus.IDLE.value, UnitStatus.ASSIGNED.value):
+                continue
+
+            idle_secs = u.command_idle_seconds()
+            if idle_secs > config.IDLE_THRESHOLD_SECONDS:
+                print(
+                    f"[health-monitor] Reaping idle unit {u.unit_id} ({u.unit_type}) "
+                    f"— no commands for {idle_secs:.0f}s"
+                )
+                await self._evict(u)
+
+    # ── Ping ──────────────────────────────────────────────────────────────────
+
+    async def _ping(self, u: UnitState) -> bool:
+        url = f"http://127.0.0.1:{u.host_port}/health"
+        headers = {"Authorization": f"Bearer {u.auth_token}"}
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(url, headers=headers)
@@ -102,102 +146,97 @@ class HealthMonitor:
         except Exception:
             return False
 
-    async def _reset_and_idle(self, s: SandboxState) -> None:
-        """Reset a sandbox container and mark it idle once the new instance is ready."""
-        sandbox_id = s.sandbox_id
-        print(f"[health-monitor] Resetting sandbox {sandbox_id} → idle …")
+    # ── Restart ───────────────────────────────────────────────────────────────
+
+    async def _restart(self, u: UnitState) -> None:
+        print(f"[health-monitor] Restarting unit {u.unit_id} ({u.unit_type})...")
+        loop = asyncio.get_event_loop()
+
+        if u.is_headless:
+            await self._restart_headless(u, loop)
+        else:
+            await self._restart_desktop(u, loop)
+
+    async def _restart_headless(self, u: UnitState, loop: asyncio.AbstractEventLoop) -> None:
+        try:
+            new_id = await loop.run_in_executor(
+                None, self._docker.reset_container,
+                u.unit_id, u.host_port, u.auth_token, u.volume_name,
+            )
+            u.container_id = new_id
+            u.health_failures = 0
+            self._pool.update(u)
+
+            if await self._wait_ready(u, timeout=30.0):
+                u.status = UnitStatus.ASSIGNED.value if u.assigned_agent_id else UnitStatus.IDLE.value
+                self._pool.update(u)
+                print(f"[health-monitor] Headless {u.unit_id} restarted → {u.status}")
+            else:
+                u.status = UnitStatus.UNHEALTHY.value
+                self._pool.update(u)
+        except Exception as exc:
+            print(f"[health-monitor] Restart failed for headless {u.unit_id}: {exc} — evicting")
+            await self._evict(u)
+
+    async def _restart_desktop(self, u: UnitState, loop: asyncio.AbstractEventLoop) -> None:
+        if self._vm is None:
+            print(f"[health-monitor] Cannot restart desktop {u.unit_id}: VMManager unavailable")
+            await self._evict(u)
+            return
+
+        try:
+            await loop.run_in_executor(None, self._vm.stop_vm, u.unit_id)
+            await asyncio.sleep(2)
+            await loop.run_in_executor(None, self._vm.start_vm, u.unit_id)
+
+            u.health_failures = 0
+            self._pool.update(u)
+
+            if await self._wait_ready(u, timeout=60.0):
+                u.status = UnitStatus.ASSIGNED.value if u.assigned_agent_id else UnitStatus.IDLE.value
+                self._pool.update(u)
+                print(f"[health-monitor] Desktop {u.unit_id} restarted → {u.status}")
+            else:
+                u.status = UnitStatus.UNHEALTHY.value
+                self._pool.update(u)
+        except Exception as exc:
+            print(f"[health-monitor] Restart failed for desktop {u.unit_id}: {exc} — evicting")
+            await self._evict(u)
+
+    # ── Reset (for zombie cleanup) ────────────────────────────────────────────
+
+    async def _reset_unit(self, u: UnitState) -> None:
+        if u.is_headless:
+            await self._reset_headless(u)
+        else:
+            # For desktop, just release and mark idle
+            self._pool.release(u.unit_id)
+
+    async def _reset_headless(self, u: UnitState) -> None:
         loop = asyncio.get_event_loop()
         try:
             new_id = await loop.run_in_executor(
-                None,
-                self._docker.reset_container,
-                sandbox_id,
-                s.host_port,
-                s.auth_token,
-                s.volume_name,
+                None, self._docker.reset_container,
+                u.unit_id, u.host_port, u.auth_token, u.volume_name,
             )
-            # Re-fetch in case the object was updated while the executor ran.
-            current = self._pool.get(sandbox_id)
+            current = self._pool.get(u.unit_id)
             if current:
                 current.container_id = new_id
                 self._pool.update(current)
 
-            # Wait for the new container to be reachable before advertising it.
-            url = f"http://127.0.0.1:{s.host_port}/health"
-            headers = {"Authorization": f"Bearer {s.auth_token}"}
-            deadline = asyncio.get_event_loop().time() + 30.0
-            ready = False
-            while asyncio.get_event_loop().time() < deadline:
-                try:
-                    async with httpx.AsyncClient(timeout=2.0) as client:
-                        resp = await client.get(url, headers=headers)
-                        if resp.status_code == 200:
-                            ready = True
-                            break
-                except Exception:
-                    pass
-                await asyncio.sleep(1.0)
-
-            if not ready:
-                print(f"[health-monitor] Sandbox {sandbox_id} not ready after reset — evicting")
-                await self._evict(self._pool.get(sandbox_id) or s)
-                return
-
-            self._pool.release(sandbox_id)
-            print(f"[health-monitor] Sandbox {sandbox_id} reset complete → idle")
+            if await self._wait_ready(u, timeout=30.0):
+                self._pool.release(u.unit_id)
+            else:
+                await self._evict(self._pool.get(u.unit_id) or u)
         except Exception as exc:
-            print(f"[health-monitor] Reset failed for {sandbox_id}: {exc} — evicting")
-            await self._evict(self._pool.get(sandbox_id) or s)
+            print(f"[health-monitor] Reset failed for {u.unit_id}: {exc} — evicting")
+            await self._evict(self._pool.get(u.unit_id) or u)
 
-    async def _restart(self, s: SandboxState) -> None:
-        """Restart an unhealthy container, keeping its assignment if it had one.
+    # ── Wait ready ────────────────────────────────────────────────────────────
 
-        Waits for the new container to be reachable before changing status.
-        Without this wait, the backend can receive a sandbox that is still
-        booting, resulting in ConnectError on the first health check or
-        shell execution attempt.
-        """
-        print(f"[health-monitor] Restarting container for sandbox {s.sandbox_id}...")
-        loop = asyncio.get_event_loop()
-        try:
-            new_id = await loop.run_in_executor(
-                None,
-                self._docker.reset_container,
-                s.sandbox_id,
-                s.host_port,
-                s.auth_token,
-                s.volume_name,
-            )
-            s.container_id = new_id
-            s.health_failures = 0
-            self._pool.update(s)
-
-            # Wait for the new container to be reachable before advertising
-            # it as assigned/idle.  This prevents a race where the backend
-            # gets connection info for a still-booting container.
-            ready = await self._wait_ready(s, timeout=30.0)
-            if not ready:
-                print(
-                    f"[health-monitor] Sandbox {s.sandbox_id} not ready after restart "
-                    "— marking unhealthy"
-                )
-                s.status = "unhealthy"
-                self._pool.update(s)
-                return
-
-            # Preserve "assigned" only when an agent still holds the sandbox.
-            # If assigned_agent_id was cleared (zombie), default to idle.
-            s.status = "assigned" if s.assigned_agent_id else "idle"
-            self._pool.update(s)
-            print(f"[health-monitor] Sandbox {s.sandbox_id} restarted → {new_id[:12]}")
-        except Exception as exc:
-            print(f"[health-monitor] Restart failed for {s.sandbox_id}: {exc} — evicting")
-            await self._evict(s)
-
-    async def _wait_ready(self, s: SandboxState, timeout: float = 30.0) -> bool:
-        """Poll /health until the container responds 200 or timeout."""
-        url = f"http://127.0.0.1:{s.host_port}/health"
-        headers = {"Authorization": f"Bearer {s.auth_token}"}
+    async def _wait_ready(self, u: UnitState, timeout: float = 30.0) -> bool:
+        url = f"http://127.0.0.1:{u.host_port}/health"
+        headers = {"Authorization": f"Bearer {u.auth_token}"}
         deadline = asyncio.get_event_loop().time() + timeout
         while asyncio.get_event_loop().time() < deadline:
             try:
@@ -210,13 +249,22 @@ class HealthMonitor:
             await asyncio.sleep(1.0)
         return False
 
-    async def _evict(self, s: SandboxState) -> None:
+    # ── Evict ─────────────────────────────────────────────────────────────────
+
+    async def _evict(self, u: UnitState) -> None:
         loop = asyncio.get_event_loop()
+        unit_type = u.unit_type
+
         try:
-            await loop.run_in_executor(None, self._docker.destroy_container, s.sandbox_id)
-            await loop.run_in_executor(None, self._docker.remove_volume, s.volume_name)
+            if u.is_headless:
+                await loop.run_in_executor(None, self._docker.destroy_container, u.unit_id)
+                if u.volume_name:
+                    await loop.run_in_executor(None, self._docker.remove_volume, u.volume_name)
+            elif u.is_desktop and self._vm is not None:
+                await loop.run_in_executor(None, self._vm.destroy_vm, u.unit_id, u.host_port)
         except Exception as exc:
-            print(f"[health-monitor] Evict error for {s.sandbox_id}: {exc}")
+            print(f"[health-monitor] Evict error for {u.unit_id}: {exc}")
         finally:
-            self._ports.release(s.host_port)
-            self._pool.remove(s.sandbox_id)
+            self._ports.release(u.host_port)
+            self._pool.remove(u.unit_id)
+            self._budget.release(unit_type)
