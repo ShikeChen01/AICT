@@ -65,7 +65,11 @@ class ChannelMessageRepository(BaseRepository[ChannelMessage]):
         limit: int = 100,
         offset: int = 0,
     ) -> list[ChannelMessage]:
-        """Messages between user (USER_AGENT_ID) and the given agent, either direction."""
+        """Messages between user and the given agent, either direction.
+
+        Supports both the legacy USER_AGENT_ID sentinel representation and the
+        newer nullable-agent-FK form backed by from_user_id.
+        """
         from backend.core.constants import USER_AGENT_ID
 
         result = await self.session.execute(
@@ -73,12 +77,19 @@ class ChannelMessageRepository(BaseRepository[ChannelMessage]):
             .where(ChannelMessage.project_id == project_id)
             .where(
                 (
-                    (ChannelMessage.from_agent_id == USER_AGENT_ID)
+                    (
+                        (ChannelMessage.from_user_id.isnot(None))
+                        | (ChannelMessage.from_agent_id == USER_AGENT_ID)
+                    )
                     & (ChannelMessage.target_agent_id == agent_id)
                 )
                 | (
                     (ChannelMessage.from_agent_id == agent_id)
-                    & (ChannelMessage.target_agent_id == USER_AGENT_ID)
+                    & (
+                        ChannelMessage.target_agent_id.is_(None)
+                        | (ChannelMessage.target_agent_id == USER_AGENT_ID)
+                    )
+                    & (ChannelMessage.broadcast.is_(False))
                 )
             )
             .order_by(ChannelMessage.created_at.desc())
@@ -100,7 +111,13 @@ class ChannelMessageRepository(BaseRepository[ChannelMessage]):
             select(ChannelMessage)
             .where(ChannelMessage.project_id == project_id)
             .where(
-                (ChannelMessage.from_agent_id == USER_AGENT_ID)
+                (ChannelMessage.from_user_id.isnot(None))
+                | (ChannelMessage.from_agent_id == USER_AGENT_ID)
+                | (
+                    (ChannelMessage.target_agent_id.is_(None))
+                    & (ChannelMessage.from_agent_id.isnot(None))
+                    & (ChannelMessage.broadcast.is_(False))
+                )
                 | (ChannelMessage.target_agent_id == USER_AGENT_ID)
             )
             .order_by(ChannelMessage.created_at.desc())

@@ -1,7 +1,10 @@
 """
 Message service: channel message send, list, mark received, broadcast.
 
-All messaging flows through channel_messages. User = USER_AGENT_ID.
+All messaging flows through channel_messages. The historical USER_AGENT_ID
+sentinel is translated to nullable agent FKs at the DB boundary so the schema
+can enforce real agent foreign keys while the rest of the app keeps its
+user-vs-agent semantics.
 Broadcast is write-only (no wake-up signal).
 """
 
@@ -22,8 +25,8 @@ class MessageService:
 
     async def send(
         self,
-        from_agent_id: UUID,
-        target_agent_id: UUID,
+        from_agent_id: UUID | None,
+        target_agent_id: UUID | None,
         project_id: UUID,
         content: str,
         *,
@@ -32,11 +35,13 @@ class MessageService:
         attachment_ids: list[UUID] | None = None,
     ) -> "ChannelMessage":
         """Send a message from one agent to another (or user to agent). Writes to DB with status=sent."""
+        db_from_agent_id = None if from_agent_id == USER_AGENT_ID else from_agent_id
+        db_target_agent_id = None if target_agent_id == USER_AGENT_ID else target_agent_id
         msg = await self._channel_repo.create_message(
             project_id=project_id,
             content=content,
-            from_agent_id=from_agent_id,
-            target_agent_id=target_agent_id,
+            from_agent_id=db_from_agent_id,
+            target_agent_id=db_target_agent_id,
             from_user_id=from_user_id,
             message_type=message_type,
             broadcast=False,

@@ -675,7 +675,11 @@ class PromptAssembly:
 
         chunks: list[str] = []
         for m in unread:
-            if m.from_agent_id != user_agent_id:
+            is_user_message = (
+                getattr(m, "from_user_id", None) is not None
+                or m.from_agent_id == user_agent_id
+            )
+            if not is_user_message:
                 a = agent_by_id.get(m.from_agent_id)
                 role_label = a.role if a else "user"
                 chunks.append(

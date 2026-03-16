@@ -59,115 +59,49 @@ class SandboxClient:
         command: str,
         timeout: int = 120,
     ) -> ShellResult:
-        """
-        Execute a shell command via WebSocket PTY streaming.
-
-        Strategy:
-          1. Open WS to /ws/shell
-          2. Drain the initial bash prompt / startup noise
-          3. Disable PTY echo and prompt so only real command output is returned
-          4. Send command + a unique end-marker echo
-          5. Collect output until end-marker appears or timeout
-          6. Parse exit code from shell (via $? captured after command)
-          7. Close WS
-        """
-        import asyncio
-        import secrets
-        import websockets
-
+        """Execute a shell command via the sandbox server REST endpoint."""
         rest_base_url = f"http://{host}:{port}"
-        ws_url = rest_base_url.replace("http://", "ws://") + f"/ws/shell?token={auth_token}"
+        async with httpx.AsyncClient(
+            base_url=rest_base_url,
+            headers={"Authorization": f"Bearer {auth_token}"},
+            timeout=timeout + 10.0,
+        ) as client:
+            try:
+                resp = await client.post(
+                    "/shell/execute",
+                    json={"command": command, "timeout": timeout},
+                )
+            except Exception as exc:
+                logger.error("Shell REST error: %s", exc)
+                raise RuntimeError(f"Shell execution failed: {exc}") from exc
 
-        marker = secrets.token_hex(8)
-        end_sentinel = _CMD_END_MARKER.format(marker=marker)
-
-        # Preamble: disable PTY echo and silence the bash prompt so that the
-        # only bytes coming back over the WebSocket are real command stdout/stderr.
-        # Without this the PTY echoes each byte we send back to us, which means
-        # the sentinel string appears in the stream BEFORE the command executes,
-        # causing the reader to break immediately with an empty (or echoed) result.
-        setup_preamble = "stty -echo 2>/dev/null; PS1=''; PS2=''; export TERM=dumb\n"
-
-        # After the real command, capture $? and echo the end-marker with exit code.
-        full_cmd = f"{command}\n__exit__=$?\necho '{end_sentinel}:'$__exit__\n"
-
-        output_chunks: list[bytes] = []
-        total_bytes = 0
-        truncated = False
-        exit_code: int | None = None
+        if resp.status_code == 408:
+            logger.warning("Shell timeout after %ds", timeout)
+            data = resp.json()
+            return ShellResult(
+                stdout=str(data.get("stdout", "Command timed out")),
+                exit_code=None,
+                truncated=False,
+            )
 
         try:
-            async with websockets.connect(ws_url, open_timeout=10) as ws:
-                # Step 1: send setup preamble and drain its output. PTY echo is still on
-                # when we send, so the sentinel appears twice: once echoed, once from the
-                # real echo command. Wait for the second occurrence so the shell is ready.
-                drain_sentinel = f"__AICT_DRAIN_{marker}__"
-                sentinel_bytes = drain_sentinel.encode()
-                await ws.send(f"{setup_preamble}echo '{drain_sentinel}'\n".encode())
-
-                drain_buf = b""
-                seen_count = 0
-
-                async def _drain() -> None:
-                    nonlocal drain_buf, seen_count
-                    while True:
-                        raw = await ws.recv()
-                        if isinstance(raw, str):
-                            raw = raw.encode()
-                        drain_buf += raw
-                        seen_count = drain_buf.count(sentinel_bytes)
-                        if seen_count >= 2:
-                            break
-
-                await asyncio.wait_for(_drain(), timeout=10)
-
-                # Brief delay so any remaining preamble output flushes before we send the command.
-                await asyncio.sleep(0.05)
-
-                # Step 2: send the real command and collect output until end sentinel.
-                await ws.send(full_cmd.encode())
-
-                async def _read() -> None:
-                    nonlocal total_bytes, truncated, exit_code
-                    while True:
-                        raw = await ws.recv()
-                        if isinstance(raw, str):
-                            raw = raw.encode()
-                        output_chunks.append(raw)
-                        total_bytes += len(raw)
-                        if total_bytes > _MAX_SHELL_OUTPUT_BYTES:
-                            truncated = True
-                            while total_bytes > _MAX_SHELL_OUTPUT_BYTES // 2 and len(output_chunks) > 1:
-                                dropped = output_chunks.pop(0)
-                                total_bytes -= len(dropped)
-
-                        combined = b"".join(output_chunks).decode("utf-8", errors="replace")
-                        if end_sentinel in combined:
-                            idx = combined.find(end_sentinel)
-                            marker_line = combined[idx:]
-                            colon_idx = marker_line.find(":")
-                            if colon_idx != -1:
-                                try:
-                                    exit_code = int(marker_line[colon_idx + 1:].split()[0])
-                                except (ValueError, IndexError):
-                                    exit_code = None
-                            break
-
-                await asyncio.wait_for(_read(), timeout=timeout)
-
-        except asyncio.TimeoutError:
-            logger.warning("Shell timeout after %ds", timeout)
-            exit_code = None
+            resp.raise_for_status()
         except Exception as exc:
-            logger.error("Shell WS error: %s", exc)
+            logger.error("Shell REST request failed: status=%s body=%s", resp.status_code, resp.text)
             raise RuntimeError(f"Shell execution failed: {exc}") from exc
 
-        combined = b"".join(output_chunks).decode("utf-8", errors="replace")
-        # Strip the sentinel line (and anything after it) from the output
-        if end_sentinel in combined:
-            combined = combined[: combined.find(end_sentinel)].rstrip()
-
-        return ShellResult(stdout=combined, exit_code=exit_code, truncated=truncated)
+        data = resp.json()
+        stdout = str(data.get("stdout", ""))
+        stdout_bytes = stdout.encode("utf-8", errors="replace")
+        truncated = len(stdout_bytes) > _MAX_SHELL_OUTPUT_BYTES
+        if truncated:
+            stdout = stdout_bytes[-_MAX_SHELL_OUTPUT_BYTES :].decode("utf-8", errors="replace")
+        exit_code = data.get("exit_code")
+        try:
+            exit_code = int(exit_code) if exit_code is not None else None
+        except (TypeError, ValueError):
+            exit_code = None
+        return ShellResult(stdout=stdout, exit_code=exit_code, truncated=truncated)
 
     # ── REST operations ───────────────────────────────────────────────────────
 

@@ -8,6 +8,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/sandbox/pool_manager
 Environment="MASTER_TOKEN=MASTER_TOKEN_PLACEHOLDER"
+Environment="EXTERNAL_HOST=EXTERNAL_HOST_PLACEHOLDER"
 Environment="STATE_FILE=/opt/sandbox/state.json"
 Environment="DOCKER_IMAGE=sandbox-base"
 Environment="PORT=9090"

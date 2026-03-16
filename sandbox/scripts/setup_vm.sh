@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # setup_vm.sh — Idempotent provisioning script for the AICT sandbox VM
-# Tested on Ubuntu 22.04 LTS. Run as root.
+# Tested on Debian 12 and Ubuntu 22.04+. Run as root.
 #
 # What this does:
 #   1. Installs Docker CE
@@ -27,22 +27,60 @@ SANDBOX_REPO_DIR="${REPO_ROOT}/sandbox"
 
 log() { echo "[setup_vm] $*"; }
 
+detect_external_host() {
+    local host
+    host="$(curl -fs -H 'Metadata-Flavor: Google' \
+        'http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip' \
+        2>/dev/null || true)"
+    if [ -n "${host}" ]; then
+        printf '%s' "${host}"
+        return
+    fi
+    hostname -I | awk '{print $1}'
+}
+
+docker_repo_os() {
+    . /etc/os-release
+    case "${ID:-}" in
+        ubuntu|debian)
+            printf '%s' "${ID}"
+            ;;
+        *)
+            echo "Unsupported distro for Docker repo: ${ID:-unknown}" >&2
+            exit 1
+            ;;
+    esac
+}
+
+docker_repo_codename() {
+    . /etc/os-release
+    if [ -n "${VERSION_CODENAME:-}" ]; then
+        printf '%s' "${VERSION_CODENAME}"
+        return
+    fi
+    lsb_release -cs
+}
+
 # ── 1. Docker CE ────────────────────────────────────────────────────────────
 
 if ! command -v docker &>/dev/null; then
     log "Installing Docker CE..."
+    rm -f /etc/apt/sources.list.d/docker.list
     apt-get update -q
     apt-get install -y -q ca-certificates curl gnupg lsb-release
 
+    DOCKER_REPO_OS="$(docker_repo_os)"
+    DOCKER_REPO_CODENAME="$(docker_repo_codename)"
+
     install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-        | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    curl -fsSL "https://download.docker.com/linux/${DOCKER_REPO_OS}/gpg" \
+        | gpg --dearmor --batch --yes -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
 
     echo \
       "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-      https://download.docker.com/linux/ubuntu \
-      $(lsb_release -cs) stable" \
+      https://download.docker.com/linux/${DOCKER_REPO_OS} \
+      ${DOCKER_REPO_CODENAME} stable" \
       > /etc/apt/sources.list.d/docker.list
 
     apt-get update -q
@@ -87,6 +125,7 @@ else
 fi
 
 MASTER_TOKEN="$(cat "${TOKEN_FILE}")"
+EXTERNAL_HOST="$(detect_external_host)"
 
 # ── 5. Firewall ──────────────────────────────────────────────────────────────
 
@@ -131,6 +170,8 @@ cp "${SANDBOX_REPO_DIR}/pool_manager.service" /etc/systemd/system/pool_manager.s
 # Inject token into service environment
 sed -i "s|MASTER_TOKEN_PLACEHOLDER|${MASTER_TOKEN}|g" \
     /etc/systemd/system/pool_manager.service
+sed -i "s|EXTERNAL_HOST_PLACEHOLDER|${EXTERNAL_HOST}|g" \
+    /etc/systemd/system/pool_manager.service
 
 systemctl daemon-reload
 systemctl enable pool_manager
@@ -143,7 +184,7 @@ log "Pool manager service started."
 log ""
 log "═══════════════════════════════════════════════"
 log " Setup complete!"
-log " Pool manager: http://$(hostname -I | awk '{print $1}'):9090"
+log " Pool manager: http://${EXTERNAL_HOST}:9090"
 log " Master token: ${MASTER_TOKEN}"
 log " Token file:   ${TOKEN_FILE}"
 log "═══════════════════════════════════════════════"

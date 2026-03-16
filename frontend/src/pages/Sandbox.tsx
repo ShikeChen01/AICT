@@ -210,6 +210,7 @@ function SandboxContent({ projectId }: { projectId: string }) {
           {expandedSandboxId && sb && (
             <VncView
               sandboxId={sb.orchestrator_sandbox_id}
+              viewOnly={!expandedInteractive}
             />
           )}
         </div>

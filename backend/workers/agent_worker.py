@@ -16,6 +16,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from backend.agents.agent import Agent, EmitCallbacks
 from backend.core.constants import USER_AGENT_ID
@@ -129,7 +130,9 @@ class AgentWorker:
 
                     try:
                         result = await db.execute(
-                            select(AgentRecord).where(AgentRecord.id == self.agent_id)
+                            select(AgentRecord)
+                            .options(selectinload(AgentRecord.sandbox))
+                            .where(AgentRecord.id == self.agent_id)
                         )
                         agent_record = result.scalar_one_or_none()
                         if not agent_record:

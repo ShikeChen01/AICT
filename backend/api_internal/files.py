@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from backend.core.auth import verify_agent_request
 from backend.db.models import Agent
@@ -32,7 +33,9 @@ async def execute(
     if body.agent_id != uuid.UUID(auth_agent_id):
         raise HTTPException(status_code=403, detail="agent_id must match authenticated agent")
 
-    result = await db.execute(select(Agent).where(Agent.id == body.agent_id))
+    result = await db.execute(
+        select(Agent).options(selectinload(Agent.sandbox)).where(Agent.id == body.agent_id)
+    )
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")

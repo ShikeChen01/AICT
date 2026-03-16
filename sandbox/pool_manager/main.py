@@ -29,8 +29,23 @@ def _external_host() -> str:
     """Return the Grand-VM's external host for session responses."""
     if config.EXTERNAL_HOST:
         return config.EXTERNAL_HOST
-    # Fall back to auto-detect: hostname -I grabs the primary IP
+    # Prefer the public NIC on GCE so Cloud Run can reach sandbox ports directly.
     import subprocess
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(
+            "http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip",
+            headers={"Metadata-Flavor": "Google"},
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            ip = resp.read().decode().strip()
+            if ip:
+                return ip
+    except Exception:
+        pass
+
+    # Fall back to auto-detect: hostname -I grabs the primary interface IP.
     try:
         result = subprocess.run(["hostname", "-I"], capture_output=True, text=True, timeout=2)
         if result.returncode == 0:

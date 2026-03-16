@@ -24,6 +24,40 @@ log()  { echo -e "${GREEN}[setup]${NC} $*"; }
 warn() { echo -e "${YELLOW}[setup]${NC} $*"; }
 err()  { echo -e "${RED}[setup]${NC} $*" >&2; }
 
+detect_external_host() {
+    local host
+    host="$(curl -fs -H 'Metadata-Flavor: Google' \
+        'http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip' \
+        2>/dev/null || true)"
+    if [[ -n "$host" ]]; then
+        printf '%s' "$host"
+        return
+    fi
+    hostname -I | awk '{print $1}'
+}
+
+docker_repo_os() {
+    . /etc/os-release
+    case "${ID:-}" in
+        ubuntu|debian)
+            printf '%s' "${ID}"
+            ;;
+        *)
+            err "Unsupported distro for Docker repo: ${ID:-unknown}"
+            exit 1
+            ;;
+    esac
+}
+
+docker_repo_codename() {
+    . /etc/os-release
+    if [[ -n "${VERSION_CODENAME:-}" ]]; then
+        printf '%s' "${VERSION_CODENAME}"
+        return
+    fi
+    lsb_release -cs
+}
+
 # ── Pre-flight checks ───────────────────────────────────────────────────────
 
 if [[ $EUID -ne 0 ]]; then
@@ -62,15 +96,19 @@ apt-get install -y -qq \
 
 if ! command -v docker &>/dev/null; then
     log "Installing Docker CE..."
+    rm -f /etc/apt/sources.list.d/docker.list
+    DOCKER_REPO_OS="$(docker_repo_os)"
+    DOCKER_REPO_CODENAME="$(docker_repo_codename)"
+
     install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-        | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    curl -fsSL "https://download.docker.com/linux/${DOCKER_REPO_OS}/gpg" \
+        | gpg --dearmor --batch --yes -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
 
     echo \
         "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-        https://download.docker.com/linux/ubuntu \
-        $(lsb_release -cs) stable" \
+        https://download.docker.com/linux/${DOCKER_REPO_OS} \
+        ${DOCKER_REPO_CODENAME} stable" \
         > /etc/apt/sources.list.d/docker.list
 
     apt-get update -qq
@@ -227,9 +265,11 @@ ENV_FILE="/opt/sandbox/.env"
 if [[ ! -f "$ENV_FILE" ]]; then
     log "Generating environment file..."
     MASTER_TOKEN=$(openssl rand -hex 32)
+    EXTERNAL_HOST=$(detect_external_host)
     cat > "$ENV_FILE" <<EOF
 # AICT Grand-VM pool manager configuration
 MASTER_TOKEN=${MASTER_TOKEN}
+EXTERNAL_HOST=${EXTERNAL_HOST}
 PORT=9090
 STATE_FILE=/opt/sandbox/state.json
 

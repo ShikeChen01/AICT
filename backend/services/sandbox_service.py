@@ -171,6 +171,13 @@ class OrchestratorClient:
                 json=body,
                 headers=self._headers,
             )
+            if resp.status_code == 404 and agent_id:
+                # Grand-VM pool manager uses /assign instead of the older /claim path.
+                resp = await client.post(
+                    f"{self._base}/sandbox/{sandbox_id}/assign",
+                    json={"agent_id": agent_id},
+                    headers=self._headers,
+                )
             resp.raise_for_status()
             return resp.json()
 
@@ -1017,6 +1024,9 @@ class SandboxService:
         )
         existing_sandbox = existing.scalar_one_or_none()
         if existing_sandbox:
+            from sqlalchemy.orm.attributes import set_committed_value
+
+            set_committed_value(agent, "sandbox", existing_sandbox)
             return SandboxMetadata(
                 sandbox_id=str(existing_sandbox.id),
                 agent_id=str(agent.id),
@@ -1056,6 +1066,9 @@ class SandboxService:
         sandbox = await self.assign_to_agent(
             session, sandbox.id, agent.id
         )
+        from sqlalchemy.orm.attributes import set_committed_value
+
+        set_committed_value(agent, "sandbox", sandbox)
         await session.commit()
 
         return SandboxMetadata(
@@ -1078,6 +1091,9 @@ class SandboxService:
         if not sb:
             raise SandboxNotFoundError(str(agent.id))
         await self.unassign_from_agent(session, sb.id)
+        from sqlalchemy.orm.attributes import set_committed_value
+
+        set_committed_value(agent, "sandbox", None)
         await session.flush()
 
     async def execute_command_legacy(
