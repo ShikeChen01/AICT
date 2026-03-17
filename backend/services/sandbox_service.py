@@ -12,7 +12,6 @@ The old agent-triggered claim() flow is preserved as a deprecated compat shim.
 from __future__ import annotations
 
 import uuid as uuid_module
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -83,22 +82,6 @@ class SandboxOwnershipError(Exception):
         super().__init__(f"User {user_id} does not own sandbox {sandbox_id}")
 
 
-# ── API response dataclass (backward compat) ─────────────────────────────
-
-@dataclass(slots=True)
-class SandboxMetadata:
-    """Backward-compatible metadata returned by legacy lifecycle methods."""
-
-    sandbox_id: str
-    agent_id: str
-    persistent: bool
-    status: str
-    host_port: int = 0
-    auth_token: str = ""
-    created: bool = False
-    restarted: bool = False
-    previous_sandbox_id: str | None = None
-    message: str = ""
 
 
 # ── Orchestrator Client ───────────────────────────────────────────────────
@@ -707,6 +690,101 @@ class SandboxService:
         return new_sandbox
 
     # ══════════════════════════════════════════════════════════════════
+    # Agent headless sandbox access (v4.1)
+    # ══════════════════════════════════════════════════════════════════
+
+    async def acquire_sandbox_for_agent(
+        self,
+        db: AsyncSession,
+        agent: Agent,
+    ) -> Sandbox:
+        """Acquire a headless sandbox for an agent (v4.1 D1).
+
+        1. If the agent already has an assigned sandbox, return it.
+        2. Otherwise, provision a new *headless* sandbox from the pool and
+           assign it to the agent.
+
+        Desktop sandboxes are never auto-provisioned here — only users can
+        create desktops via the REST API (D2).
+
+        Raises RuntimeError if the sandbox VM is not configured or if
+        provisioning fails.
+        """
+        # ── 1. Check existing assignment ────────────────────────────────
+        existing = await db.execute(
+            select(Sandbox).where(Sandbox.agent_id == agent.id)
+        )
+        existing_sandbox = existing.scalar_one_or_none()
+        if existing_sandbox:
+            from sqlalchemy.orm.attributes import set_committed_value
+            set_committed_value(agent, "sandbox", existing_sandbox)
+            return existing_sandbox
+
+        # ── 2. Guard: VM must be reachable ──────────────────────────────
+        if not self._vm_configured():
+            raise RuntimeError(
+                "Sandbox VM not configured — cannot acquire sandbox. "
+                "Set SANDBOX_VM_HOST or the orchestrator env vars."
+            )
+
+        # ── 3. Determine owner for the sandbox ─────────────────────────
+        from backend.db.models import Project, User as UserModel
+
+        owner_id = getattr(agent, "user_id", None)
+        if not owner_id:
+            proj_result = await db.execute(
+                select(Project).where(Project.id == agent.project_id)
+            )
+            project = proj_result.scalar_one_or_none()
+            owner_id = project.owner_id if project else None
+        if not owner_id:
+            first_user = await db.execute(
+                select(UserModel.id).order_by(UserModel.created_at).limit(1)
+            )
+            owner_id = first_user.scalar_one_or_none()
+        if not owner_id:
+            raise RuntimeError("Cannot determine owner for sandbox provisioning")
+
+        # ── 4. Provision headless sandbox and assign ────────────────────
+        sandbox = await self.create_sandbox(
+            db,
+            owner_id,
+            project_id=agent.project_id,
+            requires_desktop=False,  # Always headless for agent-acquired
+        )
+        sandbox = await self.assign_to_agent(db, sandbox.id, agent.id)
+
+        from sqlalchemy.orm.attributes import set_committed_value
+        set_committed_value(agent, "sandbox", sandbox)
+
+        return sandbox
+
+    async def release_agent_sandbox(
+        self,
+        db: AsyncSession,
+        agent: Agent,
+    ) -> None:
+        """Release an agent's sandbox back to the pool (v4.1 D1).
+
+        Looks up the sandbox assigned to the agent, unassigns it, and
+        returns it to the warm pool. Updates the agent's sandbox
+        relationship to None.
+
+        Does nothing if the agent has no sandbox.
+        """
+        result = await db.execute(
+            select(Sandbox).where(Sandbox.agent_id == agent.id)
+        )
+        sandbox = result.scalar_one_or_none()
+        if not sandbox:
+            return
+
+        await self.release_to_pool(db, sandbox)
+
+        from sqlalchemy.orm.attributes import set_committed_value
+        set_committed_value(agent, "sandbox", None)
+
+    # ══════════════════════════════════════════════════════════════════
     # Sandbox infrastructure operations
     # ══════════════════════════════════════════════════════════════════
 
@@ -987,146 +1065,6 @@ class SandboxService:
 
     async def list_images(self) -> list[dict]:
         return await self._orchestrator.list_images()
-
-    # ══════════════════════════════════════════════════════════════════
-    # Deprecated: agent-triggered claim flow (backward compat)
-    # ══════════════════════════════════════════════════════════════════
-
-    async def ensure_running_sandbox(
-        self,
-        session: AsyncSession,
-        agent: Agent,
-        *,
-        persistent: bool | None = None,
-    ) -> SandboxMetadata:
-        """DEPRECATED — backward compat for orchestrator.ensure_sandbox_for_agent.
-
-        If the agent already has a sandbox, returns it.
-        Otherwise, auto-creates one using the agent's user/project context.
-        Will be removed once all callers migrate to user-managed sandbox flow.
-        """
-        if not self._vm_configured():
-            logger.warning(
-                "SANDBOX_VM_HOST not configured — sandbox offline for agent %s",
-                agent.id,
-            )
-            return SandboxMetadata(
-                sandbox_id=f"offline-{agent.id}",
-                agent_id=str(agent.id),
-                persistent=False,
-                status="offline",
-                message="Sandbox offline: not configured.",
-            )
-
-        # Check if agent already has a sandbox
-        existing = await session.execute(
-            select(Sandbox).where(Sandbox.agent_id == agent.id)
-        )
-        existing_sandbox = existing.scalar_one_or_none()
-        if existing_sandbox:
-            from sqlalchemy.orm.attributes import set_committed_value
-
-            set_committed_value(agent, "sandbox", existing_sandbox)
-            return SandboxMetadata(
-                sandbox_id=str(existing_sandbox.id),
-                agent_id=str(agent.id),
-                persistent=False,
-                status=existing_sandbox.status,
-                host_port=existing_sandbox.port or 0,
-                auth_token=existing_sandbox.auth_token or "",
-                message=f"Sandbox ready: {existing_sandbox.id}",
-            )
-
-        # Auto-create: use agent's project owner as the sandbox owner
-        # (maintains backward compat until frontend handles sandbox creation)
-        from backend.db.models import Project
-        owner_id = agent.user_id if hasattr(agent, "user_id") else None
-        if not owner_id:
-            proj_result = await session.execute(
-                select(Project).where(Project.id == agent.project_id)
-            )
-            project = proj_result.scalar_one_or_none()
-            owner_id = project.owner_id if project else None
-        if not owner_id:
-            # Last resort: first user
-            from backend.db.models import User
-            first_user = await session.execute(
-                select(User.id).order_by(User.created_at).limit(1)
-            )
-            owner_id = first_user.scalar_one_or_none()
-
-        if not owner_id:
-            raise RuntimeError("Cannot determine owner for auto-created sandbox")
-
-        sandbox = await self.create_sandbox(
-            session,
-            owner_id,
-            project_id=agent.project_id,
-        )
-        sandbox = await self.assign_to_agent(
-            session, sandbox.id, agent.id
-        )
-        from sqlalchemy.orm.attributes import set_committed_value
-
-        set_committed_value(agent, "sandbox", sandbox)
-        await session.commit()
-
-        return SandboxMetadata(
-            sandbox_id=str(sandbox.id),
-            agent_id=str(agent.id),
-            persistent=False,
-            status=sandbox.status,
-            host_port=sandbox.port or 0,
-            auth_token=sandbox.auth_token or "",
-            created=True,
-            message=f"Sandbox ready: {sandbox.id}",
-        )
-
-    async def close_sandbox(self, session: AsyncSession, agent: Agent) -> None:
-        """DEPRECATED — release sandbox by agent reference."""
-        sandbox = await session.execute(
-            select(Sandbox).where(Sandbox.agent_id == agent.id)
-        )
-        sb = sandbox.scalar_one_or_none()
-        if not sb:
-            raise SandboxNotFoundError(str(agent.id))
-        await self.unassign_from_agent(session, sb.id)
-        from sqlalchemy.orm.attributes import set_committed_value
-
-        set_committed_value(agent, "sandbox", None)
-        await session.flush()
-
-    async def execute_command_legacy(
-        self,
-        session: AsyncSession,
-        agent: Agent,
-        command: str,
-        timeout: int = 120,
-    ) -> ShellResult:
-        """DEPRECATED — execute command via agent reference."""
-        meta = await self.ensure_running_sandbox(session, agent)
-        if meta.status == "offline":
-            return ShellResult(
-                stdout=f"[Sandbox offline] Cannot execute: {command}",
-                exit_code=None,
-            )
-        result = await session.execute(
-            select(Sandbox).where(Sandbox.id == meta.sandbox_id)
-        )
-        sandbox = result.scalar_one()
-        return await self.execute_command(sandbox, command, timeout)
-
-    async def take_screenshot_legacy(
-        self, session: AsyncSession, agent: Agent
-    ) -> bytes:
-        """DEPRECATED — get screenshot via agent reference."""
-        sandbox = await session.execute(
-            select(Sandbox).where(Sandbox.agent_id == agent.id)
-        )
-        sb = sandbox.scalar_one_or_none()
-        if not sb:
-            raise SandboxNotFoundError(str(agent.id))
-        return await self.take_screenshot(sb)
 
     # ── Internal helpers ──────────────────────────────────────────────
 

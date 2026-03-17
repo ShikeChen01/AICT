@@ -1,10 +1,10 @@
 """
 Unit tests for backend.services.sandbox_service.
 
-v3.1: Rewritten for user-owned sandbox model.
+v4.1: User-owned sandbox model with clean agent access paths.
   - OrchestratorClient replaces PoolManagerClient
   - SandboxService methods operate on Sandbox objects, not agents
-  - Legacy compat shims (ensure_running_sandbox, close_sandbox) tested separately
+  - acquire_sandbox_for_agent / release_agent_sandbox for agent lifecycle
 
 No real network or database writes — uses the session fixture from conftest.
 """
@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.services.sandbox_service import OrchestratorClient, SandboxMetadata, SandboxService
+from backend.services.sandbox_service import OrchestratorClient, SandboxService
 
 
 # ---------------------------------------------------------------------------
@@ -100,26 +100,7 @@ async def test_orchestrator_client_health() -> None:
 
 
 # ---------------------------------------------------------------------------
-# SandboxMetadata (backward compat dataclass)
-# ---------------------------------------------------------------------------
-
-
-def test_sandbox_metadata_defaults():
-    meta = SandboxMetadata(
-        sandbox_id="s1",
-        agent_id="a1",
-        persistent=False,
-        status="running",
-    )
-    assert meta.sandbox_id == "s1"
-    assert meta.created is False
-    assert meta.restarted is False
-    assert meta.previous_sandbox_id is None
-    assert meta.message == ""
-
-
-# ---------------------------------------------------------------------------
-# SandboxService — new user-owned methods (mocked)
+# SandboxService — user-owned methods
 # ---------------------------------------------------------------------------
 
 
@@ -128,25 +109,73 @@ def test_sandbox_service_instantiates():
     assert svc is not None
 
 
-# ---------------------------------------------------------------------------
-# Legacy compat shims — ensure_running_sandbox, close_sandbox
-# ---------------------------------------------------------------------------
-
-
 def _patch_vm_configured():
     """Patch SandboxService._vm_configured to return True so tests bypass the offline guard."""
     return patch.object(SandboxService, "_vm_configured", return_value=True)
 
 
+# ---------------------------------------------------------------------------
+# v4.1 — acquire_sandbox_for_agent, release_agent_sandbox
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.asyncio
-async def test_ensure_running_returns_offline_when_unconfigured(session, sample_engineer) -> None:
-    """When sandbox VM is not configured, returns offline metadata."""
+async def test_acquire_sandbox_raises_when_unconfigured(session, sample_engineer) -> None:
+    """v4.1 D1: acquire_sandbox_for_agent raises RuntimeError when VM not configured."""
     with patch.object(SandboxService, "_vm_configured", return_value=False):
         svc = SandboxService()
-        meta = await svc.ensure_running_sandbox(session, sample_engineer)
+        with pytest.raises(RuntimeError, match="Sandbox VM not configured"):
+            await svc.acquire_sandbox_for_agent(session, sample_engineer)
 
-    assert meta.status == "offline"
-    assert "offline" in meta.sandbox_id
+
+@pytest.mark.asyncio
+async def test_acquire_sandbox_returns_existing(session, sample_engineer) -> None:
+    """v4.1 D1: If agent already has an assigned sandbox, return it without provisioning."""
+    from backend.db.models import Sandbox
+
+    # Create a sandbox assigned to this agent
+    sb = Sandbox(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        project_id=sample_engineer.project_id,
+        name="existing-sb",
+        orchestrator_sandbox_id="orch-123",
+        unit_type="headless",
+        status="assigned",
+        host="10.0.0.1",
+        port=8080,
+        auth_token="tok-test",
+        agent_id=sample_engineer.id,
+    )
+    session.add(sb)
+    await session.flush()
+
+    svc = SandboxService()
+    result = await svc.acquire_sandbox_for_agent(session, sample_engineer)
+    assert result.id == sb.id
+    assert sample_engineer.sandbox is not None
+
+
+@pytest.mark.asyncio
+async def test_acquire_sandbox_always_provisions_headless(session, sample_engineer) -> None:
+    """v4.1 D2: acquire_sandbox_for_agent always provisions headless, never desktop."""
+    svc = SandboxService()
+
+    with _patch_vm_configured(), \
+         patch.object(svc, "create_sandbox", new_callable=AsyncMock) as mock_create, \
+         patch.object(svc, "assign_to_agent", new_callable=AsyncMock) as mock_assign:
+
+        fake_sb = MagicMock()
+        fake_sb.id = uuid.uuid4()
+        fake_sb.unit_type = "headless"
+        mock_create.return_value = fake_sb
+        mock_assign.return_value = fake_sb
+
+        await svc.acquire_sandbox_for_agent(session, sample_engineer)
+
+    # Verify requires_desktop=False was passed
+    call_kwargs = mock_create.call_args
+    assert call_kwargs.kwargs.get("requires_desktop") is False
 
 
 # ---------------------------------------------------------------------------

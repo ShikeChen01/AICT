@@ -41,12 +41,15 @@ async def execute(
         raise HTTPException(status_code=404, detail="Agent not found")
 
     svc = SandboxService()
-    shell_result = await svc.execute_command_legacy(db, agent, body.command, timeout=body.timeout)
+
+    # v4.1 (D1): Agent must have an assigned sandbox. Acquire one if needed,
+    # but only headless — desktops require user action.
+    sandbox = await svc.acquire_sandbox_for_agent(db, agent)
+    shell_result = await svc.execute_command(sandbox, body.command, body.timeout)
     await db.commit()
 
-    sandbox_id = str(agent.sandbox.id) if agent.sandbox else None
     return {
         "output": shell_result.stdout,
         "exit_code": shell_result.exit_code,
-        "sandbox_id": sandbox_id,
+        "sandbox_id": str(sandbox.id),
     }

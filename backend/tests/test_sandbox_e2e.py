@@ -479,14 +479,15 @@ class TestExecuteCommandExecutor:
 
     @pytest.mark.asyncio
     async def test_execute_command_includes_stdout(self):
+        """v4.1 D1: execute_command uses svc.execute_command(sandbox, cmd, timeout)."""
         from backend.tools.loop_registry import _run_execute_command, RunContext
 
         ctx = MagicMock(spec=RunContext)
-        ctx.agent = _make_agent()
+        ctx.agent = _make_agent(sandbox_id="testsandbox")
         ctx.db = AsyncMock()
 
         mock_svc = AsyncMock()
-        mock_svc.execute_command_legacy = AsyncMock(
+        mock_svc.execute_command = AsyncMock(
             return_value=ShellResult(stdout="hello world\n", exit_code=0)
         )
 
@@ -509,7 +510,7 @@ class TestExecuteCommandExecutor:
         ctx.db = AsyncMock()
 
         mock_svc = AsyncMock()
-        mock_svc.execute_command_legacy = AsyncMock(
+        mock_svc.execute_command = AsyncMock(
             return_value=ShellResult(stdout="", exit_code=None)
         )
 
@@ -526,15 +527,29 @@ class TestExecuteCommandExecutor:
         )
 
     @pytest.mark.asyncio
+    async def test_execute_command_no_sandbox_raises_error(self):
+        """v4.1 D1: execute_command with no sandbox raises ToolExecutionError."""
+        from backend.tools.loop_registry import _run_execute_command, RunContext
+        from backend.tools.result import ToolExecutionError
+
+        ctx = MagicMock(spec=RunContext)
+        ctx.agent = _make_agent(sandbox_id=None)
+        ctx.db = AsyncMock()
+
+        with pytest.raises(ToolExecutionError) as exc_info:
+            await _run_execute_command(ctx, {"command": "echo hello"})
+        assert exc_info.value.error_code == ToolExecutionError.SANDBOX_UNAVAILABLE
+
+    @pytest.mark.asyncio
     async def test_execute_command_shell_error_propagates(self):
         from backend.tools.loop_registry import _run_execute_command, RunContext
 
         ctx = MagicMock(spec=RunContext)
-        ctx.agent = _make_agent()
+        ctx.agent = _make_agent(sandbox_id="testsandbox")
         ctx.db = AsyncMock()
 
         mock_svc = AsyncMock()
-        mock_svc.execute_command_legacy = AsyncMock(
+        mock_svc.execute_command = AsyncMock(
             side_effect=RuntimeError("Shell execution failed: Connection refused")
         )
 

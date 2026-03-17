@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.config import settings
-from backend.services.sandbox_service import SandboxMetadata
 from backend.db.repositories.tool_configs import ToolConfigRepository
 from backend.tools.loop_registry import (
     RunContext,
@@ -85,6 +84,7 @@ def test_parse_tool_uuid_optional_allows_none_or_empty() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_command_tool_uses_vm_sandbox(sample_engineer, session) -> None:
+    """v4.1 D1: execute_command uses svc.execute_command(sandbox, cmd, timeout) directly."""
     from backend.services.sandbox_client import ShellResult
 
     from sqlalchemy.orm.attributes import set_committed_value
@@ -96,7 +96,7 @@ async def test_execute_command_tool_uses_vm_sandbox(sample_engineer, session) ->
 
     with patch("backend.tools.executors.sandbox._get_sandbox_service") as mock_f:
         mock_svc = MagicMock()
-        mock_svc.execute_command_legacy = AsyncMock(return_value=shell_result)
+        mock_svc.execute_command = AsyncMock(return_value=shell_result)
         mock_f.return_value = mock_svc
 
         result = await _run_execute_command(ctx, {"command": "pwd"})
@@ -137,6 +137,7 @@ async def test_ensure_agent_tools_backfills_new_defaults(sample_manager, session
 
 @pytest.mark.asyncio
 async def test_execute_command_tool_reports_sandbox_output(sample_engineer, session) -> None:
+    """v4.1 D1: execute_command uses svc.execute_command(sandbox, cmd, timeout) directly."""
     from backend.services.sandbox_client import ShellResult
 
     from sqlalchemy.orm.attributes import set_committed_value
@@ -148,7 +149,7 @@ async def test_execute_command_tool_reports_sandbox_output(sample_engineer, sess
 
     with patch("backend.tools.executors.sandbox._get_sandbox_service") as mock_f:
         mock_svc = MagicMock()
-        mock_svc.execute_command_legacy = AsyncMock(return_value=shell_result)
+        mock_svc.execute_command = AsyncMock(return_value=shell_result)
         mock_f.return_value = mock_svc
 
         result = await _run_execute_command(ctx, {"command": "pwd"})
@@ -159,24 +160,21 @@ async def test_execute_command_tool_reports_sandbox_output(sample_engineer, sess
 
 @pytest.mark.asyncio
 async def test_start_sandbox_tool_returns_ready_message(sample_engineer, session) -> None:
-    meta = SandboxMetadata(
-        sandbox_id="sandbox-created",
-        agent_id=str(sample_engineer.id),
-        persistent=False,
-        status="running",
-        created=True,
-        message="Sandbox created: sandbox-created",
-    )
+    """v4.1 D1: sandbox_start_session uses acquire_sandbox_for_agent."""
+    fake_sandbox = MagicMock()
+    fake_sandbox.id = "sandbox-created"
+    fake_sandbox.unit_type = "headless"
     ctx = _make_ctx(session, sample_engineer)
 
     with patch("backend.tools.executors.sandbox._get_sandbox_service") as mock_f:
         mock_svc = MagicMock()
-        mock_svc.ensure_running_sandbox = AsyncMock(return_value=meta)
+        mock_svc.acquire_sandbox_for_agent = AsyncMock(return_value=fake_sandbox)
         mock_f.return_value = mock_svc
 
         result = await _run_start_sandbox(ctx, {})
 
-    assert result == "Sandbox created: sandbox-created"
+    assert "sandbox-created" in result
+    assert "headless" in result
 
 
 @pytest.mark.asyncio

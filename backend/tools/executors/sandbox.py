@@ -25,16 +25,25 @@ def _get_sandbox_service():
 
 
 async def run_execute_command(ctx: RunContext, tool_input: dict) -> str:
+    """Execute a command in the agent's sandbox.
+
+    v4.1 (D1): Requires an existing sandbox session. If no sandbox is
+    assigned, returns a clear error directing the agent to call
+    sandbox_start_session first.  Never auto-creates sandboxes.
+    """
+    if not ctx.agent.sandbox:
+        raise ToolExecutionError(
+            "No active sandbox — call sandbox_start_session first.",
+            error_code=ToolExecutionError.SANDBOX_UNAVAILABLE,
+            hint="Call sandbox_start_session() to acquire a sandbox, then retry this command.",
+        )
+
     command = str(tool_input["command"])
     timeout = int(tool_input.get("timeout", 120))
-    prev_sandbox = ctx.agent.sandbox
     svc = _get_sandbox_service()
-    result = await svc.execute_command_legacy(ctx.db, ctx.agent, command, timeout=timeout)
-    # If sandbox was just created (first execute_command), commit and broadcast
-    if ctx.agent.sandbox != prev_sandbox and ctx.agent.sandbox is not None:
-        await _flush_and_broadcast_sandbox(ctx)
+    result = await svc.execute_command(ctx.agent.sandbox, command, timeout)
 
-    sandbox_id = ctx.agent.sandbox.id if ctx.agent.sandbox else "unknown"
+    sandbox_id = ctx.agent.sandbox.id
     parts: list[str] = [f"Sandbox: {sandbox_id}"]
     if result.truncated:
         parts.append("[output truncated]")
@@ -72,19 +81,31 @@ async def _flush_and_broadcast_sandbox(ctx: RunContext) -> None:
 
 
 async def run_sandbox_start_session(ctx: RunContext, tool_input: dict) -> str:
+    """Acquire a headless sandbox for the agent (v4.1 D1).
+
+    Uses SandboxService.acquire_sandbox_for_agent which:
+      1. Returns the existing sandbox if the agent already has one.
+      2. Provisions a new headless sandbox from the pool and assigns it.
+
+    Desktop sandboxes are never provisioned here — only users can create
+    desktops via the REST API (D2).
+    """
     svc = _get_sandbox_service()
-    meta = await svc.ensure_running_sandbox(ctx.db, ctx.agent)
-    # Commit immediately so sandbox relationship is visible to other DB sessions (API endpoints)
-    # and broadcast agent_status so the frontend refreshes and picks up the new sandbox.
+    sandbox = await svc.acquire_sandbox_for_agent(ctx.db, ctx.agent)
     await _flush_and_broadcast_sandbox(ctx)
-    return meta.message or f"Sandbox ready: {meta.sandbox_id}"
+    return f"Sandbox ready: {sandbox.id} (type={sandbox.unit_type})"
 
 
 async def run_sandbox_end_session(ctx: RunContext, tool_input: dict) -> str:
+    """Release the agent's sandbox back to the pool (v4.1 D1).
+
+    Uses SandboxService.release_agent_sandbox which unassigns the sandbox
+    and returns it to the warm pool. Does nothing if no sandbox is assigned.
+    """
     if not ctx.agent.sandbox:
         return "No active sandbox to end."
     svc = _get_sandbox_service()
-    await svc.close_sandbox(ctx.db, ctx.agent)
+    await svc.release_agent_sandbox(ctx.db, ctx.agent)
     await _flush_and_broadcast_sandbox(ctx)
     return "Sandbox session ended. Container returned to pool."
 
@@ -116,7 +137,11 @@ async def run_sandbox_screenshot(ctx: RunContext, tool_input: dict) -> str | Scr
     """Capture a screenshot; returns ScreenshotResult so the loop can inject the
     image into the LLM conversation as a vision image_part."""
     if not ctx.agent.sandbox:
-        await run_sandbox_start_session(ctx, {})
+        raise ToolExecutionError(
+            "No active sandbox — call sandbox_start_session first.",
+            error_code=ToolExecutionError.SANDBOX_UNAVAILABLE,
+            hint="Call sandbox_start_session() to acquire a sandbox, then retry.",
+        )
     svc = _get_sandbox_service()
     try:
         img_bytes = await svc.take_screenshot(ctx.agent.sandbox)

@@ -74,9 +74,9 @@ async def run_remove_agent(ctx: RunContext, tool_input: dict) -> str:
     if target.sandbox:
         try:
             from backend.services.sandbox_service import SandboxService
-            await SandboxService().close_sandbox(ctx.db, target)
+            await SandboxService().release_agent_sandbox(ctx.db, target)
         except Exception as exc:
-            logger.warning("Failed to close sandbox for agent %s: %s", target_id, exc)
+            logger.warning("Failed to release sandbox for agent %s: %s", target_id, exc)
 
     from backend.workers.worker_manager import get_worker_manager
     await get_worker_manager().remove_worker(target_id)

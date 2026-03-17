@@ -186,7 +186,6 @@ async def bulk_save_agent_tools(
     await db.commit()
     return [_enrich_with_tokens(t) for t in tools]
 
-
 @router.post("/agents/{agent_id}/tools/{tool_config_id}/reset", response_model=ToolConfigResponse)
 async def reset_agent_tool(
     agent_id: UUID,

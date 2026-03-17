@@ -802,6 +802,18 @@ class Agent:
 
             tool_use_id = tc.get("id", "")
             try:
+                # D3 (v4.1): Executor-level enforcement — reject disabled tools
+                # even if the LLM somehow calls them (cached response, prompt
+                # injection, hallucinated tool name from prior context).
+                if await self._is_tool_disabled(name):
+                    from backend.tools.result import ToolExecutionError
+                    raise ToolExecutionError(
+                        f"Tool '{name}' is disabled. "
+                        "Ask the user to re-enable it in the tool configuration panel.",
+                        error_code=ToolExecutionError.TOOL_DISABLED,
+                        hint="The user has disabled this tool. Use a different approach or ask the user to re-enable it.",
+                    )
+
                 handler = active_handlers.get(name)
                 if handler is None:
                     raise RuntimeError(f"Unknown tool '{name}'")
@@ -852,6 +864,20 @@ class Agent:
             )
 
         return pending_screenshot_parts
+
+    async def _is_tool_disabled(self, tool_name: str) -> bool:
+        """Check if a tool is disabled for this agent via ToolConfig.
+
+        Returns True if the tool has an explicit ToolConfig row with enabled=False.
+        Returns False if the tool is enabled or has no ToolConfig row (default: allowed).
+        """
+        from backend.db.repositories.tool_configs import ToolConfigRepository
+
+        repo = ToolConfigRepository(self._run_context.db)
+        tc = await repo.get_by_agent_and_name(self._record.id, tool_name)
+        if tc is not None and not tc.enabled:
+            return True
+        return False
 
     # ── Budget gates ──
 

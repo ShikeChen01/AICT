@@ -3,7 +3,6 @@ Agents REST API endpoints.
 
 List and retrieve agent information. Spawn engineers (up to max_engineers).
 """
-
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query

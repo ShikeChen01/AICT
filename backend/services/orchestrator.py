@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.db.models import Agent
+from backend.db.models import Agent, Sandbox
 from backend.logging.my_logger import get_logger
-from backend.services.sandbox_service import SandboxMetadata, SandboxService
+from backend.services.sandbox_service import SandboxService
 
 logger = get_logger(__name__)
 
@@ -50,24 +50,22 @@ class OrchestratorService:
         self,
         session: AsyncSession,
         agent: Agent,
-    ) -> SandboxMetadata:
-        """
-        Ensure agent has a running sandbox.
+    ) -> Sandbox:
+        """Acquire a headless sandbox for an agent (v4.1).
 
-        Uses the deprecated auto-create path from SandboxService if the agent
-        does not already have a sandbox. Persistence is determined by SandboxConfig,
-        not agent role.
+        Uses the clean acquire_sandbox_for_agent path which checks for
+        an existing assignment first, then provisions a new headless
+        sandbox if needed.
 
         Args:
             session: SQLAlchemy async session.
             agent: The agent model.
 
         Returns:
-            SandboxMetadata for the agent's sandbox.
+            The assigned Sandbox model instance.
         """
-        return await self.sandbox_service.ensure_running_sandbox(
-            session=session,
-            agent=agent,
+        return await self.sandbox_service.acquire_sandbox_for_agent(
+            session, agent
         )
 
     async def close_if_ephemeral(self, session: AsyncSession, agent: Agent) -> None:
@@ -83,9 +81,8 @@ class OrchestratorService:
         """
         pass
 
-    async def wake_agent(self, session: AsyncSession, agent: Agent) -> SandboxMetadata:
-        """
-        Activate a sleeping agent and ensure sandbox readiness.
+    async def wake_agent(self, session: AsyncSession, agent: Agent) -> Sandbox:
+        """Activate a sleeping agent and ensure sandbox readiness.
 
         Sets agent status to "active" and notifies the message router.
 
@@ -94,7 +91,7 @@ class OrchestratorService:
             agent: The agent model.
 
         Returns:
-            SandboxMetadata for the agent's sandbox.
+            The assigned Sandbox model instance.
         """
         if agent.status == "sleeping":
             agent.status = "active"
