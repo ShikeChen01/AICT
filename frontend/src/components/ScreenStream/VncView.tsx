@@ -198,7 +198,7 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
   }
 
   return (
-    <div className="relative flex flex-1 min-h-0 flex-col bg-black">
+    <div className="relative flex h-full flex-col bg-black">
       {/* Top bar: status indicator + interactive toggle */}
       <div className="absolute top-2 right-2 z-10 flex items-center gap-2">
         {/* Interactive toggle */}

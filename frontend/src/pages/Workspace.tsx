@@ -366,7 +366,7 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 min-h-0 overflow-hidden border-b border-[var(--border-color)]">
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden border-b border-[var(--border-color)]">
             <MessageList messages={messages} isLoading={msgsLoading} agents={agents} />
           </div>
 
