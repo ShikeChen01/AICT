@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.access_control import enforce_kanban_write
 from backend.core.auth import verify_agent_request
-from backend.core.constants import USER_AGENT_ID
 from backend.core.exceptions import AgentNotFoundError
 from backend.db.models import Agent
 from backend.db.session import get_db
@@ -133,20 +132,12 @@ async def abort_task(
     task = await service.update_status(actor.current_task_id, "aborted")
     actor.current_task_id = None
 
+    # Notify the task creator (always an agent in current design)
     if task.created_by_id:
         msg_service = get_message_service(db)
         await msg_service.send(
             from_agent_id=actor.id,
             target_agent_id=task.created_by_id,
-            project_id=task.project_id,
-            content=f"Task '{task.title}' aborted: {body.reason}",
-            message_type="system",
-        )
-    else:
-        msg_service = get_message_service(db)
-        await msg_service.send(
-            from_agent_id=actor.id,
-            target_agent_id=USER_AGENT_ID,
             project_id=task.project_id,
             content=f"Task '{task.title}' aborted: {body.reason}",
             message_type="system",

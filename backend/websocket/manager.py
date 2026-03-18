@@ -299,16 +299,18 @@ class WebSocketManager:
         project_id: UUID,
         msg_id: UUID,
         from_agent_id: UUID,
-        target_agent_id: UUID,
+        target_agent_id: UUID | None,
         content: str,
         message_type: str = "normal",
         created_at=None,
+        target_user_id: UUID | None = None,
     ) -> int:
         """Broadcast agent_message (message to user)."""
         event = create_agent_message_event(
             msg_id=msg_id,
             from_agent_id=from_agent_id,
             target_agent_id=target_agent_id,
+            target_user_id=target_user_id,
             content=content,
             message_type=message_type,
             created_at=created_at,

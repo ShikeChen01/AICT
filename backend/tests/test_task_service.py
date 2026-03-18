@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.exceptions import InvalidTaskStatus, TaskNotFoundError, AgentNotFoundError
 from backend.db.models import Agent, Project, Task
-from backend.core.constants import USER_AGENT_ID
 from backend.schemas.task import TaskCreate, TaskUpdate
 from backend.services.message_service import MessageService
 from backend.services.task_service import (
@@ -178,7 +177,7 @@ class TestTaskService:
         assert assigned.status == "assigned"  # Auto-transition
         unread = await MessageService(session).get_unread_for_agent(sample_engineer.id)
         assert any(
-            msg.from_agent_id == USER_AGENT_ID
+            msg.from_agent_id is None
             and msg.message_type == "system"
             and "Task assigned:" in msg.content
             for msg in unread

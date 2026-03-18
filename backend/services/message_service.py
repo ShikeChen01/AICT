@@ -1,10 +1,11 @@
 """
 Message service: channel message send, list, mark received, broadcast.
 
-All messaging flows through channel_messages. The historical USER_AGENT_ID
-sentinel is translated to nullable agent FKs at the DB boundary so the schema
-can enforce real agent foreign keys while the rest of the app keeps its
-user-vs-agent semantics.
+All messaging uses explicit user FKs (from_user_id, target_user_id) to
+represent human participants.  Agent participants use from_agent_id /
+target_agent_id.  There is no sentinel UUID — NULL simply means "not
+applicable" on any given FK column.
+
 Broadcast is write-only (no wake-up signal).
 """
 
@@ -12,7 +13,6 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.constants import USER_AGENT_ID
 from backend.db.repositories.attachments import AttachmentRepository
 from backend.db.repositories.messages import ChannelMessageRepository
 
@@ -23,30 +23,32 @@ class MessageService:
         self._channel_repo = ChannelMessageRepository(session)
         self._attachment_repo = AttachmentRepository(session)
 
+    # ── Send ─────────────────────────────────────────────────────────
+
     async def send(
         self,
-        from_agent_id: UUID | None,
-        target_agent_id: UUID | None,
+        *,
+        from_agent_id: UUID | None = None,
+        target_agent_id: UUID | None = None,
+        from_user_id: UUID | None = None,
+        target_user_id: UUID | None = None,
         project_id: UUID,
         content: str,
-        *,
         message_type: str = "normal",
-        from_user_id: UUID | None = None,
         attachment_ids: list[UUID] | None = None,
     ) -> "ChannelMessage":
-        """Send a message from one agent to another (or user to agent). Writes to DB with status=sent."""
-        db_from_agent_id = None if from_agent_id == USER_AGENT_ID else from_agent_id
-        db_target_agent_id = None if target_agent_id == USER_AGENT_ID else target_agent_id
+        """Send a message.  Exactly one of the from_* and one of the target_*
+        fields should be populated (the other stays None)."""
         msg = await self._channel_repo.create_message(
             project_id=project_id,
             content=content,
-            from_agent_id=db_from_agent_id,
-            target_agent_id=db_target_agent_id,
+            from_agent_id=from_agent_id,
+            target_agent_id=target_agent_id,
             from_user_id=from_user_id,
+            target_user_id=target_user_id,
             message_type=message_type,
             broadcast=False,
         )
-        # Phase 6: link pre-uploaded attachments to this message
         if attachment_ids:
             for position, att_id in enumerate(attachment_ids):
                 await self._attachment_repo.link_to_message(
@@ -64,19 +66,38 @@ class MessageService:
         user_id: UUID | None = None,
         attachment_ids: list[UUID] | None = None,
     ) -> "ChannelMessage":
-        """Send a message from the user (USER_AGENT_ID) to an agent.
+        """Send a message from a human user to an agent.
 
-        ``user_id`` is the real authenticated user FK for attribution (from_user_id).
+        ``user_id`` is the authenticated user FK (from_user_id).
         ``attachment_ids`` links pre-uploaded image attachments to this message.
         """
         return await self.send(
-            from_agent_id=USER_AGENT_ID,
+            from_user_id=user_id,
             target_agent_id=target_agent_id,
             project_id=project_id,
             content=content,
-            from_user_id=user_id,
             attachment_ids=attachment_ids,
         )
+
+    async def send_agent_to_user(
+        self,
+        from_agent_id: UUID,
+        target_user_id: UUID | None,
+        project_id: UUID,
+        content: str,
+        *,
+        message_type: str = "normal",
+    ) -> "ChannelMessage":
+        """Send a message from an agent to a human user."""
+        return await self.send(
+            from_agent_id=from_agent_id,
+            target_user_id=target_user_id,
+            project_id=project_id,
+            content=content,
+            message_type=message_type,
+        )
+
+    # ── Read ─────────────────────────────────────────────────────────
 
     async def list_conversation(
         self,
@@ -124,6 +145,8 @@ class MessageService:
         """Mark messages as received (consumed by target)."""
         await self._channel_repo.mark_received(message_ids)
 
+    # ── Broadcast ────────────────────────────────────────────────────
+
     async def broadcast(
         self,
         from_agent_id: UUID,
@@ -132,9 +155,7 @@ class MessageService:
         *,
         message_type: str = "normal",
     ) -> "ChannelMessage":
-        """Write a broadcast message (target_agent_id=NULL, broadcast=true). No wake-up signal."""
-        from backend.db.models import ChannelMessage
-
+        """Write a broadcast message (no target, broadcast=true). No wake-up signal."""
         msg = await self._channel_repo.create_message(
             project_id=project_id,
             content=content,
@@ -144,6 +165,8 @@ class MessageService:
             broadcast=True,
         )
         return msg
+
+    # ── Replay / counts ──────────────────────────────────────────────
 
     async def get_undelivered_for_replay(self) -> list["ChannelMessage"]:
         """All sent-but-unreceived messages (for MessageRouter replay on startup)."""

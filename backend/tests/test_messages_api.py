@@ -58,14 +58,14 @@ async def test_messages_list_conversation_structure(
     sample_manager: Agent,
 ) -> None:
     """Smoke test: messages list endpoint exists and returns list (with auth mocked)."""
-    from backend.core.constants import USER_AGENT_ID
+    from uuid import uuid4
     from backend.db.repositories.messages import ChannelMessageRepository
 
     repo = ChannelMessageRepository(session)
     await repo.create_message(
         project_id=sample_project.id,
         content="Test",
-        from_agent_id=USER_AGENT_ID,
+        from_user_id=uuid4(),
         target_agent_id=sample_manager.id,
     )
     await session.commit()

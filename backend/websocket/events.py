@@ -177,10 +177,11 @@ class AgentToolResultPayload(BaseModel):
 
 
 class AgentMessagePayload(BaseModel):
-    """Message to user (target_agent_id = USER_AGENT_ID)."""
+    """Message from agent, typically to the human user."""
     id: UUID
     from_agent_id: UUID
-    target_agent_id: UUID
+    target_agent_id: UUID | None = None
+    target_user_id: UUID | None = None
     content: str
     message_type: str = "normal"
     created_at: datetime | None = None
@@ -429,10 +430,11 @@ def create_agent_tool_result_event(
 def create_agent_message_event(
     msg_id: UUID,
     from_agent_id: UUID,
-    target_agent_id: UUID,
+    target_agent_id: UUID | None,
     content: str,
     message_type: str = "normal",
     created_at: datetime | None = None,
+    target_user_id: UUID | None = None,
 ) -> WebSocketEvent:
     """Create agent_message event (message to user)."""
     return WebSocketEvent(
@@ -441,6 +443,7 @@ def create_agent_message_event(
             id=msg_id,
             from_agent_id=from_agent_id,
             target_agent_id=target_agent_id,
+            target_user_id=target_user_id,
             content=content,
             message_type=message_type,
             created_at=created_at,

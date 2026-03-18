@@ -23,6 +23,7 @@ class ChannelMessageRepository(BaseRepository[ChannelMessage]):
         from_agent_id: UUID | None = None,
         target_agent_id: UUID | None = None,
         from_user_id: UUID | None = None,
+        target_user_id: UUID | None = None,
         message_type: str = "normal",
         broadcast: bool = False,
     ) -> ChannelMessage:
@@ -31,6 +32,7 @@ class ChannelMessageRepository(BaseRepository[ChannelMessage]):
             from_agent_id=from_agent_id,
             target_agent_id=target_agent_id,
             from_user_id=from_user_id,
+            target_user_id=target_user_id,
             content=content,
             message_type=message_type,
             status="sent",
@@ -65,31 +67,22 @@ class ChannelMessageRepository(BaseRepository[ChannelMessage]):
         limit: int = 100,
         offset: int = 0,
     ) -> list[ChannelMessage]:
-        """Messages between user and the given agent, either direction.
+        """Messages between any user and the given agent, either direction.
 
-        Supports both the legacy USER_AGENT_ID sentinel representation and the
-        newer nullable-agent-FK form backed by from_user_id.
+        User→Agent: from_user_id IS NOT NULL AND target_agent_id = agent_id
+        Agent→User: from_agent_id = agent_id AND target_user_id IS NOT NULL
         """
-        from backend.core.constants import USER_AGENT_ID
-
         result = await self.session.execute(
             select(ChannelMessage)
             .where(ChannelMessage.project_id == project_id)
             .where(
                 (
-                    (
-                        (ChannelMessage.from_user_id.isnot(None))
-                        | (ChannelMessage.from_agent_id == USER_AGENT_ID)
-                    )
+                    (ChannelMessage.from_user_id.isnot(None))
                     & (ChannelMessage.target_agent_id == agent_id)
                 )
                 | (
                     (ChannelMessage.from_agent_id == agent_id)
-                    & (
-                        ChannelMessage.target_agent_id.is_(None)
-                        | (ChannelMessage.target_agent_id == USER_AGENT_ID)
-                    )
-                    & (ChannelMessage.broadcast.is_(False))
+                    & (ChannelMessage.target_user_id.isnot(None))
                 )
             )
             .order_by(ChannelMessage.created_at.desc())
@@ -104,21 +97,13 @@ class ChannelMessageRepository(BaseRepository[ChannelMessage]):
         limit: int = 100,
         offset: int = 0,
     ) -> list[ChannelMessage]:
-        """All messages to/from user in the project (for activity view)."""
-        from backend.core.constants import USER_AGENT_ID
-
+        """All messages to/from any user in the project (for activity view)."""
         result = await self.session.execute(
             select(ChannelMessage)
             .where(ChannelMessage.project_id == project_id)
             .where(
                 (ChannelMessage.from_user_id.isnot(None))
-                | (ChannelMessage.from_agent_id == USER_AGENT_ID)
-                | (
-                    (ChannelMessage.target_agent_id.is_(None))
-                    & (ChannelMessage.from_agent_id.isnot(None))
-                    & (ChannelMessage.broadcast.is_(False))
-                )
-                | (ChannelMessage.target_agent_id == USER_AGENT_ID)
+                | (ChannelMessage.target_user_id.isnot(None))
             )
             .order_by(ChannelMessage.created_at.desc())
             .limit(limit)

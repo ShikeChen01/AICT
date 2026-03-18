@@ -5,7 +5,6 @@ Tests for agent status + queue API composition (docs: queue_size, pending_messag
 import pytest
 
 from backend.api.v1.agents import list_agent_status
-from backend.core.constants import USER_AGENT_ID
 from backend.schemas.task import TaskCreate
 from backend.services.message_service import get_message_service
 from backend.services.task_service import TaskService

@@ -1,15 +1,6 @@
 """
 Shared constants for the AICT backend.
-
-Reserved UUID for the user in channel_messages (from_agent_id / target_agent_id).
-This UUID never exists in the agents table.
 """
-
-from uuid import UUID
-
-# Reserved UUID representing the user in channel_messages.
-# Used when from_agent_id or target_agent_id refers to the human user.
-USER_AGENT_ID: UUID = UUID("00000000-0000-0000-0000-000000000000")
 
 # Valid agent roles
 AGENT_ROLES = ("manager", "cto", "engineer")

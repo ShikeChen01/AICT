@@ -328,14 +328,13 @@ async def wake_agent(
     agent = await _ensure_agent_access(db, agent_id, current_user.id)
     if body.message:
         from backend.services.message_service import get_message_service
-        from backend.core.constants import USER_AGENT_ID
 
         service = get_message_service(db)
-        await service.send(
-            from_agent_id=USER_AGENT_ID,
+        await service.send_user_to_agent(
             target_agent_id=agent.id,
             project_id=agent.project_id,
             content=body.message,
+            user_id=current_user.id,
         )
         await db.commit()
     from backend.workers.message_router import get_message_router

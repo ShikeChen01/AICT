@@ -9,10 +9,13 @@ This is a completely stateless client — each operation creates fresh connectio
 
 from __future__ import annotations
 
+import asyncio
+import secrets
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
+import websockets
 
 from backend.logging.my_logger import get_logger
 
@@ -23,6 +26,7 @@ _MAX_SHELL_OUTPUT_BYTES = 1 * 1024 * 1024  # 1 MB
 
 # Sentinel that sandbox server echoes back after we write a known marker
 _CMD_END_MARKER = "__AICT_CMD_DONE_{marker}__"
+_DRAIN_MARKER = "__AICT_DRAIN_{marker}__"
 
 
 @dataclass
@@ -52,6 +56,26 @@ class SandboxClient:
     # ── Shell execution ───────────────────────────────────────────────────────
 
     async def execute_shell(
+        self,
+        host: str,
+        port: int,
+        auth_token: str,
+        command: str,
+        timeout: int = 120,
+    ) -> ShellResult:
+        """Execute a shell command via REST, with WS fallback for older sandboxes."""
+        try:
+            return await self._execute_shell_rest(host, port, auth_token, command, timeout)
+        except RuntimeError as exc:
+            logger.warning(
+                "Shell REST path unavailable for %s:%s, falling back to WS shell: %s",
+                host,
+                port,
+                exc,
+            )
+            return await self._execute_shell_ws(host, port, auth_token, command, timeout)
+
+    async def _execute_shell_rest(
         self,
         host: str,
         port: int,
@@ -102,6 +126,119 @@ class SandboxClient:
         except (TypeError, ValueError):
             exit_code = None
         return ShellResult(stdout=stdout, exit_code=exit_code, truncated=truncated)
+
+    async def _execute_shell_ws(
+        self,
+        host: str,
+        port: int,
+        auth_token: str,
+        command: str,
+        timeout: int = 120,
+    ) -> ShellResult:
+        marker = secrets.token_hex(8)
+        drain_sentinel = _DRAIN_MARKER.format(marker=marker)
+        end_sentinel = _CMD_END_MARKER.format(marker=marker)
+        ws_url = f"ws://{host}:{port}/ws/shell?token={auth_token}"
+
+        async with websockets.connect(ws_url, max_size=2**22) as ws:
+            await ws.send(self._encode_drain_command(drain_sentinel))
+            await self._drain_shell_prompt(ws, drain_sentinel, timeout)
+            await ws.send(self._encode_shell_command(command, end_sentinel))
+            return await self._collect_shell_output(ws, end_sentinel, timeout)
+
+    @staticmethod
+    def _encode_drain_command(drain_sentinel: str) -> bytes:
+        return f"printf '{drain_sentinel}\\n{drain_sentinel}\\n'\n".encode("utf-8")
+
+    @staticmethod
+    def _encode_shell_command(command: str, end_sentinel: str) -> bytes:
+        wrapped = (
+            f"{command}\n"
+            "status=$?\n"
+            f"printf '{end_sentinel}:%s\\n' \"$status\"\n"
+        )
+        return wrapped.encode("utf-8")
+
+    @staticmethod
+    def _decode_ws_chunk(payload: Any) -> bytes:
+        if isinstance(payload, bytes):
+            return payload
+        if isinstance(payload, str):
+            return payload.encode("utf-8", errors="replace")
+        return b""
+
+    async def _drain_shell_prompt(self, ws: Any, drain_sentinel: str, timeout: int | float) -> None:
+        seen = 0
+        deadline = asyncio.get_running_loop().time() + float(timeout)
+        while seen < 2:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise RuntimeError("Shell prompt drain timed out")
+            chunk = self._decode_ws_chunk(await asyncio.wait_for(ws.recv(), timeout=remaining))
+            if not chunk:
+                continue
+            seen += chunk.decode("utf-8", errors="replace").count(drain_sentinel)
+
+    async def _collect_shell_output(
+        self,
+        ws: Any,
+        end_sentinel: str,
+        timeout: int | float,
+    ) -> ShellResult:
+        deadline = asyncio.get_running_loop().time() + float(timeout)
+        chunks: list[bytes] = []
+        exit_code: int | None = None
+        sentinel_bytes = end_sentinel.encode("utf-8")
+        truncated = False
+
+        while True:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                break
+            try:
+                chunk = self._decode_ws_chunk(await asyncio.wait_for(ws.recv(), timeout=remaining))
+            except asyncio.TimeoutError:
+                break
+            if not chunk:
+                break
+            chunks.append(chunk)
+            combined = b"".join(chunks)
+            marker_index = combined.find(sentinel_bytes)
+            if marker_index == -1:
+                continue
+
+            line_end = combined.find(b"\n", marker_index)
+            if line_end == -1:
+                continue
+
+            sentinel_line = combined[marker_index:line_end].decode("utf-8", errors="replace")
+            _, _, exit_text = sentinel_line.partition(":")
+            try:
+                exit_code = int(exit_text.strip())
+            except ValueError:
+                exit_code = None
+
+            stdout_bytes = combined[:marker_index]
+            truncated = line_end + 1 > _MAX_SHELL_OUTPUT_BYTES
+            if len(stdout_bytes) > _MAX_SHELL_OUTPUT_BYTES:
+                stdout_bytes = stdout_bytes[-_MAX_SHELL_OUTPUT_BYTES :]
+            elif truncated:
+                stdout_bytes = stdout_bytes[-_MAX_SHELL_OUTPUT_BYTES :]
+            return ShellResult(
+                stdout=stdout_bytes.decode("utf-8", errors="replace"),
+                exit_code=exit_code,
+                truncated=truncated,
+            )
+
+        stdout_bytes = b"".join(chunks)
+        if len(stdout_bytes) > _MAX_SHELL_OUTPUT_BYTES:
+            stdout_bytes = stdout_bytes[-_MAX_SHELL_OUTPUT_BYTES :]
+            truncated = True
+        return ShellResult(
+            stdout=stdout_bytes.decode("utf-8", errors="replace"),
+            exit_code=None,
+            truncated=truncated,
+        )
 
     # ── REST operations ───────────────────────────────────────────────────────
 

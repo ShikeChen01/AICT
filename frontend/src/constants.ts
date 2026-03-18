@@ -2,8 +2,5 @@
  * Shared constants used across the AICT frontend.
  */
 
-/**
- * Reserved UUID representing "the human user" in channel messages.
- * Backend uses the same value; keep in sync with backend/core/constants.py.
- */
-export const USER_AGENT_ID = '00000000-0000-0000-0000-000000000000';
+// (USER_AGENT_ID sentinel removed — user identity is now expressed via
+// from_user_id / target_user_id FK columns on channel messages.)

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.exceptions import InvalidTaskStatus, TaskNotFoundError, AgentNotFoundError
 from backend.db.models import Agent, Task, VALID_TASK_STATUSES
+from backend.logging.my_logger import get_logger
 from backend.schemas.task import TaskCreate, TaskUpdate, TaskResponse
 
 
@@ -23,6 +24,8 @@ VALID_TRANSITIONS: dict[str, list[str]] = {
     "done": [],  # Terminal state
     "aborted": ["backlog"],  # Can re-assign from backlog
 }
+
+logger = get_logger(__name__)
 
 
 def validate_status(status: str) -> None:
@@ -220,16 +223,22 @@ class TaskService:
         return task
 
     async def _wake_agent_for_assignment(self, agent: Agent) -> None:
-        """Ensure assigned agent is awake and has a sandbox ready."""
+        """Ensure assigned agent is awake and try to warm a sandbox if available."""
         prev_status = agent.status
         prev_sandbox = agent.sandbox
-        await self.orchestrator.wake_agent(self.session, agent)
+        try:
+            await self.orchestrator.wake_agent(self.session, agent)
+        except RuntimeError as exc:
+            logger.warning(
+                "Task assignment woke agent %s without sandbox readiness: %s",
+                agent.id,
+                exc,
+            )
         if agent.status != prev_status or agent.sandbox != prev_sandbox:
             await self.ws_manager.broadcast_agent_status(agent)
 
     async def _send_assignment_message(self, task: Task, agent: Agent) -> None:
         """Queue an assignment message so worker loops have actionable input."""
-        from backend.core.constants import USER_AGENT_ID
         from backend.services.message_service import MessageService
 
         summary = [
@@ -244,7 +253,6 @@ class TaskService:
 
         message_service = MessageService(self.session)
         await message_service.send(
-            from_agent_id=USER_AGENT_ID,
             target_agent_id=agent.id,
             project_id=task.project_id,
             content="\n".join(summary),

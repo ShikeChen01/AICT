@@ -19,15 +19,29 @@ from backend.workers.loop import (
     run_inner_loop,
 )
 from backend.services.session_service import SessionService
-from backend.core.constants import USER_AGENT_ID
 
 
 def _make_unread_msg(from_id, project_id, target_id, content="hi"):
-    """Build a minimal mock ChannelMessage object."""
+    """Build a minimal mock ChannelMessage object.
+
+    When from_id is None and target_id is an agent_id, this represents a user message.
+    Use from_user_id for user-to-agent messages.
+    """
     m = MagicMock()
     m.id = uuid4()
-    m.from_agent_id = from_id
+    # If from_id is None, this is a user message (from_user_id set separately)
+    if from_id is None:
+        m.from_agent_id = None
+        m.from_user_id = uuid4()
+        m.is_from_user = True
+    else:
+        m.from_agent_id = from_id
+        m.from_user_id = None
+        m.is_from_user = False
+    # target_id is an agent_id
     m.target_agent_id = target_id
+    m.target_user_id = None
+    m.is_to_user = False
     m.content = content
     m.message_type = "normal"
     return m
@@ -253,7 +267,7 @@ async def test_run_inner_loop_resolves_model_from_role_and_seniority(
         sample_engineer.id, sample_project.id, trigger_message_id=None
     )
 
-    unread = [_make_unread_msg(USER_AGENT_ID, sample_project.id, sample_engineer.id, "hello")]
+    unread = [_make_unread_msg(None, sample_project.id, sample_engineer.id, "hello")]
     monkeypatch.setattr(
         "backend.db.repositories.messages.ChannelMessageRepository.list_by_target_and_status",
         AsyncMock(return_value=unread),
@@ -300,7 +314,7 @@ async def test_run_inner_loop_normalizes_legacy_tool_name_in_history(
         sample_engineer.id, sample_project.id, trigger_message_id=None
     )
 
-    unread = [_make_unread_msg(USER_AGENT_ID, sample_project.id, sample_engineer.id, "hello")]
+    unread = [_make_unread_msg(None, sample_project.id, sample_engineer.id, "hello")]
     monkeypatch.setattr(
         "backend.db.repositories.messages.ChannelMessageRepository.list_by_target_and_status",
         AsyncMock(return_value=unread),
@@ -391,7 +405,7 @@ async def test_llm_error_emits_fallback_message(
     sample_manager, sample_project, session, monkeypatch
 ) -> None:
     """When LLM raises, loop returns 'error' and emits a fallback channel message to user."""
-    unread = [_make_unread_msg(USER_AGENT_ID, sample_project.id, sample_manager.id, "hello")]
+    unread = [_make_unread_msg(None, sample_project.id, sample_manager.id, "hello")]
     _patch_loop_basics(monkeypatch, unread, llm_side_effect=RuntimeError("API timeout"))
 
     sess = await SessionService(session).create_session(
@@ -416,7 +430,7 @@ async def test_llm_error_emits_fallback_message(
     assert result == "error"
     assert len(emitted_messages) == 1
     assert "error" in emitted_messages[0].content.lower() or "API timeout" in emitted_messages[0].content
-    assert emitted_messages[0].target_agent_id == USER_AGENT_ID
+    assert emitted_messages[0].target_user_id is not None
 
 
 @pytest.mark.asyncio
@@ -424,7 +438,7 @@ async def test_text_only_response_ends_session_normally(
     sample_manager, sample_project, session, monkeypatch
 ) -> None:
     """A text-only assistant response should be treated as a valid completion."""
-    unread = [_make_unread_msg(USER_AGENT_ID, sample_project.id, sample_manager.id, "hello")]
+    unread = [_make_unread_msg(None, sample_project.id, sample_manager.id, "hello")]
     _patch_loop_basics(monkeypatch, unread, llm_return=("some thinking text", [], _make_llm_response()))
 
     sess = await SessionService(session).create_session(

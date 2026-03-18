@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from backend.core.constants import USER_AGENT_ID
 from backend.schemas.task import TaskCreate
 from backend.tools.base import RunContext, parse_tool_uuid
 from backend.tools.result import ToolExecutionError
@@ -99,12 +98,14 @@ async def run_abort_task(ctx: RunContext, tool_input: dict) -> str:
         )
     task = await ctx.task_service.update_status(ctx.agent.current_task_id, "aborted")
     ctx.agent.current_task_id = None
-    await ctx.message_service.send(
-        from_agent_id=ctx.agent.id,
-        target_agent_id=task.created_by_id or USER_AGENT_ID,
-        project_id=ctx.project.id,
-        content=f"Task '{task.title}' aborted: {tool_input.get('reason', '')}",
-        message_type="system",
-    )
+    # Notify the task creator (always an agent in current design)
+    if task.created_by_id:
+        await ctx.message_service.send(
+            from_agent_id=ctx.agent.id,
+            target_agent_id=task.created_by_id,
+            project_id=ctx.project.id,
+            content=f"Task '{task.title}' aborted: {tool_input.get('reason', '')}",
+            message_type="system",
+        )
     await ctx.db.flush()
     return "Task aborted."

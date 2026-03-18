@@ -14,7 +14,9 @@ from backend.config import settings
 
 
 def _build_connect_args() -> dict:
-    """Build asyncpg connect_args, optionally enabling SSL."""
+    """Build driver-specific connect_args, optionally enabling SSL for Postgres."""
+    if settings.database_url.startswith("sqlite"):
+        return {}
     if settings.db_ssl_mode == "require":
         import ssl as _ssl
 

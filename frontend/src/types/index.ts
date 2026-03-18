@@ -457,7 +457,8 @@ export interface ChannelMessage {
   project_id: UUID;
   from_agent_id: UUID | null;
   target_agent_id: UUID | null;
-  from_user_id: UUID | null;  // Phase 2: real user attribution
+  from_user_id: UUID | null;
+  target_user_id: UUID | null;
   content: string;
   message_type: ChannelMessageType;
   status: 'sent' | 'received';
@@ -699,7 +700,8 @@ export interface AgentToolResultData {
 export interface AgentMessageData {
   id: UUID;
   from_agent_id: UUID;
-  target_agent_id: UUID;
+  target_agent_id: UUID | null;
+  target_user_id: UUID | null;
   content: string;
   message_type: ChannelMessageType;
   created_at?: string | null;

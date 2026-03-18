@@ -32,7 +32,6 @@ from backend.agents.helpers import (
     rate_limit_soft_pause,
     send_fallback_message,
 )
-from backend.core.constants import USER_AGENT_ID
 from backend.db.models import Agent as AgentRecord, PromptBlockConfig, Repository
 from backend.db.repositories.agent_templates import PromptBlockConfigRepository
 from backend.db.repositories.attachments import AttachmentRepository
@@ -158,6 +157,7 @@ class Agent:
         self._budget = BudgetPolicy()
         self._services: AgentServices | None = None
         self._agent_roster: dict[UUID, AgentRecord] = {}
+        self._reply_target_user_id: UUID | None = None
 
         # Config sync flag (set by ConfigListener via LISTEN/NOTIFY)
         self._config_dirty: bool = False
@@ -199,6 +199,21 @@ class Agent:
     @property
     def token_allocations(self) -> dict | None:
         return getattr(self._record, "token_allocations", None)
+
+    def _update_reply_target_from_messages(self, messages: list[object]) -> None:
+        """Remember the most recent human user involved in this session."""
+        for msg in reversed(messages):
+            from_user_id = getattr(msg, "from_user_id", None)
+            if from_user_id is not None:
+                self._reply_target_user_id = from_user_id
+                return
+            target_user_id = getattr(msg, "target_user_id", None)
+            if target_user_id is not None:
+                self._reply_target_user_id = target_user_id
+                return
+
+    def _fallback_target_user_id(self) -> UUID | None:
+        return self._reply_target_user_id or getattr(self._project, "owner_id", None)
 
     # ── MCP tool loading ──
 
@@ -350,6 +365,7 @@ class Agent:
             "My session exceeded the maximum number of iterations and was ended automatically. "
             "Please send a new message to continue.",
             self._callbacks.emit_agent_message,
+            target_user_id=self._fallback_target_user_id(),
         )
         return "max_iterations"
 
@@ -401,6 +417,7 @@ class Agent:
                 )
                 return "normal_end"
         else:
+            self._update_reply_target_from_messages(unread)
             await message_service.mark_received([m.id for m in unread])
 
         # Build agent roster for message formatting
@@ -412,7 +429,7 @@ class Agent:
 
         # Format incoming messages
         new_messages_text = PromptAssembly.format_incoming_messages(
-            unread, self._agent_roster, USER_AGENT_ID, assignment_context,
+            unread, self._agent_roster, assignment_context,
         )
 
         # Load image attachments
@@ -623,6 +640,7 @@ class Agent:
                 f"I encountered an error processing your request and could not respond. "
                 f"Error: {type(exc).__name__}: {str(exc)[:200]}",
                 self._callbacks.emit_agent_message,
+                target_user_id=self._fallback_target_user_id(),
             )
             return None, None, None
 
@@ -903,6 +921,7 @@ class Agent:
                     f"This project's daily token budget ({budget.daily_token_budget:,} tokens) has been "
                     "reached. Agents will resume after midnight UTC.",
                     self._callbacks.emit_agent_message,
+                    target_user_id=self._fallback_target_user_id(),
                 )
                 return "budget_exhausted"
 
@@ -920,6 +939,7 @@ class Agent:
                     f"This project's daily cost budget (${budget.daily_cost_budget_usd:.2f}) has been "
                     f"reached (${cost_today:.4f} spent today). Agents will resume after midnight UTC.",
                     self._callbacks.emit_agent_message,
+                    target_user_id=self._fallback_target_user_id(),
                 )
                 return "cost_budget_exhausted"
 
@@ -946,6 +966,7 @@ class Agent:
                         "The project's hourly rate limit was not cleared within 10 minutes. "
                         "Please raise the limit in Project Settings and send a new message.",
                         self._callbacks.emit_agent_message,
+                        target_user_id=self._fallback_target_user_id(),
                     )
                     return "rate_limited_timeout"
                 # Limits cleared or user relaxed them — refresh local limit vars
@@ -1004,9 +1025,10 @@ class Agent:
         mid_loop_unread = await svc.message_service.get_unread_for_agent(self._record.id)
         if not mid_loop_unread:
             return
+        self._update_reply_target_from_messages(mid_loop_unread)
         await svc.message_service.mark_received([m.id for m in mid_loop_unread])
         mid_loop_text = PromptAssembly.format_incoming_messages(
-            mid_loop_unread, self._agent_roster, USER_AGENT_ID
+            mid_loop_unread, self._agent_roster,
         )
         capped = self._prompt._cap_incoming_messages(mid_loop_text)
         self._prompt.messages.append({"role": "user", "content": capped})

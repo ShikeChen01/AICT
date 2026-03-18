@@ -174,6 +174,9 @@ async def _run_reconciler_forever() -> None:
 
 async def _run_config_listener_forever() -> None:
     from backend.agents.config_listener import ConfigListener, _asyncpg_dsn
+    if not settings.database_url.startswith("postgresql+asyncpg://"):
+        logger.info("ConfigListener skipped for non-Postgres database URL")
+        return
     wm = get_worker_manager()
     dsn = _asyncpg_dsn(settings.database_url)
     listener = ConfigListener(dsn=dsn, worker_manager=wm)

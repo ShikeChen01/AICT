@@ -6,7 +6,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMessages, sendMessage } from '../api/client';
 import { useOptionalAgentStreamContext } from '../contexts/AgentStreamContext';
 import type { ChannelMessage } from '../types';
-import { USER_AGENT_ID } from '../constants';
 
 interface UseMessagesOptions {
   projectId: string | null;
@@ -76,8 +75,9 @@ export function useMessages({
         id: latestActivity.id,
         project_id: latestActivity.project_id,
         from_agent_id: latestActivity.agent_id,
-        target_agent_id: USER_AGENT_ID,
+        target_agent_id: null,
         from_user_id: null,
+        target_user_id: null,  // filled by server on real messages; synthetic WS entry
         content: latestActivity.content,
         message_type: 'normal',
         status: 'received',

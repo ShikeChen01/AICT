@@ -25,7 +25,8 @@ class ChannelMessageResponse(BaseModel):
     project_id: UUID
     from_agent_id: UUID | None
     target_agent_id: UUID | None
-    from_user_id: UUID | None = None  # Phase 2: real user attribution
+    from_user_id: UUID | None = None
+    target_user_id: UUID | None = None
     content: str
     message_type: str  # 'normal' | 'system'
     status: str  # 'sent' | 'received'

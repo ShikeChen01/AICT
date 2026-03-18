@@ -700,6 +700,9 @@ class ChannelMessage(Base):
     from_user_id = Column(
         Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    target_user_id = Column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     content = Column(Text, nullable=False)
     message_type = Column(String(20), default="normal", nullable=False)
     status = Column(String(20), default="sent", nullable=False)
@@ -709,12 +712,26 @@ class ChannelMessage(Base):
     project = relationship("Project", back_populates="channel_messages")
     from_agent = relationship("Agent", foreign_keys=[from_agent_id])
     target_agent = relationship("Agent", foreign_keys=[target_agent_id])
+    from_user = relationship("User", foreign_keys=[from_user_id])
+    target_user = relationship("User", foreign_keys=[target_user_id])
     message_attachments = relationship(
         "MessageAttachment",
         lazy="selectin",
         order_by="MessageAttachment.position",
         cascade="all, delete-orphan",
     )
+
+    # ── Identity helpers (replaces USER_AGENT_ID sentinel) ──────────
+
+    @property
+    def is_from_user(self) -> bool:
+        """True when the message was sent by a human user."""
+        return self.from_user_id is not None
+
+    @property
+    def is_to_user(self) -> bool:
+        """True when the message targets a human user."""
+        return self.target_user_id is not None
 
     @property
     def attachment_ids(self) -> list[str]:

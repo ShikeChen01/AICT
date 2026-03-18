@@ -14,7 +14,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from backend.config import settings
-from backend.core.constants import USER_AGENT_ID
 from backend.db.models import Agent
 from backend.llm.model_resolver import default_model_for_role, resolve_model
 from backend.services.message_service import MessageService

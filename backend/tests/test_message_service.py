@@ -1,9 +1,9 @@
 """Unit tests for message_service (channel messages)."""
 
 import pytest
+from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.constants import USER_AGENT_ID
 from backend.db.models import ChannelMessage, Repository
 from backend.services.message_service import MessageService
 
@@ -21,19 +21,46 @@ async def test_send_user_to_agent(
 ) -> None:
     from backend.db.models import Agent
 
+    user_id = uuid4()
     msg = await message_service.send_user_to_agent(
         target_agent_id=sample_manager.id,
         project_id=sample_project.id,
         content="Hello agent",
+        user_id=user_id,
     )
     assert msg.id is not None
     assert msg.project_id == sample_project.id
-    assert msg.from_agent_id == USER_AGENT_ID
+    assert msg.from_agent_id is None
+    assert msg.from_user_id == user_id
     assert msg.target_agent_id == sample_manager.id
+    assert msg.target_user_id is None
     assert msg.content == "Hello agent"
     assert msg.message_type == "normal"
     assert msg.status == "sent"
     assert msg.broadcast is False
+    assert msg.is_from_user is True
+    assert msg.is_to_user is False
+
+
+@pytest.mark.asyncio
+async def test_send_agent_to_user(
+    message_service: MessageService,
+    sample_project: Repository,
+    sample_manager: "Agent",
+) -> None:
+    target_user_id = uuid4()
+    msg = await message_service.send_agent_to_user(
+        from_agent_id=sample_manager.id,
+        target_user_id=target_user_id,
+        project_id=sample_project.id,
+        content="Agent replies",
+    )
+    assert msg.from_agent_id == sample_manager.id
+    assert msg.from_user_id is None
+    assert msg.target_agent_id is None
+    assert msg.target_user_id == target_user_id
+    assert msg.is_from_user is False
+    assert msg.is_to_user is True
 
 
 @pytest.mark.asyncio
@@ -45,14 +72,16 @@ async def test_list_conversation(
 ) -> None:
     from backend.db.models import Agent
 
+    user_id = uuid4()
     await message_service.send_user_to_agent(
         target_agent_id=sample_manager.id,
         project_id=sample_project.id,
         content="User says hi",
+        user_id=user_id,
     )
-    await message_service.send(
+    await message_service.send_agent_to_user(
         from_agent_id=sample_manager.id,
-        target_agent_id=USER_AGENT_ID,
+        target_user_id=user_id,
         project_id=sample_project.id,
         content="Agent replies",
     )
@@ -77,15 +106,18 @@ async def test_list_all_user_messages(
     sample_manager: "Agent",
     sample_engineer: "Agent",
 ) -> None:
+    user_id = uuid4()
     await message_service.send_user_to_agent(
         target_agent_id=sample_manager.id,
         project_id=sample_project.id,
         content="To manager",
+        user_id=user_id,
     )
     await message_service.send_user_to_agent(
         target_agent_id=sample_engineer.id,
         project_id=sample_project.id,
         content="To engineer",
+        user_id=user_id,
     )
     await session.commit()
 
@@ -138,5 +170,8 @@ async def test_broadcast(
     assert msg.id is not None
     assert msg.from_agent_id == sample_manager.id
     assert msg.target_agent_id is None
+    assert msg.target_user_id is None
     assert msg.broadcast is True
     assert msg.content == "Broadcast to all"
+    assert msg.is_from_user is False
+    assert msg.is_to_user is False

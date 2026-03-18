@@ -17,27 +17,30 @@
   },
   {
     "name": "send_message",
-    "description": "Send message to agent or user. target_agent_id must be a UUID, not a display name.",
+    "description": "Send message to an agent or the human user. Provide exactly one of target_agent_id or target_user_id.",
     "detailed_description": [
-      "Send a direct message to another agent or the user. Use for 1-on-1",
+      "Send a direct message to another agent or the human user. Use for 1-on-1",
       "communication: task assignments, status updates, questions, or delivering",
-      "results. The target_agent_id must be a valid UUID \u2014 use list_agents to discover",
-      "agent IDs. To message the human user, use the user's agent UUID (provided in",
-      "your context)."
+      "results. To message an agent, pass target_agent_id (use list_agents to",
+      "discover agent IDs). To message the human user, pass target_user_id",
+      "(the user ID shown in incoming user messages)."
     ],
     "input_schema": {
       "type": "object",
       "properties": {
         "target_agent_id": {
           "type": "string",
-          "description": "Recipient UUID (agent id). Never pass display names here."
+          "description": "Recipient agent UUID. Mutually exclusive with target_user_id."
+        },
+        "target_user_id": {
+          "type": "string",
+          "description": "Recipient user UUID (for messaging the human user). Mutually exclusive with target_agent_id."
         },
         "content": {
           "type": "string"
         }
       },
       "required": [
-        "target_agent_id",
         "content"
       ]
     },

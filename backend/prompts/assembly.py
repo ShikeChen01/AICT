@@ -662,33 +662,29 @@ class PromptAssembly:
     def format_incoming_messages(
         unread: list,
         agent_by_id: dict[UUID, Agent],
-        user_agent_id: UUID,
         assignment_context: str | None = None,
     ) -> str:
-        def _sender_name(aid: UUID | None) -> str:
-            if aid is None:
-                return "System"
-            if aid == user_agent_id:
+        def _sender_name(msg) -> str:
+            if msg.is_from_user:
                 return "User"
-            a = agent_by_id.get(aid)
-            return a.display_name if a else str(aid)
+            if msg.from_agent_id is None:
+                return "System"
+            a = agent_by_id.get(msg.from_agent_id)
+            return a.display_name if a else str(msg.from_agent_id)
 
         chunks: list[str] = []
         for m in unread:
-            is_user_message = (
-                getattr(m, "from_user_id", None) is not None
-                or m.from_agent_id == user_agent_id
-            )
-            if not is_user_message:
-                a = agent_by_id.get(m.from_agent_id)
-                role_label = a.role if a else "user"
+            if m.is_from_user:
+                user_label = str(m.from_user_id) if m.from_user_id else "unknown"
                 chunks.append(
-                    f"[Message from {_sender_name(m.from_agent_id)} "
-                    f"({role_label}, id={m.from_agent_id})]: {m.content}"
+                    f"[Message from User (id={user_label})]: {m.content}"
                 )
             else:
+                a = agent_by_id.get(m.from_agent_id)
+                role_label = a.role if a else "unknown"
                 chunks.append(
-                    f"[Message from User (id={user_agent_id})]: {m.content}"
+                    f"[Message from {_sender_name(m)} "
+                    f"({role_label}, id={m.from_agent_id})]: {m.content}"
                 )
         if assignment_context:
             chunks.append(f"[Message from System (system)]: {assignment_context}")

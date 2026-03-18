@@ -19,7 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.agents.agent import Agent, EmitCallbacks
-from backend.core.constants import USER_AGENT_ID
 from backend.db.models import Agent as AgentRecord, Repository
 from backend.db.session import AsyncSessionLocal
 from backend.workers.message_router import get_message_router
@@ -102,10 +101,11 @@ class AgentWorker:
                     project.id,
                     msg.id,
                     msg.from_agent_id or agent_record.id,
-                    msg.target_agent_id or USER_AGENT_ID,
+                    msg.target_agent_id,
                     msg.content,
                     message_type=msg.message_type,
                     created_at=msg.created_at,
+                    target_user_id=msg.target_user_id,
                 )
             ),
         )
@@ -127,6 +127,7 @@ class AgentWorker:
                     session_service = SessionService(db)
                     agent_record = None
                     sess = None
+                    needs_rollback_before_reset = False
 
                     try:
                         result = await db.execute(
@@ -176,11 +177,21 @@ class AgentWorker:
                         try:
                             end_reason = await self._task
                         except asyncio.CancelledError:
+                            worker_shutdown = not self._interrupt
                             end_reason = "interrupted"
+                            needs_rollback_before_reset = True
+                            if self._task is not None and not self._task.done():
+                                self._task.cancel()
+                                try:
+                                    await self._task
+                                except asyncio.CancelledError:
+                                    pass
                             try:
                                 await session_service.end_session_force(sess.id, "interrupted")
                             except Exception:
                                 pass
+                            if worker_shutdown:
+                                raise
                         except Exception as loop_exc:
                             logger.exception(
                                 "Agent worker %s: unhandled exception from Agent.run: %s",
@@ -207,6 +218,8 @@ class AgentWorker:
                         await db.rollback()
                     finally:
                         try:
+                            if needs_rollback_before_reset:
+                                await db.rollback()
                             refresh_result = await db.execute(
                                 select(AgentRecord).where(AgentRecord.id == self.agent_id)
                             )

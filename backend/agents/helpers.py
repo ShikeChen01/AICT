@@ -14,7 +14,6 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.constants import USER_AGENT_ID
 from backend.db.models import Agent as AgentRecord, Task
 from backend.db.repositories.messages import AgentMessageRepository
 from backend.llm.contracts import ImagePart
@@ -89,6 +88,7 @@ async def send_fallback_message(
     project_id: UUID,
     content: str,
     emit_agent_message: object,
+    target_user_id: UUID | None = None,
 ) -> None:
     """Write a fallback channel message to the user and emit it via WebSocket.
 
@@ -96,9 +96,9 @@ async def send_fallback_message(
     so the user is never left staring at a blank chat.
     """
     try:
-        msg = await message_service.send(
+        msg = await message_service.send_agent_to_user(
             from_agent_id=agent.id,
-            target_agent_id=USER_AGENT_ID,
+            target_user_id=target_user_id,
             project_id=project_id,
             content=content,
             message_type="system",

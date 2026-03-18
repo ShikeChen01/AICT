@@ -8,7 +8,6 @@ import type { Agent, AgentRole, ChannelMessage } from '../../types';
 import { Button } from '../ui';
 import { useAutoFollow } from '../../hooks';
 import { fetchAttachmentBlob } from '../../api/client';
-import { USER_AGENT_ID } from '../../constants';
 
 /** Fetches an attachment's bytes, memoises the blob URL, and cleans up on unmount. */
 function AttachmentImage({ attachmentId }: { attachmentId: string }) {
@@ -72,8 +71,6 @@ const ROLE_COLOR: Record<AgentRole, string> = {
 interface MessageListProps {
   messages: ChannelMessage[];
   isLoading?: boolean;
-  /** Optional: from_agent_id that represents "user" (default USER_AGENT_ID). */
-  userAgentId?: string | null;
   /** Optional: agents list used to show role labels in message bubbles. */
   agents?: Agent[];
 }
@@ -139,8 +136,7 @@ function MessageBubble({
   );
 }
 
-export function MessageList({ messages, isLoading, userAgentId, agents }: MessageListProps) {
-  const uid = userAgentId ?? USER_AGENT_ID;
+export function MessageList({ messages, isLoading, agents }: MessageListProps) {
 
   const agentMap = useMemo(() => {
     const map = new Map<string, Agent>();
@@ -185,7 +181,7 @@ export function MessageList({ messages, isLoading, userAgentId, agents }: Messag
           </div>
         )}
         {messages.map((msg) => {
-          const isUser = msg.from_agent_id === null || msg.from_agent_id === uid;
+          const isUser = msg.from_user_id !== null;
           const agent = msg.from_agent_id ? agentMap.get(msg.from_agent_id) : undefined;
           const agentLabel = agent ? ROLE_ABBREVIATION[agent.role] : 'A';
           const agentColorClass = agent ? ROLE_COLOR[agent.role] : 'bg-purple-500';

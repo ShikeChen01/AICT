@@ -43,8 +43,8 @@ def main() -> int:
     # Core
     ok &= check_contains(
         BACKEND / "core" / "constants.py",
-        "USER_AGENT_ID",
-        "core/constants.py with USER_AGENT_ID",
+        "AGENT_ROLES",
+        "core/constants.py with AGENT_ROLES",
     )
 
     # Message service
