@@ -139,6 +139,13 @@ jobs:
           DB_NAME="${{ secrets.POSTGRES_VM_DB }}"
           DB_SSL_MODE="${{ secrets.DB_SSL_MODE }}"
           VPC_CONNECTOR_NAME="${{ secrets.VPC_CONNECTOR_NAME }}"
+          ORCH_HOST="${{ secrets.SANDBOX_ORCHESTRATOR_HOST }}"
+          ORCH_PORT="${{ secrets.SANDBOX_ORCHESTRATOR_PORT }}"
+          ORCH_TOKEN="${{ secrets.SANDBOX_ORCHESTRATOR_TOKEN }}"
+          VM_HOST="${{ secrets.SANDBOX_VM_HOST }}"
+          VM_INTERNAL_HOST="${{ secrets.SANDBOX_VM_INTERNAL_HOST }}"
+          VM_POOL_PORT="${{ secrets.SANDBOX_VM_POOL_PORT }}"
+          VM_MASTER_TOKEN="${{ secrets.SANDBOX_VM_MASTER_TOKEN }}"
 
           DB_PORT="${DB_PORT:-5432}"
           DB_USER="${DB_USER:-aict}"
@@ -256,6 +263,24 @@ jobs:
             echo "Resolved deploy image is empty"
             exit 1
           fi
+
+          SANDBOX_ENV_ARGS=()
+          if [ -n "$VM_HOST" ] || [ -n "$VM_INTERNAL_HOST" ]; then
+            echo "Using legacy sandbox VM configuration for deploy"
+            SANDBOX_ENV_ARGS+=("--clear-env-vars=SANDBOX_ORCHESTRATOR_HOST,SANDBOX_ORCHESTRATOR_PORT,SANDBOX_ORCHESTRATOR_TOKEN")
+            SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_VM_HOST=$VM_HOST")
+            SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_VM_INTERNAL_HOST=$VM_INTERNAL_HOST")
+            SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_VM_POOL_PORT=${VM_POOL_PORT:-9090}")
+            SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_VM_MASTER_TOKEN=$VM_MASTER_TOKEN")
+          elif [ -n "$ORCH_HOST" ]; then
+            echo "Using sandbox orchestrator configuration for deploy"
+            SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_ORCHESTRATOR_HOST=$ORCH_HOST")
+            SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_ORCHESTRATOR_PORT=$ORCH_PORT")
+            SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_ORCHESTRATOR_TOKEN=$ORCH_TOKEN")
+          else
+            echo "No sandbox backend secrets configured; sandbox/VNC features will remain unavailable"
+          fi
+
           gcloud run deploy "$CLOUD_RUN_SERVICE" \
             --project "$GCLOUD_PROJECT_ID" \
             --image "$IMAGE" \
@@ -277,16 +302,15 @@ jobs:
             --set-env-vars="MANAGER_MODEL_DEFAULT=${{ secrets.MANAGER_MODEL_DEFAULT }}" \
             --set-env-vars="CTO_MODEL_DEFAULT=${{ secrets.CTO_MODEL_DEFAULT }}" \
             --set-env-vars="ENGINEER_MODEL_DEFAULT=${{ secrets.ENGINEER_MODEL_DEFAULT }}" \
+            --set-env-vars="ENGINEER_JUNIOR_MODEL=${{ secrets.ENGINEER_MODEL_DEFAULT }}" \
             --set-env-vars="GITHUB_TOKEN=${{ secrets.GH_REPO_TOKEN }}" \
-            --set-env-vars="SANDBOX_ORCHESTRATOR_HOST=${{ secrets.SANDBOX_ORCHESTRATOR_HOST }}" \
-            --set-env-vars="SANDBOX_ORCHESTRATOR_PORT=${{ secrets.SANDBOX_ORCHESTRATOR_PORT }}" \
-            --set-env-vars="SANDBOX_ORCHESTRATOR_TOKEN=${{ secrets.SANDBOX_ORCHESTRATOR_TOKEN }}" \
             --set-env-vars="SECRET_ENCRYPTION_KEY=${{ secrets.SECRET_ENCRYPTION_KEY }}" \
             --set-env-vars="VOYAGE_API_KEY=${{ secrets.VOYAGE_API_KEY }}" \
             --set-env-vars="^;;^ALLOWED_ORIGINS=https://aict-487016.web.app,http://localhost:3000,http://localhost:5173,http://localhost:8000" \
             --set-env-vars="PROVISION_REPOS_ON_STARTUP=false" \
             --set-env-vars="CLONE_CODE_REPO_ON_STARTUP=false" \
             --set-env-vars="MAX_ENGINEERS=5" \
+            "${SANDBOX_ENV_ARGS[@]}" \
             --min-instances 1 \
             --cpu-boost \
             --no-cpu-throttling \

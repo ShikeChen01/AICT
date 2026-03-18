@@ -78,11 +78,9 @@ $yamlLines = @(
     "MANAGER_MODEL_DEFAULT: '$($env:MANAGER_MODEL_DEFAULT)'"
     "CTO_MODEL_DEFAULT: '$($env:CTO_MODEL_DEFAULT)'"
     "ENGINEER_MODEL_DEFAULT: '$($env:ENGINEER_MODEL_DEFAULT)'"
+    "ENGINEER_JUNIOR_MODEL: '$($env:ENGINEER_MODEL_DEFAULT)'"
     "LLM_USE_LEGACY_HTTP: '$($env:LLM_USE_LEGACY_HTTP)'"
     "GITHUB_TOKEN: '$($env:GITHUB_TOKEN)'"
-    "SANDBOX_ORCHESTRATOR_HOST: '$($env:SANDBOX_ORCHESTRATOR_HOST)'"
-    "SANDBOX_ORCHESTRATOR_PORT: '$($env:SANDBOX_ORCHESTRATOR_PORT)'"
-    "SANDBOX_ORCHESTRATOR_TOKEN: '$($env:SANDBOX_ORCHESTRATOR_TOKEN)'"
     "PROVISION_REPOS_ON_STARTUP: 'true'"
     "CLONE_CODE_REPO_ON_STARTUP: 'true'"
     "MAX_ENGINEERS: '5'"
@@ -90,6 +88,23 @@ $yamlLines = @(
     "ALLOWED_ORIGINS: 'https://aict-487016.web.app,http://localhost:3000,http://localhost:5173,http://localhost:8000'"
     "VOYAGE_API_KEY: '$($env:VOYAGE_API_KEY)'"
 )
+
+if ($env:SANDBOX_VM_HOST -or $env:SANDBOX_VM_INTERNAL_HOST) {
+    Write-Host "Using legacy sandbox VM configuration."
+    $yamlLines += "SANDBOX_VM_HOST: '$($env:SANDBOX_VM_HOST)'"
+    $yamlLines += "SANDBOX_VM_INTERNAL_HOST: '$($env:SANDBOX_VM_INTERNAL_HOST)'"
+    $yamlLines += "SANDBOX_VM_POOL_PORT: '$($env:SANDBOX_VM_POOL_PORT)'"
+    $yamlLines += "SANDBOX_VM_MASTER_TOKEN: '$($env:SANDBOX_VM_MASTER_TOKEN)'"
+}
+elseif ($env:SANDBOX_ORCHESTRATOR_HOST) {
+    Write-Host "Using sandbox orchestrator configuration."
+    $yamlLines += "SANDBOX_ORCHESTRATOR_HOST: '$($env:SANDBOX_ORCHESTRATOR_HOST)'"
+    $yamlLines += "SANDBOX_ORCHESTRATOR_PORT: '$($env:SANDBOX_ORCHESTRATOR_PORT)'"
+    $yamlLines += "SANDBOX_ORCHESTRATOR_TOKEN: '$($env:SANDBOX_ORCHESTRATOR_TOKEN)'"
+}
+else {
+    Write-Warning "No sandbox backend env vars configured; sandbox features will remain unavailable."
+}
 [System.IO.File]::WriteAllLines($EnvFile, $yamlLines)
 
 try {
