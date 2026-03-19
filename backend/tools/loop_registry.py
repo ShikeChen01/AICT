@@ -57,6 +57,32 @@ from backend.tools.executors.meta import run_sleep, run_think, run_get_project_m
 from backend.tools.executors.docs import run_write_architecture_doc
 from backend.tools.executors.knowledge import run_search_knowledge
 
+# ---------------------------------------------------------------------------
+# Sandbox tools — excluded from tool lists when no VM backend is configured
+# ---------------------------------------------------------------------------
+
+_SANDBOX_TOOL_NAMES = frozenset({
+    "execute_command",
+    "sandbox_start_session",
+    "sandbox_end_session",
+    "sandbox_health",
+    "sandbox_screenshot",
+    "sandbox_mouse_move",
+    "sandbox_mouse_click",
+    "sandbox_mouse_scroll",
+    "sandbox_mouse_location",
+    "sandbox_keyboard_press",
+    "sandbox_record_screen",
+    "sandbox_end_record_screen",
+})
+
+
+def _sandbox_available() -> bool:
+    """Return True if a sandbox VM backend is configured."""
+    from backend.config import settings
+    return bool(settings.sandbox_orchestrator_host or settings.sandbox_vm_host)
+
+
 # Re-export for backward-compat with loop.py imports
 __all__ = [
     "RunContext",
@@ -232,9 +258,11 @@ def get_tool_defs_for_role(role: str) -> list[dict]:
     Used during thinking phase and as fallback. For the main agent loop,
     prefer get_tool_defs_for_agent() which reads from DB (user-customized).
     """
+    sandbox_ok = _sandbox_available()
     return [
         {"name": t.name, "description": t.description, "input_schema": t.input_schema}
         for t in _TOOLS
+        if sandbox_ok or t.name not in _SANDBOX_TOOL_NAMES
     ]
 
 
@@ -256,9 +284,12 @@ async def get_tool_defs_for_agent(agent_id, role: str, db) -> list[dict]:
     base_role = role if role in ("manager", "cto", "worker", "custom") else "worker"
     db_tools = await repo.ensure_agent_tools(agent_id, base_role)
 
+    sandbox_ok = _sandbox_available()
     result = []
     for tc in db_tools:
         if not tc.enabled:
+            continue
+        if not sandbox_ok and tc.tool_name in _SANDBOX_TOOL_NAMES:
             continue
         result.append({
             "name": tc.tool_name,
