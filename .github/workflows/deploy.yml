@@ -203,10 +203,20 @@ jobs:
           fi
 
           echo "Executing migration..."
-          gcloud run jobs execute "$JOB_NAME" \
+          if ! gcloud run jobs execute "$JOB_NAME" \
             --project "$GCLOUD_PROJECT_ID" \
             --region "$GCLOUD_REGION" \
-            --wait
+            --wait; then
+            echo "--- Migration job failed. Fetching Cloud Logging output... ---"
+            sleep 5  # Brief pause for log ingestion
+            gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
+              --project "$GCLOUD_PROJECT_ID" \
+              --limit 200 \
+              --format "value(textPayload)" \
+              --order asc 2>/dev/null || echo "(Could not retrieve logs — check GCP Console)"
+            exit 1
+          fi
 
   # ============================================================================
   # Backend: Deploy to Cloud Run
