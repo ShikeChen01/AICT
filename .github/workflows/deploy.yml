@@ -257,6 +257,13 @@ jobs:
           DB_NAME="${{ secrets.POSTGRES_VM_DB }}"
           DB_SSL_MODE="${{ secrets.DB_SSL_MODE }}"
           VPC_CONNECTOR_NAME="${{ secrets.VPC_CONNECTOR_NAME }}"
+          ORCH_HOST="${{ secrets.SANDBOX_ORCHESTRATOR_HOST }}"
+          ORCH_PORT="${{ secrets.SANDBOX_ORCHESTRATOR_PORT }}"
+          ORCH_TOKEN="${{ secrets.SANDBOX_ORCHESTRATOR_TOKEN }}"
+          VM_HOST="${{ secrets.SANDBOX_VM_HOST }}"
+          VM_INTERNAL_HOST="${{ secrets.SANDBOX_VM_INTERNAL_HOST }}"
+          VM_POOL_PORT="${{ secrets.SANDBOX_VM_POOL_PORT }}"
+          VM_MASTER_TOKEN="${{ secrets.SANDBOX_VM_MASTER_TOKEN }}"
 
           DB_PORT="${DB_PORT:-5432}"
           DB_USER="${DB_USER:-aict}"
