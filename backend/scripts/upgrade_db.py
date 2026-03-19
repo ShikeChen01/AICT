@@ -130,3 +130,4 @@ def main() -> int:
 if __name__ == "__main__":
     raise SystemExit(main())
 # migration diagnostic run Wed Mar 18 22:41:26 EDT 2026
+
