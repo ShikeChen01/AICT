@@ -288,14 +288,12 @@ jobs:
             SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_ORCHESTRATOR_HOST=$ORCH_HOST")
             SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_ORCHESTRATOR_PORT=$ORCH_PORT")
             SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_ORCHESTRATOR_TOKEN=$ORCH_TOKEN")
-            SANDBOX_ENV_ARGS+=("--remove-env-vars=SANDBOX_VM_HOST,SANDBOX_VM_INTERNAL_HOST,SANDBOX_VM_POOL_PORT,SANDBOX_VM_MASTER_TOKEN")
           elif [ -n "$VM_HOST" ] || [ -n "$VM_INTERNAL_HOST" ]; then
             echo "Using legacy sandbox VM configuration for deploy"
             SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_VM_HOST=$VM_HOST")
             SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_VM_INTERNAL_HOST=$VM_INTERNAL_HOST")
             SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_VM_POOL_PORT=${VM_POOL_PORT:-9090}")
             SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_VM_MASTER_TOKEN=$VM_MASTER_TOKEN")
-            SANDBOX_ENV_ARGS+=("--remove-env-vars=SANDBOX_ORCHESTRATOR_HOST,SANDBOX_ORCHESTRATOR_PORT,SANDBOX_ORCHESTRATOR_TOKEN")
           else
             echo "No sandbox backend secrets configured; sandbox/VNC features will remain unavailable"
           fi
