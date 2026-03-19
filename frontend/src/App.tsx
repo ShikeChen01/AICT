@@ -29,11 +29,10 @@ import { ThemeProvider } from './contexts/ThemeContext';
 
 function ProtectedRoute() {
   const { firebaseUser, user, loading } = useAuth();
-  const hasToken = Boolean(getAuthToken());
   if (loading) {
     return <div className="h-screen flex items-center justify-center text-[var(--text-muted)]">Loading...</div>;
   }
-  if (!firebaseUser && !user && !hasToken) {
+  if (!firebaseUser && !user) {
     return <Navigate to="/login" replace />;
   }
   return <Outlet />;
