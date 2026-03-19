@@ -179,8 +179,12 @@ class VMManager:
         ram_kib = int(config.DESKTOP_RAM_GB * 1024 * 1024)
         name = f"aict-vm-{vm_id}"
 
+        # Use KVM if available, fall back to QEMU TCG (software emulation)
+        virt_type = "kvm" if os.path.exists("/dev/kvm") else "qemu"
+        cpu_xml = "<cpu mode='host-passthrough'/>" if virt_type == "kvm" else "<cpu mode='custom' match='exact'><model fallback='allow'>qemu64</model></cpu>"
+
         return textwrap.dedent(f"""\
-            <domain type='kvm'>
+            <domain type='{virt_type}'>
               <name>{name}</name>
               <memory unit='KiB'>{ram_kib}</memory>
               <vcpu placement='static'>{config.DESKTOP_VCPUS}</vcpu>
@@ -192,7 +196,7 @@ class VMManager:
                 <acpi/>
                 <apic/>
               </features>
-              <cpu mode='host-passthrough'/>
+              {cpu_xml}
               <clock offset='utc'/>
               <on_poweroff>destroy</on_poweroff>
               <on_reboot>restart</on_reboot>
