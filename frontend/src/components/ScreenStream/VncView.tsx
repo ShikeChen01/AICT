@@ -79,6 +79,10 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
       }
       rfbRef.current = null;
     }
+    // noVNC attaches cursor/overlay canvases directly to document.body in some
+    // configurations (e.g. dot-cursor fallback). Remove any orphaned ones so
+    // they don't bleed into the page after the VNC panel is dismissed.
+    document.querySelectorAll('body > canvas').forEach((c) => c.remove());
   }, []);
 
   /** Cancel any pending reconnect timer. */
