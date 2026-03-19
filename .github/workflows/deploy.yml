@@ -208,13 +208,14 @@ jobs:
             --region "$GCLOUD_REGION" \
             --wait; then
             echo "--- Migration job failed. Fetching Cloud Logging output... ---"
-            sleep 5  # Brief pause for log ingestion
+            sleep 10  # Brief pause for log ingestion
             gcloud logging read \
               "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
               --project "$GCLOUD_PROJECT_ID" \
-              --limit 200 \
+              --limit 50 \
+              --freshness 15m \
               --format "value(textPayload)" \
-              --order asc 2>/dev/null || echo "(Could not retrieve logs — check GCP Console)"
+              --order desc 2>/dev/null | tac || echo "(Could not retrieve logs — check GCP Console)"
             exit 1
           fi
 
