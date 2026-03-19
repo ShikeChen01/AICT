@@ -43,7 +43,6 @@ import {
 import type {
   Project,
   ProjectSecret,
-  ProjectSettings,
   ProjectUsageResponse,
 } from '../types';
 import { Button, Card, Input, Textarea } from '../components/ui';
@@ -169,7 +168,7 @@ export function SettingsPage() {
         setProject(updated);
       }
 
-      const updatedSettings = await updateProjectSettings(projectId, {
+      await updateProjectSettings(projectId, {
         max_engineers: maxEngineers,
         calls_per_hour_limit: callsPerHour,
         tokens_per_hour_limit: tokensPerHour,
