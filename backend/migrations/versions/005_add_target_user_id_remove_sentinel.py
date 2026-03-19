@@ -27,11 +27,16 @@ _SENTINEL = "00000000-0000-0000-0000-000000000000"
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    inspector = sa.inspect(bind)
-    column_names = {col["name"] for col in inspector.get_columns("channel_messages")}
+    conn = op.get_bind()
+    result = conn.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'channel_messages' AND column_name = 'target_user_id'"
+        )
+    )
+    has_target_user_id = result.fetchone() is not None
 
-    if "target_user_id" not in column_names:
+    if not has_target_user_id:
         op.add_column(
             "channel_messages",
             sa.Column(

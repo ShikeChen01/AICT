@@ -11,8 +11,10 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import ssl as _ssl
 from pathlib import Path
 
 from alembic import command
@@ -25,7 +27,18 @@ logger = logging.getLogger(__name__)
 _BASELINE_REV = "001_baseline"
 
 
-def _restamp_if_orphaned(cfg: Config) -> None:
+def _build_ssl_connect_args() -> dict:
+    """Return asyncpg SSL connect_args when DB_SSL_MODE=require."""
+    ssl_mode = os.getenv("DB_SSL_MODE", "").lower()
+    if ssl_mode == "require":
+        ctx = _ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl.CERT_NONE
+        return {"ssl": ctx}
+    return {}
+
+
+async def _restamp_if_orphaned_async(cfg: Config) -> None:
     """Re-stamp the DB to 001_baseline when its current revision is orphaned.
 
     After squashing old migrations into a single baseline file, the DB's
@@ -40,22 +53,35 @@ def _restamp_if_orphaned(cfg: Config) -> None:
     script = ScriptDirectory.from_config(cfg)
     known_revisions = {rev.revision for rev in script.walk_revisions()}
 
-    # Read + update via a disposable sync engine (avoids triggering the async
-    # env.py path that command.stamp would use).
-    from sqlalchemy import create_engine, text
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
 
     url = os.getenv("DATABASE_URL", "")
-    sync_url = url.replace("+asyncpg", "+psycopg2").replace("+aiosqlite", "")
-    engine = create_engine(sync_url)
+    if not url:
+        return  # Nothing to check without a URL.
+
+    connect_args = _build_ssl_connect_args()
+    engine = create_async_engine(url, connect_args=connect_args)
     try:
-        with engine.connect() as conn:
-            if not engine.dialect.has_table(conn, "alembic_version"):
+        async with engine.connect() as conn:
+            # Check whether alembic_version table exists.
+            result = await conn.execute(
+                text(
+                    "SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = 'alembic_version'"
+                )
+            )
+            if result.fetchone() is None:
                 return  # Fresh DB — alembic upgrade will handle everything.
-            row = conn.execute(text("SELECT version_num FROM alembic_version")).fetchone()
+
+            row = await conn.execute(
+                text("SELECT version_num FROM alembic_version")
+            )
+            row = row.fetchone()
             if row is None:
                 return  # No version stamped yet.
-            current_rev = row[0]
 
+            current_rev = row[0]
             if current_rev in known_revisions:
                 return  # Revision chain is intact — nothing to do.
 
@@ -65,13 +91,18 @@ def _restamp_if_orphaned(cfg: Config) -> None:
                 current_rev,
                 _BASELINE_REV,
             )
-            conn.execute(
+            await conn.execute(
                 text("UPDATE alembic_version SET version_num = :rev"),
                 {"rev": _BASELINE_REV},
             )
-            conn.commit()
+            await conn.commit()
     finally:
-        engine.dispose()
+        await engine.dispose()
+
+
+def _restamp_if_orphaned(cfg: Config) -> None:
+    """Sync wrapper around the async restamp check."""
+    asyncio.run(_restamp_if_orphaned_async(cfg))
 
 
 def upgrade_db() -> None:
