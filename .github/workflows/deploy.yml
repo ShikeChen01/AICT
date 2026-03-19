@@ -285,15 +285,17 @@ jobs:
           SANDBOX_ENV_ARGS=()
           if [ -n "$ORCH_HOST" ]; then
             echo "Using sandbox orchestrator configuration for deploy"
-            SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_ORCHESTRATOR_HOST=$ORCH_HOST")
-            SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_ORCHESTRATOR_PORT=$ORCH_PORT")
-            SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_ORCHESTRATOR_TOKEN=$ORCH_TOKEN")
+            SANDBOX_ENV_ARGS+=("--update-env-vars=SANDBOX_ORCHESTRATOR_HOST=$ORCH_HOST")
+            SANDBOX_ENV_ARGS+=("--update-env-vars=SANDBOX_ORCHESTRATOR_PORT=$ORCH_PORT")
+            SANDBOX_ENV_ARGS+=("--update-env-vars=SANDBOX_ORCHESTRATOR_TOKEN=$ORCH_TOKEN")
+            SANDBOX_ENV_ARGS+=("--remove-env-vars=SANDBOX_VM_HOST,SANDBOX_VM_INTERNAL_HOST,SANDBOX_VM_POOL_PORT,SANDBOX_VM_MASTER_TOKEN")
           elif [ -n "$VM_HOST" ] || [ -n "$VM_INTERNAL_HOST" ]; then
             echo "Using legacy sandbox VM configuration for deploy"
-            SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_VM_HOST=$VM_HOST")
-            SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_VM_INTERNAL_HOST=$VM_INTERNAL_HOST")
-            SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_VM_POOL_PORT=${VM_POOL_PORT:-9090}")
-            SANDBOX_ENV_ARGS+=("--set-env-vars=SANDBOX_VM_MASTER_TOKEN=$VM_MASTER_TOKEN")
+            SANDBOX_ENV_ARGS+=("--update-env-vars=SANDBOX_VM_HOST=$VM_HOST")
+            SANDBOX_ENV_ARGS+=("--update-env-vars=SANDBOX_VM_INTERNAL_HOST=$VM_INTERNAL_HOST")
+            SANDBOX_ENV_ARGS+=("--update-env-vars=SANDBOX_VM_POOL_PORT=${VM_POOL_PORT:-9090}")
+            SANDBOX_ENV_ARGS+=("--update-env-vars=SANDBOX_VM_MASTER_TOKEN=$VM_MASTER_TOKEN")
+            SANDBOX_ENV_ARGS+=("--remove-env-vars=SANDBOX_ORCHESTRATOR_HOST,SANDBOX_ORCHESTRATOR_PORT,SANDBOX_ORCHESTRATOR_TOKEN")
           else
             echo "No sandbox backend secrets configured; sandbox/VNC features will remain unavailable"
           fi
@@ -306,27 +308,27 @@ jobs:
             --allow-unauthenticated \
             --vpc-connector "$VPC_CONNECTOR_NAME" \
             --vpc-egress private-ranges-only \
-            --set-env-vars="ENV=development" \
-            --set-env-vars="DATABASE_URL=$DATABASE_URL" \
-            --set-env-vars="DB_SSL_MODE=$DB_SSL_MODE" \
-            --set-env-vars="API_TOKEN=${{ secrets.API_TOKEN }}" \
-            --set-env-vars="FIREBASE_CREDENTIALS_PATH=${{ secrets.FIREBASE_CREDENTIALS_PATH }}" \
-            --set-env-vars="FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" \
-            --set-env-vars="CLAUDE_API_KEY=${{ secrets.CLAUDE_API_KEY }}" \
-            --set-env-vars="GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" \
-            --set-env-vars="OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
-            --set-env-vars="MOONSHOT_API_KEY=${{ secrets.MOONSHOT_API_KEY }}" \
-            --set-env-vars="MANAGER_MODEL_DEFAULT=${{ secrets.MANAGER_MODEL_DEFAULT }}" \
-            --set-env-vars="CTO_MODEL_DEFAULT=${{ secrets.CTO_MODEL_DEFAULT }}" \
-            --set-env-vars="ENGINEER_MODEL_DEFAULT=${{ secrets.ENGINEER_MODEL_DEFAULT }}" \
-            --set-env-vars="ENGINEER_JUNIOR_MODEL=${{ secrets.ENGINEER_MODEL_DEFAULT }}" \
-            --set-env-vars="GITHUB_TOKEN=${{ secrets.GH_REPO_TOKEN }}" \
-            --set-env-vars="SECRET_ENCRYPTION_KEY=${{ secrets.SECRET_ENCRYPTION_KEY }}" \
-            --set-env-vars="VOYAGE_API_KEY=${{ secrets.VOYAGE_API_KEY }}" \
-            --set-env-vars="^;;^ALLOWED_ORIGINS=https://aict-487016.web.app,http://localhost:3000,http://localhost:5173,http://localhost:8000" \
-            --set-env-vars="PROVISION_REPOS_ON_STARTUP=false" \
-            --set-env-vars="CLONE_CODE_REPO_ON_STARTUP=false" \
-            --set-env-vars="MAX_ENGINEERS=5" \
+            --update-env-vars="ENV=development" \
+            --update-env-vars="DATABASE_URL=$DATABASE_URL" \
+            --update-env-vars="DB_SSL_MODE=$DB_SSL_MODE" \
+            --update-env-vars="API_TOKEN=${{ secrets.API_TOKEN }}" \
+            --update-env-vars="FIREBASE_CREDENTIALS_PATH=${{ secrets.FIREBASE_CREDENTIALS_PATH }}" \
+            --update-env-vars="FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" \
+            --update-env-vars="CLAUDE_API_KEY=${{ secrets.CLAUDE_API_KEY }}" \
+            --update-env-vars="GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" \
+            --update-env-vars="OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
+            --update-env-vars="MOONSHOT_API_KEY=${{ secrets.MOONSHOT_API_KEY }}" \
+            --update-env-vars="MANAGER_MODEL_DEFAULT=${{ secrets.MANAGER_MODEL_DEFAULT }}" \
+            --update-env-vars="CTO_MODEL_DEFAULT=${{ secrets.CTO_MODEL_DEFAULT }}" \
+            --update-env-vars="ENGINEER_MODEL_DEFAULT=${{ secrets.ENGINEER_MODEL_DEFAULT }}" \
+            --update-env-vars="ENGINEER_JUNIOR_MODEL=${{ secrets.ENGINEER_MODEL_DEFAULT }}" \
+            --update-env-vars="GITHUB_TOKEN=${{ secrets.GH_REPO_TOKEN }}" \
+            --update-env-vars="SECRET_ENCRYPTION_KEY=${{ secrets.SECRET_ENCRYPTION_KEY }}" \
+            --update-env-vars="VOYAGE_API_KEY=${{ secrets.VOYAGE_API_KEY }}" \
+            --update-env-vars="^;;^ALLOWED_ORIGINS=https://aict-487016.web.app,http://localhost:3000,http://localhost:5173,http://localhost:8000" \
+            --update-env-vars="PROVISION_REPOS_ON_STARTUP=false" \
+            --update-env-vars="CLONE_CODE_REPO_ON_STARTUP=false" \
+            --update-env-vars="MAX_ENGINEERS=5" \
             "${SANDBOX_ENV_ARGS[@]}" \
             --min-instances 1 \
             --cpu-boost \
