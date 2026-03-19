@@ -90,7 +90,6 @@ export function SettingsPage() {
   const navigate = useNavigate();
 
   const [project, setProject] = useState<Project | null>(null);
-  const [, setPs] = useState<ProjectSettings | null>(null);
   const [usage, setUsage] = useState<ProjectUsageResponse | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -131,7 +130,6 @@ export function SettingsPage() {
         listProjectSecrets(projectId).catch(() => []),
       ]);
       setProject(proj);
-      setPs(settings);
       setUsage(usageData);
       setName(proj.name);
       setDescription(proj.description || '');
@@ -178,7 +176,6 @@ export function SettingsPage() {
         daily_token_budget: dailyTokenBudget,
         daily_cost_budget_usd: dailyCostBudget,
       });
-      setPs(updatedSettings);
       // Refresh usage after save (limits changed — active agents will pick up within 5s)
       getProjectUsage(projectId).then(setUsage).catch(() => null);
       setSuccess('Settings saved. Active agents will respect new limits within 5 seconds.');
@@ -206,7 +203,7 @@ export function SettingsPage() {
           <h2 className="text-lg font-semibold text-[var(--text-primary)]">Project not found</h2>
           <button
             onClick={() => navigate('/projects')}
-            className="mt-4 text-[var(--color-primary)] hover:text-[var(--color-primary)]"
+            className="mt-4 text-[var(--color-primary)] hover:underline"
           >
             Back to Projects
           </button>

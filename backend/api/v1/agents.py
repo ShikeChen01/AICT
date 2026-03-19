@@ -215,7 +215,23 @@ async def create_agent(
 
     await db.commit()
     await db.refresh(agent)
-    return agent
+    # New agents never have a sandbox immediately after creation
+    return AgentResponse(
+        id=agent.id,
+        project_id=agent.project_id,
+        template_id=agent.template_id,
+        role=agent.role,
+        display_name=agent.display_name,
+        model=agent.model,
+        provider=agent.provider,
+        thinking_enabled=agent.thinking_enabled,
+        status=agent.status,
+        current_task_id=agent.current_task_id,
+        sandbox_id=None,
+        memory=agent.memory,
+        created_at=agent.created_at,
+        updated_at=agent.updated_at,
+    )
 
 
 # ── Agent Inspector (Frontend V2) ──────────────────────────────────
@@ -390,9 +406,25 @@ async def update_agent(
                 )
         agent.token_allocations = alloc
 
+    sandbox = agent.sandbox  # capture before commit expires the relationship
     await db.commit()
     await db.refresh(agent)
-    return agent
+    return AgentResponse(
+        id=agent.id,
+        project_id=agent.project_id,
+        template_id=agent.template_id,
+        role=agent.role,
+        display_name=agent.display_name,
+        model=agent.model,
+        provider=agent.provider,
+        thinking_enabled=agent.thinking_enabled,
+        status=agent.status,
+        current_task_id=agent.current_task_id,
+        sandbox_id=str(sandbox.id) if sandbox else None,
+        memory=agent.memory,
+        created_at=agent.created_at,
+        updated_at=agent.updated_at,
+    )
 
 
 @router.get("/{agent_id}/context", response_model=AgentContextResponse)

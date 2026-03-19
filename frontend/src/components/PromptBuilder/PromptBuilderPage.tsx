@@ -290,10 +290,13 @@ export function PromptBuilderPage({ projectId }: PromptBuilderPageProps) {
   // ── Delete custom block ────────────────────────────────────────────────────
 
   const handleDeleteBlock = useCallback((blockId: string) => {
+    let result: PromptBlockConfig[] | null = null;
     setBlocks((prev) => {
-      const updated = prev.filter((b) => b.id !== blockId);
-      persistBlocks(updated);
-      return updated;
+      result = prev.filter((b) => b.id !== blockId);
+      return result;
+    });
+    queueMicrotask(() => {
+      if (result) persistBlocks(result);
     });
   }, [persistBlocks]);
 

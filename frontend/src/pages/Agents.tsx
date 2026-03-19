@@ -7,7 +7,7 @@
  * Replaces the old Agent Build page with a more cohesive experience.
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Loader2,
@@ -84,8 +84,8 @@ export function AgentsPage() {
   if (!project || !projectId) {
     return (
       <AppLayout>
-        <div className="flex flex-1 items-center justify-center">
-          <AlertCircle className="w-12 h-12 text-[var(--color-danger)] mb-4" />
+        <div className="flex flex-col flex-1 items-center justify-center gap-4">
+          <AlertCircle className="w-12 h-12 text-[var(--color-danger)]" />
           <button onClick={() => navigate('/projects')} className="text-[var(--color-primary)] hover:underline">
             Back to Projects
           </button>
@@ -110,6 +110,8 @@ function AgentsContent({ projectId }: { projectId: string }) {
   const [loading, setLoading] = useState(true);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('builder');
+  const selectedAgentIdRef = useRef<string | null>(null);
+  selectedAgentIdRef.current = selectedAgentId;
 
   const fetchData = useCallback(async () => {
     try {
@@ -123,7 +125,7 @@ function AgentsContent({ projectId }: { projectId: string }) {
       setUsage(usageData);
 
       // Auto-select first agent if nothing selected
-      if (!selectedAgentId && agentList.length > 0) {
+      if (!selectedAgentIdRef.current && agentList.length > 0) {
         setSelectedAgentId(agentList[0].id);
       }
     } catch {
@@ -131,7 +133,7 @@ function AgentsContent({ projectId }: { projectId: string }) {
     } finally {
       setLoading(false);
     }
-  }, [projectId, selectedAgentId]);
+  }, [projectId]);
 
   useEffect(() => {
     fetchData();

@@ -164,22 +164,6 @@ export function MessageList({ messages, isLoading, agents }: MessageListProps) {
         </div>
       )}
       <div ref={attachRef} onScroll={onScroll} className="h-full overflow-y-auto p-4 space-y-1">
-        {isLoading && (
-          <div className="flex justify-start mb-4">
-            <div className="flex items-end gap-2">
-              <div className="w-8 h-8 rounded-full bg-purple-500 flex items-center justify-center text-white text-xs">
-                ...
-              </div>
-              <div className="bg-gray-100 rounded-2xl rounded-bl-sm px-4 py-3">
-                <div className="flex gap-1">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
         {messages.map((msg) => {
           const isUser = msg.from_user_id !== null;
           const agent = msg.from_agent_id ? agentMap.get(msg.from_agent_id) : undefined;
@@ -195,6 +179,22 @@ export function MessageList({ messages, isLoading, agents }: MessageListProps) {
             />
           );
         })}
+        {isLoading && messages.length === 0 && (
+          <div className="flex justify-start mb-4">
+            <div className="flex items-end gap-2">
+              <div className="w-8 h-8 rounded-full bg-purple-500 flex items-center justify-center text-white text-xs">
+                ...
+              </div>
+              <div className="bg-gray-100 rounded-2xl rounded-bl-sm px-4 py-3">
+                <div className="flex gap-1">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

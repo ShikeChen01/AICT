@@ -44,18 +44,29 @@ export function useWebSocket(
       setIsConnected(client.isConnected);
     });
 
+    let checkConnection: ReturnType<typeof setInterval> | null = null;
+    let checkTimeout: ReturnType<typeof setTimeout> | null = null;
+
     if (autoConnect) {
       client.connect();
-      const checkConnection = setInterval(() => {
+      checkConnection = setInterval(() => {
         setIsConnected(client.isConnected);
-        if (client.isConnected) {
+        if (client.isConnected && checkConnection !== null) {
           clearInterval(checkConnection);
+          checkConnection = null;
         }
       }, 100);
-      setTimeout(() => clearInterval(checkConnection), 10000);
+      checkTimeout = setTimeout(() => {
+        if (checkConnection !== null) {
+          clearInterval(checkConnection);
+          checkConnection = null;
+        }
+      }, 10000);
     }
 
     return () => {
+      if (checkConnection !== null) clearInterval(checkConnection);
+      if (checkTimeout !== null) clearTimeout(checkTimeout);
       unsubscribe();
       client.disconnect();
       clientRef.current = null;

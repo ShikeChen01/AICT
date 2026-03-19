@@ -160,7 +160,7 @@ export function ProjectsPage({ onProjectsUpdated }: ProjectsPageProps) {
           <Card className="mb-6 flex items-center gap-3 border-[var(--color-danger)]/30 bg-[var(--color-danger-light)] px-4 py-3 text-[var(--color-danger)]">
             <AlertCircle className="h-5 w-5 flex-shrink-0" />
             <span className="text-sm">{error}</span>
-            <button onClick={() => setError(null)} className="ml-auto text-[var(--color-danger)] hover:text-[var(--color-danger)]">
+            <button onClick={() => setError(null)} className="ml-auto text-[var(--color-danger)] hover:opacity-70 transition-opacity">
               &times;
             </button>
           </Card>

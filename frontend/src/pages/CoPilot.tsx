@@ -193,7 +193,7 @@ function CoPilotContent({ projectId }: { projectId: string }) {
         setSandboxMap(map);
       })
       .catch(() => {});
-  }, [projectId, agents]);
+  }, [projectId]);
   const resolvedSandboxId = selectedAgent ? (sandboxMap[selectedAgent.id] ?? selectedAgent.sandbox_id) : null;
 
   return (

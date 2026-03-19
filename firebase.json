@@ -5,6 +5,27 @@
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
       {
+        "source": "/api/**",
+        "run": {
+          "serviceId": "aict-backend-dev",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/internal/**",
+        "run": {
+          "serviceId": "aict-backend-dev",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/testfads89213xlogin",
+        "run": {
+          "serviceId": "aict-backend-dev",
+          "region": "us-central1"
+        }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

@@ -238,9 +238,9 @@ export function AgentsPanel({ projectId, selectedAgentId, onSelectAgent }: Agent
               <div className="mt-2">
                 <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Latest activity</p>
                 <div className="mt-1 rounded border border-[var(--border-color)] bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--text-secondary)] leading-4 max-h-32 overflow-y-auto">
-                  {(getBuffer?.(agent.id).chunks.length ?? 0) > 0 ? (
+                  {(getBuffer?.(agent.id)?.chunks.length ?? 0) > 0 ? (
                     <ul className="space-y-1">
-                      {(getBuffer?.(agent.id).chunks ?? [])
+                      {(getBuffer?.(agent.id)?.chunks ?? [])
                         .slice(-10)
                         .reverse()
                         .map((chunk, idx) => (

@@ -89,8 +89,8 @@ export function SandboxPage() {
   if (!project || !projectId) {
     return (
       <AppLayout>
-        <div className="flex flex-1 items-center justify-center">
-          <AlertCircle className="w-12 h-12 text-[var(--color-danger)] mb-4" />
+        <div className="flex flex-col flex-1 items-center justify-center gap-4">
+          <AlertCircle className="w-12 h-12 text-[var(--color-danger)]" />
           <button onClick={() => navigate('/projects')} className="text-[var(--color-primary)] hover:underline">
             Back to Projects
           </button>
