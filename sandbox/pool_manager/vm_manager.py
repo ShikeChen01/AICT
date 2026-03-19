@@ -107,10 +107,80 @@ class VMManager:
         )
         return image_path
 
+    @staticmethod
+    def _cloudinit_iso_path(vm_id: str) -> str:
+        return os.path.join(config.DESKTOP_IMAGE_DIR, f"vm-{vm_id}-cidata.iso")
+
+    def create_cloudinit_iso(self, vm_id: str, auth_token: str, vm_ip: str) -> str:
+        """Create a NoCloud cloud-init ISO with per-VM configuration."""
+        self._ensure_image_dir()
+        iso_path = self._cloudinit_iso_path(vm_id)
+
+        tmpdir = Path(config.DESKTOP_IMAGE_DIR) / f".ci-{vm_id}"
+        tmpdir.mkdir(exist_ok=True)
+        try:
+            gateway = config.VM_GATEWAY
+            # meta-data
+            (tmpdir / "meta-data").write_text(
+                f"instance-id: aict-vm-{vm_id}\n"
+                f"local-hostname: aict-vm-{vm_id}\n"
+            )
+            # user-data — write env file + configure networking
+            (tmpdir / "user-data").write_text(
+                "#cloud-config\n"
+                "write_files:\n"
+                "  - path: /etc/sandbox/env\n"
+                "    content: |\n"
+                f"      AUTH_TOKEN={auth_token}\n"
+                "      DISPLAY=:99\n"
+                "      PORT=8080\n"
+                "      SCREEN_WIDTH=1024\n"
+                "      SCREEN_HEIGHT=768\n"
+                "      SCREEN_DEPTH=24\n"
+                "    permissions: '0600'\n"
+                "runcmd:\n"
+                "  - systemctl restart sandbox.service\n"
+            )
+            # network-config — static IP
+            (tmpdir / "network-config").write_text(
+                "version: 2\n"
+                "ethernets:\n"
+                "  id0:\n"
+                "    match:\n"
+                "      name: en*\n"
+                "    addresses:\n"
+                f"      - {vm_ip}/24\n"
+                "    routes:\n"
+                f"      - to: default\n"
+                f"        via: {gateway}\n"
+                "    nameservers:\n"
+                "      addresses: [8.8.8.8, 8.8.4.4]\n"
+            )
+            # Generate ISO
+            subprocess.run(
+                [
+                    "genisoimage", "-output", iso_path,
+                    "-volid", "cidata", "-joliet", "-rock",
+                    str(tmpdir / "meta-data"),
+                    str(tmpdir / "user-data"),
+                    str(tmpdir / "network-config"),
+                ],
+                check=True, capture_output=True, text=True,
+            )
+            logger.info("Created cloud-init ISO: %s (ip=%s)", iso_path, vm_ip)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+        return iso_path
+
     def remove_image(self, vm_id: str) -> None:
         image_path = self._vm_image_path(vm_id)
         if os.path.exists(image_path):
             os.remove(image_path)
+        # Also remove cloud-init ISO
+        iso_path = self._cloudinit_iso_path(vm_id)
+        if os.path.exists(iso_path):
+            os.remove(iso_path)
 
     # ── Networking ────────────────────────────────────────────────────────────
 
@@ -176,6 +246,7 @@ class VMManager:
         self,
         vm_id: str,
         image_path: str,
+        cloudinit_iso: str,
         vm_ip: str,
         auth_token: str,
     ) -> str:
@@ -214,6 +285,12 @@ class VMManager:
                   <driver name='qemu' type='qcow2' cache='writeback'/>
                   <source file='{image_path}'/>
                   <target dev='vda' bus='virtio'/>
+                </disk>
+                <disk type='file' device='cdrom'>
+                  <driver name='qemu' type='raw'/>
+                  <source file='{cloudinit_iso}'/>
+                  <target dev='sda' bus='sata'/>
+                  <readonly/>
                 </disk>
                 <interface type='bridge'>
                   <source bridge='{config.VM_BRIDGE}'/>
@@ -263,16 +340,23 @@ class VMManager:
         # 2. Compute static IP
         vm_ip = self._static_ip_for_port(host_port)
 
-        # 3. Setup port forwarding
+        # 3. Create cloud-init ISO with per-VM config (auth token, static IP)
+        try:
+            cloudinit_iso = self.create_cloudinit_iso(vm_id, auth_token, vm_ip)
+        except Exception:
+            self.remove_image(vm_id)
+            raise
+
+        # 4. Setup port forwarding
         try:
             self.setup_port_forward(host_port, vm_ip)
         except Exception:
             self.remove_image(vm_id)
             raise
 
-        # 4. Define and start libvirt domain
+        # 5. Define and start libvirt domain
         conn = self._get_conn()
-        xml = self._domain_xml(vm_id, image_path, vm_ip, auth_token)
+        xml = self._domain_xml(vm_id, image_path, cloudinit_iso, vm_ip, auth_token)
         try:
             dom = conn.defineXML(xml)
             dom.create()  # start the domain
