@@ -27,6 +27,17 @@ _SENTINEL = "00000000-0000-0000-0000-000000000000"
 
 
 def upgrade() -> None:
+    # Widen alembic_version.version_num so Alembic can stamp this revision.
+    # The default Postgres schema uses character varying(32), but this revision
+    # ID is 38 characters — exceeding the limit.  The ALTER is always safe
+    # (PostgreSQL allows widening a VARCHAR constraint).
+    op.execute(
+        sa.text(
+            "ALTER TABLE alembic_version "
+            "ALTER COLUMN version_num TYPE character varying(255)"
+        )
+    )
+
     conn = op.get_bind()
     result = conn.execute(
         sa.text(
