@@ -22,7 +22,11 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import logging
+
 import config
+
+logger = logging.getLogger("pool-manager")
 
 # libvirt is optional — pool manager still starts for Docker-only mode if
 # libvirt is not installed.  All VMManager methods raise RuntimeError if
@@ -179,9 +183,12 @@ class VMManager:
         ram_kib = int(config.DESKTOP_RAM_GB * 1024 * 1024)
         name = f"aict-vm-{vm_id}"
 
-        # Use KVM if available, fall back to QEMU TCG (software emulation)
-        virt_type = "kvm" if os.path.exists("/dev/kvm") else "qemu"
-        cpu_xml = "<cpu mode='host-passthrough'/>" if virt_type == "kvm" else "<cpu mode='custom' match='exact'><model fallback='allow'>qemu64</model></cpu>"
+        # Use KVM if available and accessible, fall back to QEMU TCG (software emulation)
+        kvm_available = os.path.exists("/dev/kvm") and os.access("/dev/kvm", os.R_OK | os.W_OK)
+        virt_type = "kvm" if kvm_available else "qemu"
+        if virt_type == "qemu":
+            logger.warning("KVM unavailable (/dev/kvm missing or not accessible); falling back to TCG software emulation — expect slower VM performance")
+        cpu_xml = "<cpu mode='host-passthrough'/>" if virt_type == "kvm" else "<cpu mode='custom'><model>qemu64</model></cpu>"
 
         return textwrap.dedent(f"""\
             <domain type='{virt_type}'>

@@ -298,6 +298,7 @@ jobs:
             SANDBOX_ENV_ARGS+=("--remove-env-vars=SANDBOX_ORCHESTRATOR_HOST,SANDBOX_ORCHESTRATOR_PORT,SANDBOX_ORCHESTRATOR_TOKEN")
           else
             echo "No sandbox backend secrets configured; sandbox/VNC features will remain unavailable"
+            SANDBOX_ENV_ARGS+=("--remove-env-vars=SANDBOX_ORCHESTRATOR_HOST,SANDBOX_ORCHESTRATOR_PORT,SANDBOX_ORCHESTRATOR_TOKEN,SANDBOX_VM_HOST,SANDBOX_VM_INTERNAL_HOST,SANDBOX_VM_POOL_PORT,SANDBOX_VM_MASTER_TOKEN")
           fi
 
           gcloud run deploy "$CLOUD_RUN_SERVICE" \
