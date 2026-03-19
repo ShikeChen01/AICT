@@ -691,13 +691,23 @@ export async function createSandbox(
   projectId: string,
   configId?: string | null,
   name?: string | null,
+  requiresDesktop?: boolean,
 ): Promise<Sandbox> {
   return request<Sandbox>(
     'POST',
     '/sandboxes',
-    { project_id: projectId, config_id: configId ?? null, name: name ?? null } as CreateSandboxRequest,
+    { project_id: projectId, config_id: configId ?? null, name: name ?? null, ...(requiresDesktop !== undefined ? { requires_desktop: requiresDesktop } : {}) } as CreateSandboxRequest,
     120_000,
   );
+}
+
+/** Create a desktop (sandbox with requires_desktop=true). */
+export async function createDesktop(
+  projectId: string,
+  configId?: string | null,
+  name?: string | null,
+): Promise<Sandbox> {
+  return createSandbox(projectId, configId, name, true);
 }
 
 export async function assignSandbox(sandboxId: string, agentId: string): Promise<Sandbox> {

@@ -1,10 +1,12 @@
 /**
- * Sandbox Page — Grid-first live sandbox viewer.
+ * Desktops Page — Grid-first live desktop viewer.
  *
- * Default view: responsive grid of live sandbox thumbnails (MJPEG streams).
- * Click a sandbox → expand to full interactive VNC mode.
- * Config gear icon on each sandbox → opens config modal.
- * Toolbar: sandbox lifecycle controls, activity feed toggle.
+ * Desktops are user-managed, persistent VNC-capable environments.
+ * Sandboxes (headless, agent-owned) are not shown here.
+ *
+ * Default view: responsive grid of live desktop thumbnails (MJPEG streams).
+ * Click a desktop → expand to full interactive VNC mode.
+ * Assign / unassign / reassign desktops to agents via dropdown.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -17,18 +19,20 @@ import {
   Settings2,
   RotateCcw,
   Trash2,
-  Power,
   Eye,
   MousePointer2,
   Maximize2,
-  ChevronDown,
+  Plus,
+  Link2,
+  Unlink,
 } from 'lucide-react';
 import {
   getProject,
   getAgents,
   listSandboxes,
   listSandboxConfigs,
-  createAndAssignSandbox,
+  createDesktop,
+  assignSandbox,
   unassignSandbox,
   restartSandbox,
   destroySandbox,
@@ -43,15 +47,6 @@ import { useScreenStream } from '../hooks/useScreenStream';
 import { VncView } from '../components/ScreenStream';
 
 // ── Constants ──────────────────────────────────────────────────────────────
-
-/** Deterministic color based on agent name for sandbox card avatars. */
-const AGENT_COLORS = ['#3b82f6', '#8b5cf6', '#f59e0b', '#10b981', '#ef4444', '#ec4899'];
-function agentColor(name: string | null): string {
-  if (!name) return '#64748b';
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
-  return AGENT_COLORS[Math.abs(hash) % AGENT_COLORS.length];
-}
 
 const STATUS_BG: Record<string, string> = {
   assigned: 'bg-green-500/20 text-green-400',
@@ -101,26 +96,26 @@ export function SandboxPage() {
 
   return (
     <AppLayout>
-      <SandboxContent projectId={projectId} />
+      <DesktopContent projectId={projectId} />
     </AppLayout>
   );
 }
 
-// ── Sandbox Content ────────────────────────────────────────────────────────
+// ── Desktop Content ───────────────────────────────────────────────────────
 
-function SandboxContent({ projectId }: { projectId: string }) {
-  const [sandboxes, setSandboxes] = useState<Sandbox[]>([]);
+function DesktopContent({ projectId }: { projectId: string }) {
+  const [allSandboxes, setAllSandboxes] = useState<Sandbox[]>([]);
   const [configs, setConfigs] = useState<SandboxConfig[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Expanded VNC state
-  const [expandedSandboxId, setExpandedSandboxId] = useState<string | null>(null);
+  const [expandedDesktopId, setExpandedDesktopId] = useState<string | null>(null);
   const [expandedInteractive, setExpandedInteractive] = useState(true);
 
   // Config modal
-  const [configModalSandbox, setConfigModalSandbox] = useState<Sandbox | null>(null);
+  const [configModalDesktop, setConfigModalDesktop] = useState<Sandbox | null>(null);
 
   const refreshInterval = useRef<number | undefined>(undefined);
 
@@ -134,10 +129,10 @@ function SandboxContent({ projectId }: { projectId: string }) {
 
       setAgents(agentList);
       setConfigs(configList);
-      setSandboxes(sandboxList);
+      setAllSandboxes(sandboxList);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load sandboxes');
+      setError(e instanceof Error ? e.message : 'Failed to load desktops');
     } finally {
       setLoading(false);
     }
@@ -149,14 +144,14 @@ function SandboxContent({ projectId }: { projectId: string }) {
     return () => { if (refreshInterval.current) clearInterval(refreshInterval.current); };
   }, [fetchData]);
 
-  // Agents that don't have a sandbox yet
-  const agentsWithoutSandbox = agents.filter(a => !sandboxes.some(sb => sb.agent_id === a.id));
+  // Only show desktops, not headless sandboxes
+  const desktops = allSandboxes.filter(sb => sb.unit_type === 'desktop');
 
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center" role="status">
         <Loader2 className="w-6 h-6 animate-spin text-[var(--color-primary)]" />
-        <span className="ml-2 text-sm text-[var(--text-muted)]">Loading sandboxes…</span>
+        <span className="ml-2 text-sm text-[var(--text-muted)]">Loading desktops…</span>
       </div>
     );
   }
@@ -172,23 +167,23 @@ function SandboxContent({ projectId }: { projectId: string }) {
   }
 
   // ── Full VNC Expanded View ───────────────────────────────────
-  if (expandedSandboxId) {
-    const sb = sandboxes.find(s => s.id === expandedSandboxId);
+  if (expandedDesktopId) {
+    const desktop = desktops.find(d => d.id === expandedDesktopId);
     return (
       <div className="flex flex-1 flex-col min-h-0 bg-black">
         {/* Top bar */}
         <div className="flex items-center gap-3 px-4 py-2 bg-[var(--surface-card)] border-b border-[var(--border-color)]">
           <button
-            onClick={() => setExpandedSandboxId(null)}
+            onClick={() => setExpandedDesktopId(null)}
             className="flex items-center gap-1.5 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
           >
             <X className="w-4 h-4" />
             Back to Grid
           </button>
           <div className="flex-1" />
-          {sb && (
+          {desktop && (
             <span className="text-sm font-medium text-[var(--text-primary)]">
-              {sb.agent_name ?? 'Unknown'}{sb.name ? ` — ${sb.name}` : ''}
+              {desktop.name ?? 'Desktop'}{desktop.agent_name ? ` — ${desktop.agent_name}` : ''}
             </span>
           )}
           <div className="flex-1" />
@@ -207,9 +202,9 @@ function SandboxContent({ projectId }: { projectId: string }) {
 
         {/* VNC */}
         <div className="flex-1 min-h-0">
-          {expandedSandboxId && sb && (
+          {desktop && (
             <VncView
-              sandboxId={sb.orchestrator_sandbox_id}
+              sandboxId={desktop.orchestrator_sandbox_id}
               viewOnly={!expandedInteractive}
             />
           )}
@@ -226,35 +221,32 @@ function SandboxContent({ projectId }: { projectId: string }) {
           {/* Header */}
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-bold text-[var(--text-primary)]">Sandboxes</h1>
+              <h1 className="text-xl font-bold text-[var(--text-primary)]">Desktops</h1>
               <p className="text-sm text-[var(--text-muted)] mt-0.5">
-                {sandboxes.length} sandbox{sandboxes.length !== 1 ? 'es' : ''} · Click to enter remote desktop
+                {desktops.length} desktop{desktops.length !== 1 ? 's' : ''} · Click to enter remote desktop
               </p>
             </div>
-            {agentsWithoutSandbox.length > 0 && (
-              <StartSandboxDropdown projectId={projectId} agents={agentsWithoutSandbox} onStarted={fetchData} />
-            )}
+            <CreateDesktopButton projectId={projectId} onCreated={fetchData} />
           </div>
 
           {/* Grid */}
-          {sandboxes.length === 0 ? (
+          {desktops.length === 0 ? (
             <div className="rounded-xl border border-dashed border-[var(--border-color)] bg-[var(--surface-muted)] p-12 text-center">
               <Monitor className="w-10 h-10 mx-auto text-[var(--text-faint)] mb-3" />
-              <p className="text-sm text-[var(--text-muted)] mb-1">No sandboxes running</p>
-              <p className="text-xs text-[var(--text-faint)]">Start a sandbox for an agent to see it here.</p>
+              <p className="text-sm text-[var(--text-muted)] mb-1">No desktops running</p>
+              <p className="text-xs text-[var(--text-faint)]">Create a desktop to get started.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {sandboxes.map(sb => (
-                <SandboxCard
-                  key={sb.id}
-                  projectId={projectId}
-                  sandbox={sb}
+              {desktops.map(desktop => (
+                <DesktopCard
+                  key={desktop.id}
+                  desktop={desktop}
+                  agents={agents}
+                  desktops={desktops}
                   configs={configs}
-                  onExpand={() => {
-                    setExpandedSandboxId(sb.id);
-                  }}
-                  onConfigure={() => setConfigModalSandbox(sb)}
+                  onExpand={() => setExpandedDesktopId(desktop.id)}
+                  onConfigure={() => setConfigModalDesktop(desktop)}
                   onRefresh={fetchData}
                 />
               ))}
@@ -264,37 +256,44 @@ function SandboxContent({ projectId }: { projectId: string }) {
       </div>
 
       {/* Config Modal */}
-      {configModalSandbox && (
+      {configModalDesktop && (
         <ConfigModal
-          sandbox={configModalSandbox}
+          sandbox={configModalDesktop}
           configs={configs}
-          onClose={() => setConfigModalSandbox(null)}
-          onSaved={() => { setConfigModalSandbox(null); fetchData(); }}
+          onClose={() => setConfigModalDesktop(null)}
+          onSaved={() => { setConfigModalDesktop(null); fetchData(); }}
         />
       )}
     </div>
   );
 }
 
-// ── Sandbox Card ───────────────────────────────────────────────────────────
+// ── Desktop Card ──────────────────────────────────────────────────────────
 
-interface SandboxCardProps {
-  projectId: string;
-  sandbox: Sandbox;
+interface DesktopCardProps {
+  desktop: Sandbox;
+  agents: Agent[];
+  desktops: Sandbox[];
   configs: SandboxConfig[];
   onExpand: () => void;
   onConfigure: () => void;
   onRefresh: () => void;
 }
 
-function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: SandboxCardProps) {
-  const { frameUrl, isConnected } = useScreenStream(sandbox.orchestrator_sandbox_id);
-  const avatarColor = agentColor(sandbox.agent_name);
-  const statusClass = STATUS_BG[sandbox.status] ?? STATUS_BG.idle;
+function DesktopCard({ desktop, agents, desktops, onExpand, onConfigure, onRefresh }: DesktopCardProps) {
+  const { frameUrl, isConnected } = useScreenStream(desktop.orchestrator_sandbox_id);
+  const statusClass = STATUS_BG[desktop.status] ?? STATUS_BG.idle;
   const [acting, setActing] = useState(false);
   const [showSnapshots, setShowSnapshots] = useState(false);
   const [snapshots, setSnapshots] = useState<SandboxSnapshot[]>([]);
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
+  const [showAgentDropdown, setShowAgentDropdown] = useState(false);
+  const agentDropdownRef = useRef<HTMLDivElement>(null);
+
+  // One agent can only have one desktop — filter out agents already assigned to another desktop
+  const assignableAgents = agents.filter(
+    a => a.id === desktop.agent_id || !desktops.some(d => d.agent_id === a.id),
+  );
 
   const handleAction = async (action: () => Promise<unknown>) => {
     setActing(true);
@@ -309,7 +308,7 @@ function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: S
     }
     setLoadingSnapshots(true);
     try {
-      const snaps = await listSandboxSnapshots(sandbox.id);
+      const snaps = await listSandboxSnapshots(desktop.id);
       setSnapshots(snaps);
       setShowSnapshots(true);
     } catch (e) {
@@ -319,13 +318,39 @@ function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: S
     }
   };
 
+  const handleAssign = async (agentId: string) => {
+    setShowAgentDropdown(false);
+    await handleAction(async () => {
+      if (desktop.agent_id) {
+        await unassignSandbox(desktop.id);
+      }
+      await assignSandbox(desktop.id, agentId);
+    });
+  };
+
+  const handleUnassign = async () => {
+    await handleAction(() => unassignSandbox(desktop.id));
+  };
+
+  // Close agent dropdown on outside click — only listen when open
+  useEffect(() => {
+    if (!showAgentDropdown) return;
+    const handleClick = (e: MouseEvent) => {
+      if (agentDropdownRef.current && !agentDropdownRef.current.contains(e.target as Node)) {
+        setShowAgentDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showAgentDropdown]);
+
   return (
     <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] overflow-hidden hover:border-[var(--border-color-hover)] transition-colors group">
       {/* Stream preview */}
       <button type="button" onClick={onExpand} className="relative w-full aspect-video cursor-pointer overflow-hidden"
         style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)' }}>
         {frameUrl ? (
-          <img src={frameUrl} alt={`${sandbox.agent_name ?? 'Sandbox'} display`} className="w-full h-full object-cover" />
+          <img src={frameUrl} alt={`${desktop.name ?? 'Desktop'} display`} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center gap-2">
             <Monitor className="w-8 h-8 text-slate-500" />
@@ -345,24 +370,95 @@ function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: S
       {/* Info bar */}
       <div className="px-3 py-2.5">
         <div className="flex items-center gap-2 mb-1.5">
-          <div className="w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold text-white shrink-0"
-            style={{ backgroundColor: avatarColor }}>
-            {(sandbox.agent_name ?? 'U').charAt(0).toUpperCase()}
-          </div>
-          <span className="text-sm font-medium text-[var(--text-primary)] truncate flex-1">{sandbox.agent_name ?? 'Unknown'}</span>
+          <span className="text-sm font-medium text-[var(--text-primary)] truncate flex-1">
+            {desktop.name ?? 'Desktop'}
+          </span>
           <span className={`text-[10px] font-medium rounded px-1.5 py-0.5 ${statusClass}`}>
-            {sandbox.status}
+            {desktop.status}
           </span>
         </div>
 
-        <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)] mb-2">
-          <span className="font-mono">{sandbox.orchestrator_sandbox_id.slice(0, 12)}</span>
-          {sandbox.name && (
-            <>
-              <span className="text-[var(--text-faint)]">·</span>
-              <span>{sandbox.name}</span>
-            </>
+        {/* Agent assignment */}
+        <div className="flex items-center gap-2 mb-2" ref={agentDropdownRef}>
+          {desktop.agent_id ? (
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <Link2 className="w-3 h-3 text-[var(--color-primary)] shrink-0" />
+              <span className="text-[11px] text-[var(--text-secondary)] truncate">{desktop.agent_name}</span>
+              <button
+                onClick={handleUnassign}
+                disabled={acting}
+                title="Unassign agent"
+                className="p-0.5 rounded text-[var(--text-faint)] hover:text-[var(--color-danger)] transition-colors disabled:opacity-40 shrink-0"
+              >
+                <Unlink className="w-3 h-3" />
+              </button>
+            </div>
+          ) : (
+            <div className="relative flex-1">
+              <button
+                onClick={() => setShowAgentDropdown(v => !v)}
+                disabled={acting}
+                className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-40"
+              >
+                <Link2 className="w-3 h-3" />
+                Assign to agent…
+              </button>
+              {showAgentDropdown && (
+                <div className="absolute left-0 top-full mt-1 w-48 rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] shadow-lg z-20 py-1">
+                  {assignableAgents.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-[var(--text-faint)]">No available agents</div>
+                  ) : (
+                    assignableAgents.map(a => (
+                      <button
+                        key={a.id}
+                        onClick={() => handleAssign(a.id)}
+                        className="w-full text-left px-3 py-1.5 text-xs text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors"
+                      >
+                        <span className="font-medium">{a.display_name}</span>
+                        <span className="text-[var(--text-muted)] ml-1.5 capitalize">({a.role})</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
           )}
+
+          {/* Reassign dropdown (when already assigned) */}
+          {desktop.agent_id && (
+            <div className="relative">
+              <button
+                onClick={() => setShowAgentDropdown(v => !v)}
+                disabled={acting}
+                title="Reassign to different agent"
+                className="p-0.5 rounded text-[var(--text-faint)] hover:text-[var(--color-primary)] transition-colors disabled:opacity-40"
+              >
+                <Link2 className="w-3 h-3" />
+              </button>
+              {showAgentDropdown && (
+                <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] shadow-lg z-20 py-1">
+                  {assignableAgents.filter(a => a.id !== desktop.agent_id).length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-[var(--text-faint)]">No other agents</div>
+                  ) : (
+                    assignableAgents.filter(a => a.id !== desktop.agent_id).map(a => (
+                      <button
+                        key={a.id}
+                        onClick={() => handleAssign(a.id)}
+                        className="w-full text-left px-3 py-1.5 text-xs text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors"
+                      >
+                        <span className="font-medium">{a.display_name}</span>
+                        <span className="text-[var(--text-muted)] ml-1.5 capitalize">({a.role})</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)] mb-2">
+          <span className="font-mono">{desktop.orchestrator_sandbox_id.slice(0, 12)}</span>
         </div>
 
         {/* Action buttons */}
@@ -375,7 +471,7 @@ function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: S
             <Settings2 className="w-3.5 h-3.5" />
           </button>
           <button
-            onClick={() => handleAction(() => restartSandbox(sandbox.id))}
+            onClick={() => handleAction(() => restartSandbox(desktop.id))}
             disabled={acting}
             title="Restart"
             className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors disabled:opacity-40"
@@ -383,22 +479,7 @@ function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: S
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
           <button
-            onClick={() => handleAction(async () => {
-              const agentId = sandbox.agent_id;
-              await unassignSandbox(sandbox.id);
-              if (agentId) {
-                await createAndAssignSandbox(projectId, agentId);
-              }
-              await destroySandbox(sandbox.id);
-            })}
-            disabled={acting}
-            title="Reset (fresh)"
-            className="p-1.5 rounded-md text-[var(--color-warning)] hover:bg-[var(--color-warning)]/10 transition-colors disabled:opacity-40"
-          >
-            <Power className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => handleAction(() => destroySandbox(sandbox.id))}
+            onClick={() => handleAction(() => destroySandbox(desktop.id))}
             disabled={acting}
             title="Destroy"
             className="p-1.5 rounded-md text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 transition-colors disabled:opacity-40"
@@ -422,7 +503,7 @@ function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: S
               {snapshots.map(snap => (
                 <button
                   key={snap.id}
-                  onClick={() => handleAction(() => restoreSandboxSnapshot(sandbox.id, snap.id))}
+                  onClick={() => handleAction(() => restoreSandboxSnapshot(desktop.id, snap.id))}
                   disabled={acting}
                   className="w-full text-left text-[9px] px-2 py-0.5 rounded border border-[var(--border-color-subtle)] bg-[var(--surface-muted)] text-[var(--text-muted)] hover:bg-[var(--color-primary)]/20 transition-colors disabled:opacity-40 truncate"
                   title={snap.label ?? snap.id}
@@ -438,72 +519,45 @@ function SandboxCard({ projectId, sandbox, onExpand, onConfigure, onRefresh }: S
   );
 }
 
-// ── Start Sandbox Dropdown ─────────────────────────────────────────────────
+// ── Create Desktop Button ─────────────────────────────────────────────────
 
-function StartSandboxDropdown({ projectId, agents, onStarted }: { projectId: string; agents: Agent[]; onStarted: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [starting, setStarting] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+function CreateDesktopButton({ projectId, onCreated }: { projectId: string; onCreated: () => void }) {
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
-
-  const [startError, setStartError] = useState<string | null>(null);
-
-  const handleStart = async (agentId: string) => {
-    setStarting(true);
-    setStartError(null);
+  const handleCreate = async () => {
+    setCreating(true);
+    setError(null);
     try {
-      await createAndAssignSandbox(projectId, agentId);
-      onStarted();
+      await createDesktop(projectId);
+      onCreated();
     } catch (err) {
-      console.error('Failed to start sandbox:', err);
-      setStartError(err instanceof Error ? err.message : 'Failed to start sandbox');
+      console.error('Failed to create desktop:', err);
+      setError(err instanceof Error ? err.message : 'Failed to create desktop');
     } finally {
-      setStarting(false);
-      setOpen(false);
+      setCreating(false);
     }
   };
 
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
-        onClick={() => { setOpen(o => !o); setStartError(null); }}
-        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] transition-colors"
+        onClick={handleCreate}
+        disabled={creating}
+        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] transition-colors disabled:opacity-50"
       >
-        <Power className="w-4 h-4" />
-        {starting ? 'Starting…' : 'Start Sandbox'}
-        <ChevronDown className="w-3 h-3" />
+        <Plus className="w-4 h-4" />
+        {creating ? 'Creating…' : 'New Desktop'}
       </button>
-      {open && (
-        <div className="absolute right-0 mt-1 w-56 rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] shadow-lg z-20 py-1">
-          {agents.map(a => (
-            <button
-              key={a.id}
-              onClick={() => handleStart(a.id)}
-              disabled={starting}
-              className="w-full text-left px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors disabled:opacity-40"
-            >
-              <span className="font-medium">{a.display_name}</span>
-              <span className="text-[var(--text-muted)] ml-2 capitalize">({a.role})</span>
-            </button>
-          ))}
-        </div>
-      )}
-      {startError && (
+      {error && (
         <div className="absolute right-0 mt-1 w-72 rounded-lg border border-red-500/30 bg-red-950/80 shadow-lg z-20 p-3">
           <div className="flex items-start gap-2">
             <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-red-300">Failed to start sandbox</p>
-              <p className="text-[10px] text-red-400/70 mt-1 break-words">{startError}</p>
+              <p className="text-xs font-medium text-red-300">Failed to create desktop</p>
+              <p className="text-[10px] text-red-400/70 mt-1 break-words">{error}</p>
             </div>
-            <button onClick={() => setStartError(null)} className="text-red-400/60 hover:text-red-300 shrink-0">
+            <button onClick={() => setError(null)} className="text-red-400/60 hover:text-red-300 shrink-0">
               <X className="w-3 h-3" />
             </button>
           </div>
@@ -547,7 +601,7 @@ function ConfigModal({ sandbox, configs, onClose, onSaved }: ConfigModalProps) {
       >
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-base font-semibold text-[var(--text-primary)]">
-            Configure: {sandbox.agent_name ?? 'Sandbox'}
+            Configure: {sandbox.name ?? 'Desktop'}
           </h3>
           <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
             <X className="w-5 h-5" />
@@ -556,7 +610,7 @@ function ConfigModal({ sandbox, configs, onClose, onSaved }: ConfigModalProps) {
 
         <div className="space-y-3">
           <label className="block">
-            <span className="text-sm font-medium text-[var(--text-secondary)]">Sandbox Config</span>
+            <span className="text-sm font-medium text-[var(--text-secondary)]">Desktop Config</span>
             <select
               value={selectedConfigId}
               onChange={e => setSelectedConfigId(e.target.value)}
@@ -570,7 +624,7 @@ function ConfigModal({ sandbox, configs, onClose, onSaved }: ConfigModalProps) {
           </label>
 
           <div className="text-[11px] text-[var(--text-faint)]">
-            Assigning a config will run the setup script on this sandbox. This may take a few minutes.
+            Assigning a config will run the setup script on this desktop. This may take a few minutes.
           </div>
         </div>
 

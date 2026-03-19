@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom';
 import {
   AgentBuildPage,
   AgentsPage,
@@ -26,6 +26,11 @@ import { getAuthToken, healthCheck } from './api/client';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProjectProvider, useProjectContext } from './contexts/ProjectContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+
+function SandboxRedirect() {
+  const { projectId } = useParams<{ projectId: string }>();
+  return <Navigate to={`/project/${projectId}/desktops`} replace />;
+}
 
 function ProtectedRoute() {
   const { firebaseUser, user, loading } = useAuth();
@@ -105,13 +110,14 @@ function AppShell() {
           />
           {/* Primary pages (new v3 structure) */}
           <Route path="/project/:projectId/dashboard" element={<DashboardPage />} />
-          <Route path="/project/:projectId/sandbox" element={<SandboxPage />} />
+          <Route path="/project/:projectId/desktops" element={<SandboxPage />} />
           <Route path="/project/:projectId/agents" element={<AgentsPage />} />
           <Route path="/project/:projectId/workspace" element={<WorkspacePage view="workspace" />} />
           <Route path="/project/:projectId/copilot" element={<CoPilotPage />} />
           <Route path="/project/:projectId/kanban" element={<WorkspacePage view="kanban" />} />
 
           {/* Backward-compatible redirects */}
+          <Route path="/project/:projectId/sandbox" element={<SandboxRedirect />} />
           <Route path="/project/:projectId/monitor" element={<MonitorPage />} />
           <Route path="/project/:projectId/agent-build" element={<AgentBuildPage />} />
           <Route path="/project/:projectId/logs" element={<BackendLogsPage />} />

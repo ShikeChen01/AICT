@@ -861,6 +861,7 @@ export interface Sandbox {
   name: string | null;
   description: string | null;
   orchestrator_sandbox_id: string;
+  unit_type: 'headless' | 'desktop';
   status: string;
   host: string | null;
   port: number;
@@ -890,6 +891,7 @@ export interface CreateSandboxRequest {
   config_id?: string | null;
   name?: string | null;
   description?: string | null;
+  requires_desktop?: boolean;
 }
 
 export interface AssignSandboxRequest {

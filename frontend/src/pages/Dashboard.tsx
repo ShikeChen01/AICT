@@ -352,7 +352,7 @@ function DashboardContent({ projectId, projectName }: DashboardContentProps) {
             </div>
             <button
               type="button"
-              onClick={() => navigate(`/project/${projectId}/sandbox`)}
+              onClick={() => navigate(`/project/${projectId}/desktops`)}
               className="flex items-center gap-1 text-xs text-[var(--color-primary)] hover:text-[var(--color-primary-hover)] font-medium transition-colors"
             >
               Open Sandbox
@@ -369,13 +369,13 @@ function DashboardContent({ projectId, projectName }: DashboardContentProps) {
                   key={sb.id}
                   sandbox={sb}
                   agents={agents}
-                  onClick={() => navigate(`/project/${projectId}/sandbox`)}
+                  onClick={() => navigate(`/project/${projectId}/desktops`)}
                 />
               ))}
               {sandboxes.length > 4 && (
                 <button
                   type="button"
-                  onClick={() => navigate(`/project/${projectId}/sandbox`)}
+                  onClick={() => navigate(`/project/${projectId}/desktops`)}
                   className="col-span-2 text-center text-xs text-[var(--color-primary)] hover:underline py-2"
                 >
                   +{sandboxes.length - 4} more sandbox{sandboxes.length - 4 !== 1 ? 'es' : ''}

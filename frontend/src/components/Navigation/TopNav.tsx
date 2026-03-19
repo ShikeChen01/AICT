@@ -37,8 +37,8 @@ export function TopNav() {
           icon: <LayoutDashboard className="h-4 w-4" aria-hidden="true" />,
         },
         {
-          label: 'Sandbox',
-          path: `/project/${projectId}/sandbox`,
+          label: 'Desktops',
+          path: `/project/${projectId}/desktops`,
           icon: <Monitor className="h-4 w-4" aria-hidden="true" />,
         },
         {

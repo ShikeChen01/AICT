@@ -788,7 +788,7 @@ export function SettingsPage() {
           </p>
           <Button
             variant="outline"
-            onClick={() => navigate(`/project/${projectId}/sandbox`)}
+            onClick={() => navigate(`/project/${projectId}/desktops`)}
             className="inline-flex items-center gap-2"
           >
             Open Sandbox Manager

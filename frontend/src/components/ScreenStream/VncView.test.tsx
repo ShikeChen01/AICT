@@ -222,8 +222,7 @@ describe('VncView', () => {
     expect(outer).toBeInTheDocument();
     expect(outer?.className).toContain('flex');
     expect(outer?.className).toContain('flex-col');
-    expect(outer?.className).toContain('flex-1');
-    expect(outer?.className).toContain('min-h-0');
+    expect(outer?.className).toContain('h-full');
   });
 
   it('canvas container has overflow-hidden to contain noVNC content', async () => {
