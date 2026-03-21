@@ -101,6 +101,31 @@ class User(Base):
     memberships = relationship("ProjectMembership", back_populates="user", cascade="all, delete-orphan")
     sandbox_configs = relationship("SandboxConfig", back_populates="user", cascade="all, delete-orphan")
     sandboxes = relationship("Sandbox", foreign_keys="Sandbox.user_id", cascade="all, delete-orphan")
+    api_keys = relationship("UserAPIKey", back_populates="user", cascade="all, delete-orphan")
+
+
+# ── User API Keys (per-user LLM provider keys) ─────────────────────
+
+
+class UserAPIKey(Base):
+    """Per-user encrypted LLM API key for a specific provider."""
+
+    __tablename__ = "user_api_keys"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id = Column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    provider = Column(String(50), nullable=False)  # anthropic | openai | google | moonshot
+    encrypted_key = Column(Text, nullable=False)
+    display_hint = Column(String(20), nullable=True)  # "sk-...abc" for UI
+    is_valid = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    user = relationship("User", back_populates="api_keys")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="uq_user_api_keys_user_provider"),
+    )
 
 
 # ── Sandbox Configs (user-owned blueprints) ────────────────────────
