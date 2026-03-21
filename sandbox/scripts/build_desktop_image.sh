@@ -73,7 +73,7 @@ echo "==> Running virt-customize (this takes ~10 minutes)..."
 virt-customize -a "$IMAGE" --memsize 2048 \
     --run-command 'apt-get update -qq' \
     \
-    --install 'xvfb,xdotool,ffmpeg,x11-utils,x11-xserver-utils,x11vnc,openbox,dbus-x11,python3,python3-pip,python3-venv,curl,git,ca-certificates,gnupg,wget,net-tools,iputils-ping' \
+    --install 'xvfb,xdotool,ffmpeg,x11-utils,x11-xserver-utils,x11vnc,openbox,obconf,dbus-x11,xterm,tint2,python3,python3-pip,python3-venv,curl,git,ca-certificates,gnupg,wget,net-tools,iputils-ping' \
     \
     --run-command 'curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg' \
     --run-command 'echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list' \
