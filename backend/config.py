@@ -98,6 +98,14 @@ class Settings(BaseSettings):
     sandbox_jwt_secret: str = ""  # Signing secret for connection JWTs
     sandbox_jwt_ttl_seconds: int = 3600  # Token time-to-live (1 hour)
 
+    # Stripe Billing
+    stripe_secret_key: str = ""
+    stripe_publishable_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_individual_price_id: str = ""      # price_xxx for $20/mo Individual
+    stripe_team_price_id: str = ""            # price_xxx for $50/mo Team
+    tier_enforcement_enabled: bool = False    # Kill switch: disable all tier checks
+
     # Logging — Cloud Logging on Cloud Run (K_SERVICE) or when USE_CLOUD_LOGGING=true
     use_cloud_logging: bool = Field(
         default_factory=lambda: (
