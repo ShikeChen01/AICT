@@ -10,6 +10,7 @@ import {
   AgentsPage,
   AuthCallbackPage,
   BackendLogsPage,
+  BillingPage,
   CoPilotPage,
   DashboardPage,
   LoginPage,
@@ -92,6 +93,7 @@ function AppShell() {
         <Route element={<ProtectedRoute />}>
           <Route path="/projects" element={<ProjectsPage onProjectsUpdated={refreshProjects} />} />
           <Route path="/settings" element={<UserSettingsPage />} />
+          <Route path="/settings/billing" element={<BillingPage />} />
           <Route path="/project/:projectId/settings" element={<SettingsPage />} />
 
           <Route

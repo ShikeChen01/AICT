@@ -1,4 +1,5 @@
 export { AgentBuildPage } from './AgentBuild';
+export { BillingPage } from './Billing';
 export { AgentsPage } from './Agents';
 export { CoPilotPage } from './CoPilot';
 export { DashboardPage } from './Dashboard';

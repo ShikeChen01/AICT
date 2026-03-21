@@ -827,6 +827,41 @@ export async function assignSandboxConfig(agentId: string, configId: string | nu
 }
 
 
+// ── Billing ──────────────────────────────────────────────────────────────
+
+export interface SubscriptionInfo {
+  tier: string;
+  status: string;
+  cancel_at_period_end: boolean;
+  current_period_end: string | null;
+}
+
+export interface UsageSummary {
+  tier: string;
+  period_start: string;
+  period_end: string;
+  headless_seconds_used: number;
+  headless_seconds_included: number;
+  desktop_seconds_used: number;
+  desktop_seconds_included: number;
+}
+
+export async function getSubscription(): Promise<SubscriptionInfo> {
+  return request<SubscriptionInfo>('GET', '/billing/subscription');
+}
+
+export async function getUsage(): Promise<UsageSummary> {
+  return request<UsageSummary>('GET', '/billing/usage');
+}
+
+export async function createCheckoutSession(tier: string, returnUrl: string): Promise<{ checkout_url: string }> {
+  return request<{ checkout_url: string }>('POST', '/billing/checkout-session', { tier, return_url: returnUrl });
+}
+
+export async function createPortalSession(returnUrl: string): Promise<{ portal_url: string }> {
+  return request<{ portal_url: string }>('POST', '/billing/portal-session', { return_url: returnUrl });
+}
+
 // ─── WebSocket Client ────────────────────────────────────────────────
 
 type WSEventHandler = (event: WSEvent) => void;
