@@ -11,10 +11,10 @@
 
 set -euo pipefail
 
-VM_HOST="${EXTERNAL_IP:-34.9.162.152}"
+VM_HOST="${EXTERNAL_IP:-34.172.85.22}"
 VM_USER="${VM_USER:-$(whoami)}"
-GCP_ZONE="${GCP_ZONE:-us-central1-c}"
-GCP_INSTANCE="${GCP_INSTANCE_NAME:-aictsandboxv1}"
+GCP_ZONE="${GCP_ZONE:-us-central1-a}"
+GCP_INSTANCE="${GCP_INSTANCE_NAME:-sandbox-dev}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 

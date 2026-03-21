@@ -90,6 +90,10 @@ async def _resolve_sandbox_connection(sandbox_id: str) -> tuple[str | None, int,
             host = data.get("host")
             port = data.get("port", data.get("host_port", 8080))
             auth_token = data.get("auth_token")
+            # Pool manager detail responses may omit `host` — use configured host
+            if not host:
+                from backend.config import settings as _settings
+                host = _settings.sandbox_vm_internal_host or _settings.sandbox_vm_host or _settings.sandbox_orchestrator_host
         except Exception as exc:
             logger.warning("Sandbox %s orchestrator lookup failed: %s", sandbox_id, exc)
 
@@ -108,6 +112,12 @@ async def _resolve_sandbox_connection(sandbox_id: str) -> tuple[str | None, int,
         except Exception as exc:
             logger.warning("Dev tunnel failed for sandbox %s, falling back to direct: %s: %s", sandbox_id, type(exc).__name__, exc)
 
+    # Prefer internal VPC host when available — the DB may store the external IP
+    # but Cloud Run should reach the sandbox VM via VPC connector.
+    from backend.config import settings
+    if settings.sandbox_vm_internal_host and host == settings.sandbox_vm_host:
+        host = settings.sandbox_vm_internal_host
+
     return (host, port or 8080, auth_token)
 
 
@@ -124,8 +134,18 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
         await _safe_close_viewer(viewer_ws, 4004, "Sandbox not registered")
         return
 
-    rest_base_url = f"http://{host}:{port}"
-    upstream_url = f"ws://{host}:{port}/ws/vnc?token={auth_token}"
+    # For desktop VMs on the legacy sandbox VM, route through the pool manager's
+    # VNC proxy (port 9090) instead of iptables DNAT on the desktop port.
+    # The pool manager bridges to the sub-VM's bridge IP internally.
+    _vm_hosts = {settings.sandbox_vm_host, settings.sandbox_vm_internal_host} - {""}
+    if host in _vm_hosts and port != settings.sandbox_vm_pool_port:
+        pm_host = settings.sandbox_vm_internal_host or settings.sandbox_vm_host
+        pm_port = settings.sandbox_vm_pool_port
+        upstream_url = f"ws://{pm_host}:{pm_port}/ws/vnc/{sandbox_id}?token={auth_token}"
+        rest_base_url = f"http://{pm_host}:{pm_port}"
+    else:
+        upstream_url = f"ws://{host}:{port}/ws/vnc?token={auth_token}"
+        rest_base_url = f"http://{host}:{port}"
     logger.info(
         "VNC proxy opening upstream to sandbox %s (%s)",
         sandbox_id,

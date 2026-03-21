@@ -2,7 +2,7 @@
 #
 # setup_grand_vm.sh — Idempotent provisioning script for the AICT Grand-VM.
 #
-# Target: GCE e2-standard-8 (8 vCPU, 16 GB RAM) with 500 GB SSD.
+# Target: GCE n2-standard-2 (2 vCPU, 8 GB RAM, KVM nested virt) with 50 GB SSD.
 # Sets up: Docker CE, QEMU/KVM, libvirt, bridge networking, base images,
 #          pool manager service, and watchdog service.
 #
@@ -273,16 +273,22 @@ EXTERNAL_HOST=${EXTERNAL_HOST}
 PORT=9090
 STATE_FILE=/opt/sandbox/state.json
 
-# Grand-VM resource budget
-BUDGET_CPU=6.5
-BUDGET_RAM_GB=14.0
-BUDGET_DISK_GB=400
+# Grand-VM resource budget (n2-standard-2: 2 vCPU, 8 GB)
+GRAND_VM_TOTAL_CPU=2
+GRAND_VM_TOTAL_RAM_GB=8
+RESERVED_CPU=0.5
+RESERVED_RAM_GB=1.0
+BUDGET_CPU=1.5
+BUDGET_RAM_GB=7.0
+BUDGET_DISK_GB=40
 
-# Docker
+# Docker headless
 DOCKER_IMAGE=sandbox-base
 CGROUP_PARENT=sandbox.slice
+MAX_HEADLESS=5
 
-# Desktop sub-VMs
+# Desktop sub-VMs (KVM accelerated on N2)
+MAX_DESKTOP=1
 DESKTOP_BASE_IMAGE=/data/images/ubuntu-desktop-base.qcow2
 DESKTOP_IMAGE_DIR=/data/vms
 VM_BRIDGE=br0

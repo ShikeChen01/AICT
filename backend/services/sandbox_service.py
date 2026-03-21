@@ -243,7 +243,7 @@ class OrchestratorClient:
             body["os_image"] = os_image
         if project_id:
             body["project_id"] = project_id
-        read_timeout = 300.0 if setup_script else 120.0
+        read_timeout = 300.0 if (setup_script or requires_desktop) else 120.0
         timeout = httpx.Timeout(read_timeout, connect=10.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(

@@ -196,7 +196,8 @@ class VMManager:
 
     @staticmethod
     def setup_port_forward(host_port: int, vm_ip: str) -> None:
-        """Add iptables DNAT rule: host_port → vm_ip:8080."""
+        """Add iptables rules: host_port → vm_ip:8080."""
+        # DNAT for external traffic (PREROUTING)
         subprocess.run(
             [
                 "iptables", "-t", "nat", "-A", "PREROUTING",
@@ -206,7 +207,7 @@ class VMManager:
             check=True,
             capture_output=True,
         )
-        # Also add for localhost access on the host itself
+        # DNAT for localhost traffic (OUTPUT)
         subprocess.run(
             [
                 "iptables", "-t", "nat", "-A", "OUTPUT",
@@ -216,10 +217,20 @@ class VMManager:
             check=True,
             capture_output=True,
         )
+        # FORWARD accept for DNAT'd traffic (Docker sets FORWARD policy to DROP)
+        subprocess.run(
+            [
+                "iptables", "-I", "DOCKER-USER",
+                "-p", "tcp", "-d", vm_ip, "--dport", str(config.CONTAINER_INTERNAL_PORT),
+                "-j", "ACCEPT",
+            ],
+            check=True,
+            capture_output=True,
+        )
 
     @staticmethod
     def remove_port_forward(host_port: int, vm_ip: str) -> None:
-        """Remove iptables DNAT rules for a specific host port."""
+        """Remove iptables DNAT and FORWARD rules for a specific host port."""
         for chain in ("PREROUTING", "OUTPUT"):
             if chain == "OUTPUT":
                 extra = ["-d", "127.0.0.1"]
@@ -239,6 +250,19 @@ class VMManager:
                 )
             except subprocess.CalledProcessError:
                 pass  # Rule may not exist
+        # Remove FORWARD accept rule
+        try:
+            subprocess.run(
+                [
+                    "iptables", "-D", "DOCKER-USER",
+                    "-p", "tcp", "-d", vm_ip, "--dport", str(config.CONTAINER_INTERNAL_PORT),
+                    "-j", "ACCEPT",
+                ],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
 
     # ── libvirt domain XML ────────────────────────────────────────────────────
 
@@ -268,6 +292,7 @@ class VMManager:
               <vcpu placement='static'>{config.DESKTOP_VCPUS}</vcpu>
               <os>
                 <type arch='x86_64'>hvm</type>
+                <loader readonly='yes' type='pflash'>/usr/share/OVMF/OVMF_CODE.fd</loader>
                 <boot dev='hd'/>
               </os>
               <features>
@@ -380,6 +405,7 @@ class VMManager:
             dom.undefineFlags(
                 libvirt.VIR_DOMAIN_UNDEFINE_MANAGED_SAVE
                 | libvirt.VIR_DOMAIN_UNDEFINE_SNAPSHOTS_METADATA
+                | libvirt.VIR_DOMAIN_UNDEFINE_NVRAM
             )
         except Exception:
             pass  # Domain may already be gone

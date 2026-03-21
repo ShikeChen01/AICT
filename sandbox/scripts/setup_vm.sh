@@ -161,7 +161,7 @@ log "Docker image built."
 # ── 9. Pool manager virtualenv + systemd ────────────────────────────────────
 
 log "Setting up pool manager virtualenv..."
-python3 -m venv "${PM_DIR}/venv"
+python3 -m venv --system-site-packages "${PM_DIR}/venv"
 "${PM_DIR}/venv/bin/pip" install --quiet -r "${PM_DIR}/requirements.txt"
 
 log "Installing pool manager systemd service..."

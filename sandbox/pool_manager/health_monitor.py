@@ -69,6 +69,11 @@ class HealthMonitor:
             if u.status in (UnitStatus.RESETTING.value, UnitStatus.PROMOTING.value, UnitStatus.DEMOTING.value):
                 continue
 
+            # Boot grace period: skip health checks for desktop VMs still booting.
+            # Desktop sub-VMs need ~90-120s for cloud-init + service startup.
+            if u.is_desktop and u.age_seconds() < 180:
+                continue
+
             if u.status == UnitStatus.UNHEALTHY.value:
                 print(f"[health-monitor] Evicting permanently unhealthy unit {u.unit_id} ({u.unit_type})")
                 await self._evict(u)
@@ -137,7 +142,12 @@ class HealthMonitor:
     # ── Ping ──────────────────────────────────────────────────────────────────
 
     async def _ping(self, u: UnitState) -> bool:
-        url = f"http://127.0.0.1:{u.host_port}/health"
+        # For desktop VMs, use bridge IP directly (iptables OUTPUT DNAT
+        # is unreliable when Docker's FORWARD policy is DROP).
+        if u.is_desktop and u.vm_ip:
+            url = f"http://{u.vm_ip}:8080/health"
+        else:
+            url = f"http://127.0.0.1:{u.host_port}/health"
         headers = {"Authorization": f"Bearer {u.auth_token}"}
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:

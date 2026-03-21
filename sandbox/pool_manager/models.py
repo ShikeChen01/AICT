@@ -80,6 +80,13 @@ class UnitState:
         self.last_command_at = now
         self.last_used_at = now
 
+    def age_seconds(self) -> float:
+        """Seconds since this unit was created."""
+        created = datetime.fromisoformat(self.created_at)
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        return (_now() - created).total_seconds()
+
     def idle_seconds(self) -> float:
         last = datetime.fromisoformat(self.last_used_at)
         if last.tzinfo is None:

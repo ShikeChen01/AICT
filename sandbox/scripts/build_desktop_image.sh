@@ -21,6 +21,13 @@ if [ ! -f "$IMAGE" ]; then
     exit 1
 fi
 
+# Ensure image is large enough for package installs (~8 GB minimum)
+VSIZE=$(qemu-img info --output=json "$IMAGE" | python3 -c "import sys,json; print(json.load(sys.stdin)['virtual-size'])")
+if [ "$VSIZE" -lt 8000000000 ]; then
+    echo "==> Resizing image to 8G (was $(( VSIZE / 1073741824 ))G)..."
+    qemu-img resize "$IMAGE" 8G
+fi
+
 echo "==> Building desktop base image: $IMAGE"
 echo "==> Server code: $SERVER_DIR"
 echo "==> Entrypoint: $ENTRYPOINT"
@@ -37,7 +44,7 @@ chmod +x "$STAGING/entrypoint.sh"
 cat > "$STAGING/sandbox.service" << 'EOF'
 [Unit]
 Description=AICT Sandbox Server
-After=cloud-init.target network-online.target
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -46,7 +53,7 @@ WorkingDirectory=/opt/sandbox-server
 EnvironmentFile=-/etc/sandbox/env
 ExecStart=/opt/sandbox-server/entrypoint.sh
 Restart=always
-RestartSec=5
+RestartSec=3
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=sandbox-server
@@ -56,6 +63,11 @@ WantedBy=multi-user.target
 EOF
 
 export LIBGUESTFS_BACKEND=direct
+
+echo "==> Expanding filesystem inside image..."
+virt-customize -a "$IMAGE" --memsize 2048 \
+    --run-command 'growpart /dev/sda 1 || true' \
+    --run-command 'resize2fs /dev/sda1 || true'
 
 echo "==> Running virt-customize (this takes ~10 minutes)..."
 virt-customize -a "$IMAGE" --memsize 2048 \
@@ -80,7 +92,7 @@ virt-customize -a "$IMAGE" --memsize 2048 \
     --copy-in "$STAGING/requirements.txt:/opt/sandbox-server/" \
     --copy-in "$STAGING/entrypoint.sh:/opt/sandbox-server/" \
     \
-    --run-command 'pip3 install --no-cache-dir --break-system-packages -r /opt/sandbox-server/requirements.txt' \
+    --run-command 'pip3 install --no-cache-dir -r /opt/sandbox-server/requirements.txt' \
     \
     --copy-in "$STAGING/sandbox.service:/etc/systemd/system/" \
     --run-command 'systemctl enable sandbox.service' \

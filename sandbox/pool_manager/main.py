@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -183,8 +183,14 @@ async def _wait_for_ready(
     auth_token: str,
     timeout: float = 30.0,
     poll_interval: float = 1.0,
+    vm_ip: str | None = None,
 ) -> bool:
-    url = f"http://127.0.0.1:{host_port}/health"
+    # For desktop VMs, poll the bridge IP directly (iptables OUTPUT DNAT
+    # is unreliable when Docker's FORWARD policy is DROP).
+    if vm_ip:
+        url = f"http://{vm_ip}:{config.CONTAINER_INTERNAL_PORT}/health"
+    else:
+        url = f"http://127.0.0.1:{host_port}/health"
     headers = {"Authorization": f"Bearer {auth_token}"}
     deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:
@@ -387,7 +393,7 @@ async def session_start(
       - true  → QEMU/KVM desktop sub-VM
     """
     unit_type = UnitType.DESKTOP.value if body.requires_desktop else UnitType.HEADLESS.value
-    timeout = 60.0 if body.requires_desktop else 30.0
+    timeout = 180.0 if body.requires_desktop else 30.0
 
     host = _external_host()
 
@@ -397,7 +403,7 @@ async def session_start(
         if existing and existing.status in (UnitStatus.ASSIGNED.value, UnitStatus.IDLE.value):
             if existing.status == UnitStatus.IDLE.value:
                 _pool.assign(existing.unit_id, body.agent_id)
-            ready = await _wait_for_ready(existing.host_port, existing.auth_token, timeout=5.0, poll_interval=0.5)
+            ready = await _wait_for_ready(existing.host_port, existing.auth_token, timeout=5.0, poll_interval=0.5, vm_ip=existing.vm_ip)
             return JSONResponse({
                 "sandbox_id": existing.unit_id,
                 "host": host,
@@ -414,7 +420,7 @@ async def session_start(
         u = idle_units[0]
         if body.agent_id:
             _pool.assign(u.unit_id, body.agent_id)
-        ready = await _wait_for_ready(u.host_port, u.auth_token, timeout=5.0, poll_interval=0.5)
+        ready = await _wait_for_ready(u.host_port, u.auth_token, timeout=5.0, poll_interval=0.5, vm_ip=u.vm_ip)
         return JSONResponse({
             "sandbox_id": u.unit_id,
             "host": host,
@@ -431,7 +437,7 @@ async def session_start(
 
     try:
         if body.requires_desktop:
-            u = await _create_desktop(unit_id, auth_token, body.persistent)
+            u = await _create_desktop(unit_id, auth_token, persistent=True)  # desktops are always persistent
         else:
             u = await _create_headless(unit_id, auth_token, body.persistent)
     except ExhaustedError as exc:
@@ -440,7 +446,7 @@ async def session_start(
     if body.agent_id:
         _pool.assign(u.unit_id, body.agent_id)
 
-    ready = await _wait_for_ready(u.host_port, u.auth_token, timeout=timeout)
+    ready = await _wait_for_ready(u.host_port, u.auth_token, timeout=timeout, vm_ip=u.vm_ip)
     if not ready:
         print(f"[pool-manager] WARNING: unit {u.unit_id} did not become ready in {timeout}s")
 
@@ -579,11 +585,12 @@ async def promote_unit(
         raise HTTPException(status_code=500, detail=f"VM creation failed: {exc}") from exc
 
     # Wait for VM to be ready
-    ready = await _wait_for_ready(desktop_port, u.auth_token, timeout=60.0)
+    desktop_vm_ip = VMManager._static_ip_for_port(desktop_port) if VMManager else None
+    ready = await _wait_for_ready(desktop_port, u.auth_token, timeout=60.0, vm_ip=desktop_vm_ip)
 
     # Migrate files from Docker volume to VM
     if ready and u.volume_name:
-        vm_ip = VMManager._static_ip_for_port(desktop_port)
+        vm_ip = desktop_vm_ip or VMManager._static_ip_for_port(desktop_port)
         await loop.run_in_executor(
             None, VMManager.migrate_files_to_vm,
             u.volume_name, new_id, vm_ip, u.auth_token,
@@ -812,7 +819,7 @@ async def restart_unit(
             raise HTTPException(status_code=500, detail=f"VM restart failed: {exc}") from exc
 
     timeout = 60.0 if u.is_desktop else 30.0
-    ready = await _wait_for_ready(u.host_port, u.auth_token, timeout=timeout)
+    ready = await _wait_for_ready(u.host_port, u.auth_token, timeout=timeout, vm_ip=u.vm_ip)
 
     if not ready:
         u3 = _pool.get(unit_id)
@@ -928,6 +935,79 @@ async def create_snapshot(
         raise HTTPException(status_code=501, detail="Snapshots unavailable for this unit type")
 
     return JSONResponse({"ok": True, "snapshot_name": snapshot_name, "unit_id": unit_id})
+
+
+# ── VNC WebSocket proxy ──────────────────────────────────────────────────────
+
+
+@app.websocket("/ws/vnc/{unit_id}")
+async def vnc_proxy_ws(ws: WebSocket, unit_id: str):
+    """Proxy VNC WebSocket from external clients to the sub-VM's sandbox server.
+
+    The backend (Cloud Run) connects here instead of going through iptables DNAT
+    on the desktop port, since VPC→DNAT→bridge routing is unreliable.
+    """
+    import websockets
+
+    u = _pool.get(unit_id)
+    if u is None:
+        await ws.close(code=4004, reason="Unit not found")
+        return
+    if not u.is_desktop or not u.vm_ip:
+        await ws.close(code=4005, reason="Not a desktop unit")
+        return
+
+    # Verify auth token from query params
+    token = ws.query_params.get("token", "")
+    if token != u.auth_token:
+        await ws.close(code=4001, reason="Invalid token")
+        return
+
+    await ws.accept(subprotocol="binary")
+
+    upstream_url = f"ws://{u.vm_ip}:{config.CONTAINER_INTERNAL_PORT}/ws/vnc?token={u.auth_token}"
+    try:
+        upstream = await asyncio.wait_for(
+            websockets.connect(
+                upstream_url,
+                open_timeout=6,
+                max_size=2**22,
+                subprotocols=[websockets.Subprotocol("binary")],
+                ping_interval=30,
+                ping_timeout=10,
+            ).__aenter__(),
+            timeout=8,
+        )
+    except Exception as exc:
+        print(f"[vnc-proxy] Failed to connect upstream for {unit_id}: {exc}")
+        await ws.close(code=1011, reason=f"VNC upstream unreachable: {type(exc).__name__}")
+        return
+
+    try:
+        async def frontend_to_sandbox():
+            while True:
+                data = await ws.receive_bytes()
+                await upstream.send(data)
+
+        async def sandbox_to_frontend():
+            async for msg in upstream:
+                if isinstance(msg, bytes):
+                    await ws.send_bytes(msg)
+                else:
+                    await ws.send_text(msg)
+
+        f2s = asyncio.create_task(frontend_to_sandbox())
+        s2f = asyncio.create_task(sandbox_to_frontend())
+        done, pending = await asyncio.wait({f2s, s2f}, return_when=asyncio.FIRST_COMPLETED)
+        for t in pending:
+            t.cancel()
+    except Exception:
+        pass
+    finally:
+        try:
+            await upstream.close()
+        except Exception:
+            pass
 
 
 class SnapshotRestoreRequest(BaseModel):
