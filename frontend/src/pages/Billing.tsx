@@ -79,16 +79,16 @@ const PLANS: PlanDef[] = [
   {
     tier: 'individual',
     label: 'Individual',
-    price: '$29 / month',
+    price: '$20 / month',
     description: 'For solo developers who need more compute.',
-    highlights: ['50h headless compute', '10h desktop compute', 'Priority support'],
+    highlights: ['200h headless compute', '200h desktop compute'],
   },
   {
     tier: 'team',
     label: 'Team',
-    price: '$99 / month',
+    price: '$50 / month',
     description: 'For teams that need shared agent infrastructure.',
-    highlights: ['200h headless compute', '50h desktop compute', 'Team seats', 'SLA'],
+    highlights: ['1000h headless compute', '1000h desktop compute', '3 team seats'],
   },
 ];
 
