@@ -532,6 +532,7 @@ export interface UserProfile {
   email: string;
   display_name: string | null;
   github_token_set: boolean;
+  tier?: string;
   created_at: string;
   updated_at: string;
 }

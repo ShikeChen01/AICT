@@ -9,6 +9,7 @@ class UserResponse(BaseModel):
     email: str
     display_name: str | None
     github_token_set: bool = Field(default=False)
+    tier: str = "free"
     created_at: datetime
     updated_at: datetime
 

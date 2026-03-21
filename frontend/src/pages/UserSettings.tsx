@@ -8,6 +8,7 @@ import { Button, Card, Input } from '../components/ui';
 import { SandboxConfigEditor } from '../components/Sandbox/SandboxConfigEditor';
 import { APIKeyManager } from '../components/APIKeyManager';
 import { AppLayout } from '../components/Layout';
+import { TierBadge } from '../components/TierBadge';
 
 export function UserSettingsPage() {
   const { user, refreshProfile, logout } = useAuth();
@@ -47,7 +48,10 @@ export function UserSettingsPage() {
     <div className="min-h-screen bg-[var(--app-bg)] p-6">
       <Card className="mx-auto max-w-2xl p-6">
         <h1 className="mb-2 text-xl font-semibold">User Settings</h1>
-        <p className="mb-6 text-sm text-gray-600">{user.email}</p>
+        <div className="mb-6 flex items-center gap-2">
+          <p className="text-sm text-gray-600">{user.email}</p>
+          <TierBadge tier={user?.tier ?? 'free'} />
+        </div>
         <form onSubmit={handleSave} className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1">Display name</label>

@@ -45,6 +45,9 @@ import type { Project, Agent, SandboxConfig, Sandbox, SandboxSnapshot } from '..
 import { AppLayout } from '../components/Layout';
 import { useScreenStream } from '../hooks/useScreenStream';
 import { VncView } from '../components/ScreenStream';
+import { useBilling } from '../hooks/useBilling';
+import { formatHours } from '../utils/billingUtils';
+import { UpgradeBanner } from '../components/UpgradeBanner';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -109,6 +112,7 @@ function DesktopContent({ projectId }: { projectId: string }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { usage } = useBilling();
 
   // Expanded VNC state
   const [expandedDesktopId, setExpandedDesktopId] = useState<string | null>(null);
@@ -226,7 +230,15 @@ function DesktopContent({ projectId }: { projectId: string }) {
                 {desktops.length} desktop{desktops.length !== 1 ? 's' : ''} · Click to enter remote desktop
               </p>
             </div>
-            <CreateDesktopButton projectId={projectId} onCreated={fetchData} />
+            <div className="flex flex-col items-end gap-1">
+              <CreateDesktopButton projectId={projectId} onCreated={fetchData} />
+              {usage && (
+                <div className="text-xs text-[var(--text-muted)]">
+                  Headless: {formatHours(usage.headless_seconds_included - usage.headless_seconds_used)} remaining |
+                  Desktop: {formatHours(usage.desktop_seconds_included - usage.desktop_seconds_used)} remaining
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Grid */}
@@ -524,16 +536,23 @@ function DesktopCard({ desktop, agents, desktops, onExpand, onConfigure, onRefre
 function CreateDesktopButton({ projectId, onCreated }: { projectId: string; onCreated: () => void }) {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tierError, setTierError] = useState<{ error: 'tier_limit'; message: string; current_tier: string; upgrade_url: string } | null>(null);
 
   const handleCreate = async () => {
     setCreating(true);
     setError(null);
+    setTierError(null);
     try {
       await createDesktop(projectId);
       onCreated();
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to create desktop:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create desktop');
+      const apiErr = err as { status?: number; detail?: { error?: string; message?: string; current_tier?: string; upgrade_url?: string } };
+      if (apiErr?.status === 403 || apiErr?.detail?.error === 'tier_limit') {
+        setTierError(apiErr.detail as { error: 'tier_limit'; message: string; current_tier: string; upgrade_url: string });
+      } else {
+        setError(err instanceof Error ? (err as Error).message : 'Failed to create desktop');
+      }
     } finally {
       setCreating(false);
     }
@@ -549,6 +568,11 @@ function CreateDesktopButton({ projectId, onCreated }: { projectId: string; onCr
         <Plus className="w-4 h-4" />
         {creating ? 'Creating…' : 'New Desktop'}
       </button>
+      {tierError && (
+        <div className="absolute right-0 mt-1 w-80 z-20">
+          <UpgradeBanner detail={tierError} />
+        </div>
+      )}
       {error && (
         <div className="absolute right-0 mt-1 w-72 rounded-lg border border-red-500/30 bg-red-950/80 shadow-lg z-20 p-3">
           <div className="flex items-start gap-2">
