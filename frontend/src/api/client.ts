@@ -1035,3 +1035,32 @@ export async function searchKnowledge(
 export async function getKnowledgeStats(projectId: string): Promise<KnowledgeStatsResponse> {
   return request<KnowledgeStatsResponse>('GET', `/knowledge/${projectId}/stats`);
 }
+
+// ── User API Keys ─────────────────────────────────────────────────────
+
+export interface UserAPIKey {
+  provider: string;
+  display_hint: string | null;
+  is_valid: boolean;
+}
+
+export interface APIKeyTestResult {
+  valid: boolean;
+  error?: string;
+}
+
+export async function listAPIKeys(): Promise<UserAPIKey[]> {
+  return request<UserAPIKey[]>('GET', '/auth/api-keys');
+}
+
+export async function upsertAPIKey(provider: string, apiKey: string): Promise<UserAPIKey> {
+  return request<UserAPIKey>('PUT', `/auth/api-keys/${provider}`, { api_key: apiKey });
+}
+
+export async function deleteAPIKey(provider: string): Promise<void> {
+  return request<void>('DELETE', `/auth/api-keys/${provider}`);
+}
+
+export async function testAPIKey(provider: string): Promise<APIKeyTestResult> {
+  return request<APIKeyTestResult>('POST', `/auth/api-keys/${provider}/test`);
+}

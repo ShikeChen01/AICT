@@ -6,6 +6,7 @@ import { updateMe } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { Button, Card, Input } from '../components/ui';
 import { SandboxConfigEditor } from '../components/Sandbox/SandboxConfigEditor';
+import { APIKeyManager } from '../components/APIKeyManager';
 import { AppLayout } from '../components/Layout';
 
 export function UserSettingsPage() {
@@ -93,6 +94,9 @@ export function UserSettingsPage() {
             </Button>
           </div>
         </form>
+        <div className="border-t border-[var(--border)] pt-4 mt-4">
+          <APIKeyManager />
+        </div>
       </Card>
 
       {/* Sandbox Configs — user-level reusable setup profiles */}
