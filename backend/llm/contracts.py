@@ -62,6 +62,7 @@ class LLMRequest:
     temperature: float = 0.2
     max_tokens: int = 1024
     provider: str | None = None
+    api_key: str | None = None
 
 
 @dataclass(slots=True)

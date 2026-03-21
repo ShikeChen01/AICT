@@ -70,28 +70,34 @@ class ProviderRouter:
             return "openai"
         return "none"
 
-    def get_provider(self, model: str, provider: str | None = None) -> BaseLLMProvider:
+    def get_provider(
+        self, model: str, provider: str | None = None, api_key: str | None = None
+    ) -> BaseLLMProvider:
         selected = self.resolve_provider_name(model, provider)
         if selected == "anthropic":
-            if not settings.claude_api_key:
+            key = api_key or settings.claude_api_key
+            if not key:
                 raise RuntimeError("CLAUDE_API_KEY is not configured")
-            return AnthropicSDKProvider(api_key=settings.claude_api_key)
+            return AnthropicSDKProvider(api_key=key)
         if selected == "google":
-            if not settings.gemini_api_key:
+            key = api_key or settings.gemini_api_key
+            if not key:
                 raise RuntimeError("GEMINI_API_KEY is not configured")
             return GeminiProviderAdapter(
-                api_key=settings.gemini_api_key,
+                api_key=key,
                 timeout_seconds=self.timeout_seconds,
             )
         if selected == "openai":
-            if not settings.openai_api_key:
+            key = api_key or settings.openai_api_key
+            if not key:
                 raise RuntimeError("OPENAI_API_KEY is not configured")
-            return OpenAISDKProvider(api_key=settings.openai_api_key)
+            return OpenAISDKProvider(api_key=key)
         if selected in {"kimi", "moonshot"}:
-            if not settings.moonshot_api_key:
+            key = api_key or settings.moonshot_api_key
+            if not key:
                 raise RuntimeError("MOONSHOT_API_KEY is not configured")
             return KimiSDKProvider(
-                api_key=settings.moonshot_api_key,
+                api_key=key,
                 base_url=settings.moonshot_base_url,
             )
         raise RuntimeError(

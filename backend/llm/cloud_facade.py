@@ -20,7 +20,8 @@ class CloudLLMFacade:
     async def complete(self, request: LLMRequest) -> LLMResponse:
         normalized_request, adapter = normalize_request_tool_names(request)
         provider = self.router.get_provider(
-            normalized_request.model, normalized_request.provider
+            normalized_request.model, normalized_request.provider,
+            api_key=normalized_request.api_key,
         )
         response = await provider.complete(normalized_request)
         if adapter is None:
@@ -36,6 +37,7 @@ class CloudLLMFacade:
         tools: list[dict[str, Any]],
         provider: str | None = None,
         max_tokens: int | None = None,
+        api_key: str | None = None,
     ) -> LLMResponse:
         canonical_messages: list[LLMMessage] = []
         for msg in messages:
@@ -88,6 +90,7 @@ class CloudLLMFacade:
                 tools=canonical_tools,
                 temperature=settings.llm_temperature,
                 max_tokens=effective_max_tokens,
+                api_key=api_key,
             )
         )
 

@@ -271,6 +271,7 @@ class LLMService:
         tools: list[dict[str, Any]],
         *,
         max_tokens: int | None = None,
+        api_key: str | None = None,
     ) -> tuple[str, list[dict[str, Any]], Any]:
         """
         Non-streaming chat with tool support. Used by the universal agent loop.
@@ -301,6 +302,7 @@ class LLMService:
                 tools=tools,
                 provider=provider,
                 max_tokens=effective_max_tokens,
+                api_key=api_key,
             )
             logger.info(
                 "LLM facade response: provider=%s model=%s request_id=%s tool_calls=%d in=%d out=%d",

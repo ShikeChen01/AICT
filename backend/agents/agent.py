@@ -39,8 +39,10 @@ from backend.db.repositories.llm_usage import LLMUsageRepository
 from backend.db.repositories.messages import AgentMessageRepository
 from backend.db.repositories.project_secrets import ProjectSecretsRepository
 from backend.db.repositories.project_settings import ProjectSettingsRepository
+from backend.db.repositories.user_api_keys import UserAPIKeyRepository
 from backend.llm.contracts import ImagePart
 from backend.llm.model_resolver import resolve_provider
+from backend.llm.router import ProviderRouter
 from backend.llm.pricing import estimate_cost_usd
 from backend.prompts.assembly import PromptAssembly
 from backend.services.agent_service import AgentService
@@ -610,6 +612,42 @@ class Agent:
         session.loopbacks = 0
         return await self._dispatch_tool_calls(tool_calls, session)
 
+    # ── User API key resolution ──
+
+    _PROVIDER_TO_KEY_PROVIDER: dict[str, str] = {
+        "anthropic": "anthropic",
+        "google": "google",
+        "openai": "openai",
+        "kimi": "moonshot",
+        "moonshot": "moonshot",
+    }
+
+    async def _resolve_user_api_key(self) -> str | None:
+        """Look up a per-user API key for the current model's provider.
+
+        Returns the decrypted key or None. Fails silently so the agent
+        falls back to server-wide keys on any error.
+        """
+        try:
+            from backend.config import settings as app_settings
+
+            owner_id = self._project.owner_id
+            if not owner_id:
+                return None
+            provider_name = ProviderRouter().resolve_provider_name(
+                self._resolved_model, self._resolved_provider or None
+            )
+            key_provider = self._PROVIDER_TO_KEY_PROVIDER.get(provider_name)
+            if not key_provider:
+                return None
+            repo = UserAPIKeyRepository(
+                self._db, encryption_key=app_settings.secret_encryption_key
+            )
+            return await repo.get_decrypted_key(owner_id, key_provider)
+        except Exception as exc:
+            logger.debug("Could not resolve user API key: %s", exc)
+            return None
+
     # ── LLM call ──
 
     async def _call_llm(self) -> tuple[str | None, list[dict] | None, Any]:
@@ -620,12 +658,14 @@ class Agent:
         from backend.config import settings as app_settings
 
         try:
+            user_api_key = await self._resolve_user_api_key()
             content, tool_calls, llm_response = await self._services.llm.chat_completion_with_tools(
                 model=self._resolved_model,
                 system_prompt=self._prompt.system_prompt,
                 messages=self._prompt.messages,
                 tools=self._prompt.tools,
                 max_tokens=app_settings.llm_max_tokens_agent_loop,
+                api_key=user_api_key,
             )
             return content, tool_calls, llm_response
         except Exception as exc:
