@@ -97,6 +97,12 @@ export function UserSettingsPage() {
         <div className="border-t border-[var(--border)] pt-4 mt-4">
           <APIKeyManager />
         </div>
+        <div className="border-t border-[var(--border)] pt-4 mt-4">
+          <h2 className="text-sm font-medium mb-2">Billing &amp; Usage</h2>
+          <Button variant="secondary" onClick={() => navigate('/settings/billing')}>
+            Manage Billing
+          </Button>
+        </div>
       </Card>
 
       {/* Sandbox Configs — user-level reusable setup profiles */}
