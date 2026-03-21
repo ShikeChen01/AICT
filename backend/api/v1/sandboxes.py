@@ -27,6 +27,8 @@ from backend.services.sandbox_service import (
     SandboxOwnershipError,
     SandboxService,
 )
+from backend.services.tier_service import TierService
+from backend.core.exceptions import TierLimitError
 
 router = APIRouter(prefix="/sandboxes", tags=["sandboxes"])
 
@@ -217,6 +219,22 @@ async def create_sandbox(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new user-owned sandbox."""
+    # Tier enforcement: check sandbox hour limits
+    tier_svc = TierService(db)
+    try:
+        unit_type = "desktop" if body.requires_desktop else "headless"
+        await tier_svc.check_can_start_sandbox(current_user, unit_type)
+    except TierLimitError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "tier_limit",
+                "message": str(exc),
+                "current_tier": exc.current_tier,
+                "upgrade_url": exc.upgrade_url,
+            },
+        ) from exc
+
     svc = _get_sandbox_service()
     try:
         sandbox = await svc.create_sandbox(

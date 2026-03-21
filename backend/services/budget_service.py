@@ -164,12 +164,16 @@ class BudgetService:
         sandbox_id: str,
         pod_seconds: float,
         event_type: str = "session_end",
+        user_id: UUID | None = None,
+        unit_type: str = "headless",
     ) -> None:
         """
         Record sandbox compute usage for metering and billing.
 
         event_type: "session_end" | "heartbeat" | "reclaim_candidate"
         pod_seconds: wall-clock seconds the sandbox was actively used.
+        user_id: optional — when provided, tier usage counters are updated.
+        unit_type: "headless" | "desktop" — used to update the correct tier counter.
         """
         try:
             await self._db.execute(
@@ -191,6 +195,18 @@ class BudgetService:
         except Exception as exc:
             # Table not yet migrated — log at WARNING so metering gaps are visible
             logger.warning("BudgetService: sandbox usage record failed (migration pending?): %s", exc)
+
+        # Update tier usage counters
+        if user_id:
+            try:
+                from backend.services.tier_service import TierService
+                from backend.db.models import User
+                user = await self._db.get(User, user_id)
+                if user:
+                    tier_svc = TierService(self._db)
+                    await tier_svc.record_usage(user, unit_type, int(pod_seconds))
+            except Exception as tier_exc:
+                logger.warning("TierService usage recording failed: %s", tier_exc)
 
     async def get_budget_summary(self, project_id: UUID) -> dict:
         """
