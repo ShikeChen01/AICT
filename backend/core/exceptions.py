@@ -69,3 +69,12 @@ class InvalidTaskStatus(AICTException):
     def __init__(self, status: str):
         self.status = status
         super().__init__(f"Invalid task status: {status}")
+
+
+class TierLimitError(AICTException):
+    """Raised when a user exceeds their subscription tier limits."""
+
+    def __init__(self, message: str, current_tier: str = "free", upgrade_url: str = "/settings/billing"):
+        self.current_tier = current_tier
+        self.upgrade_url = upgrade_url
+        super().__init__(message)

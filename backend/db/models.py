@@ -94,6 +94,8 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False)
     display_name = Column(String(100), nullable=True)
     github_token = Column(String(512), nullable=True)
+    tier = Column(String(20), nullable=False, default="free")  # free | individual | team
+    stripe_customer_id = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
@@ -102,6 +104,7 @@ class User(Base):
     sandbox_configs = relationship("SandboxConfig", back_populates="user", cascade="all, delete-orphan")
     sandboxes = relationship("Sandbox", foreign_keys="Sandbox.user_id", cascade="all, delete-orphan")
     api_keys = relationship("UserAPIKey", back_populates="user", cascade="all, delete-orphan")
+    subscription = relationship("Subscription", back_populates="user", uselist=False)
 
 
 # ── User API Keys (per-user LLM provider keys) ─────────────────────
@@ -125,6 +128,51 @@ class UserAPIKey(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "provider", name="uq_user_api_keys_user_provider"),
+    )
+
+
+# ── Billing ─────────────────────────────────────────────────────────
+
+
+class Subscription(Base):
+    """Stripe subscription state for a user."""
+    __tablename__ = "subscriptions"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id = Column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    tier = Column(String(20), nullable=False, default="free")
+    status = Column(String(20), nullable=False, default="active")
+    stripe_customer_id = Column(String(255), nullable=True)
+    stripe_subscription_id = Column(String(255), nullable=True)
+    current_period_start = Column(DateTime(timezone=True), nullable=True)
+    current_period_end = Column(DateTime(timezone=True), nullable=True)
+    cancel_at_period_end = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    user = relationship("User", back_populates="subscription")
+
+    __table_args__ = (
+        Index("ix_subscriptions_stripe_customer", "stripe_customer_id"),
+        Index("ix_subscriptions_stripe_sub", "stripe_subscription_id"),
+    )
+
+
+class UsagePeriod(Base):
+    """Monthly sandbox usage counters per user per billing cycle."""
+    __tablename__ = "usage_periods"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id = Column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    period_start = Column(DateTime(timezone=True), nullable=False)
+    period_end = Column(DateTime(timezone=True), nullable=False)
+    headless_seconds = Column(BigInteger, default=0, nullable=False)
+    desktop_seconds = Column(BigInteger, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "period_start", name="uq_usage_period_user_start"),
     )
 
 
@@ -237,6 +285,7 @@ class SandboxUsageEvent(Base):
     project_id = Column(Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     agent_id = Column(Uuid, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     event_type = Column(String(50), nullable=False)
+    unit_type = Column(String(20), nullable=False, default="headless")
     pod_seconds = Column(Float, nullable=False, default=0)
     cost_usd = Column(Float, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
