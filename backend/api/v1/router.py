@@ -61,3 +61,6 @@ from backend.api.v1.cluster import router as cluster_router
 from backend.api.v1.budget import router as budget_router
 api_router.include_router(cluster_router)
 api_router.include_router(budget_router)
+
+from backend.api.v1.api_keys import router as api_keys_router
+api_router.include_router(api_keys_router)
