@@ -45,7 +45,7 @@ export function UserSettingsPage() {
 
   return (
     <AppLayout>
-    <div className="min-h-screen bg-[var(--app-bg)] p-6">
+    <div className="flex-1 overflow-y-auto bg-[var(--app-bg)] p-6">
       <Card className="mx-auto max-w-2xl p-6">
         <h1 className="mb-2 text-xl font-semibold">User Settings</h1>
         <div className="mb-6 flex items-center gap-2">
