@@ -1,6 +1,6 @@
 # OpenAI OAuth Integration Design
 
-> **Status:** Draft
+> **Status:** Ready for review
 > **Date:** 2026-03-24
 > **Scope:** Phase 1 of the ChatGPT OAuth pivot. Agent architecture redesign is a separate spec.
 
@@ -55,7 +55,7 @@ Stores OAuth token state per user per provider. Designed to support future OAuth
 ```
 user_oauth_connections
 ├── id                  UUID PK
-├── user_id             UUID FK → users (nullable for unlinked sign-ups mid-flow)
+├── user_id             UUID FK → users NOT NULL
 ├── provider            VARCHAR(50) NOT NULL  -- "openai" (extensible)
 ├── provider_user_id    VARCHAR(255) NOT NULL -- OpenAI user ID
 ├── provider_email      VARCHAR(255)          -- email from OpenAI profile
@@ -70,11 +70,24 @@ user_oauth_connections
 └── UNIQUE(provider, provider_user_id)
 ```
 
+`user_id` is NOT NULL. The User row is always created before the OAuthConnection (Flow A creates the user first, Flow B already has one). No mid-flow unlinked state.
+
 ### 3.2 User model changes
 
-Add `openai_connected` as a derived property (exists in `user_oauth_connections`), not a column. The `_to_user_response` helper adds it to the API response by querying the connection table.
+The migration widens `users.firebase_uid` from `String(128)` to `String(255)`. This column now serves as a polymorphic federation key (Firebase UID or `openai:{provider_user_id}`), and needs headroom for future provider ID formats.
 
-No new columns on `users`. The `firebase_uid` for OpenAI-only users uses the format `openai:{provider_user_id}` to guarantee uniqueness.
+Add `openai_connected` as a derived property (exists in `user_oauth_connections`), not a column. The `_to_user_response` helper needs a DB session to query the connection table — refactor it to accept `db: AsyncSession` and eagerly load the flag.
+
+The `firebase_uid` for OpenAI-only users uses the format `openai:{provider_user_id}` to guarantee uniqueness (colons never appear in real Firebase UIDs).
+
+### 3.3 Email collision handling
+
+The `users.email` column has a unique constraint. When a user signs in via OpenAI, their OpenAI email may already belong to an existing Firebase (Google) user. This is handled in Flow A:
+
+- After fetching the OpenAI profile, check if a User with that email already exists.
+- If so, do NOT auto-create a new user. Return a response telling the frontend: "An account with this email already exists. Please sign in with Google first, then connect your OpenAI account from Settings."
+- This prevents duplicate accounts and avoids forced account merging.
+- Edge case: if the existing user already has an OpenAI connection, return the same message (they should sign in via their original method).
 
 ---
 
@@ -138,10 +151,23 @@ DELETE /auth/openai/disconnect
 Backend:
   1. Verify user has Firebase (Google) auth as fallback
      - Check firebase_uid does NOT start with "openai:"
-     - If it does, reject: "Cannot disconnect your only auth method"
+     - If it does, reject: "Cannot disconnect your only auth method.
+       Link a Google account first."
   2. Delete UserOAuthConnection
   3. LLM calls fall back to BYOK or server-wide keys
 ```
+
+### 4.4 Flow D: OpenAI-only user links Google account
+
+Users who signed in via OpenAI have `firebase_uid="openai:{id}"` and no Google auth. To add a Google escape path (so they can later disconnect OpenAI):
+
+1. User clicks "Link Google Account" in Settings
+2. Frontend calls `linkWithPopup(auth.currentUser, GoogleAuthProvider)` (Firebase client SDK)
+3. Firebase links the Google credential to their existing custom-token account
+4. Backend updates `User.firebase_uid` to the real Firebase UID from the Google credential
+5. User now has two auth methods and can disconnect either one
+
+This is a standard Firebase account linking flow. The implementation detail: after `linkWithPopup`, the frontend calls a new `PATCH /auth/link-google` endpoint that receives the Google credential's UID and updates the `firebase_uid` column.
 
 ---
 
@@ -153,7 +179,7 @@ All under `/api/v1/auth/openai/`.
 
 Generates the OAuth authorization URL with a CSRF `state` token.
 
-- **State management:** Generate random state, store in a short-lived server-side cache (Redis or in-memory dict with TTL). The state encodes whether this is a "login" or "connect" flow.
+- **State management:** HMAC-signed, self-contained state token. The state encodes the flow type ("login" or "connect"), a nonce, and an expiry timestamp, signed with `secret_encryption_key`. The callback verifies the signature without server-side storage — works across multiple Cloud Run instances.
 - **Query params:** `?flow=login` (default) or `?flow=connect`
 - **Returns:** `{url: "https://platform.openai.com/oauth/authorize?..."}`
 
@@ -171,7 +197,9 @@ Exchanges the authorization code for tokens.
      - Link OAuthConnection to existing user
      - Return `{connected: true}`
   5. If login flow:
-     - Find or create User with `firebase_uid="openai:{provider_user_id}"`
+     - Check if a User with the OpenAI email already exists (email collision check, see 3.3)
+     - If collision: return `{error: "email_exists", message: "..."}`
+     - Otherwise: find or create User with `firebase_uid="openai:{provider_user_id}"`
      - Create OAuthConnection
      - Mint Firebase Custom Token
      - Return `{firebase_custom_token: "..."}`
@@ -209,7 +237,18 @@ async def get_valid_openai_token(user_id: UUID, db: AsyncSession) -> str | None:
     if conn.token_expires_at and conn.token_expires_at > utcnow() + timedelta(minutes=5):
         return decrypt(conn.access_token)
 
-    # Refresh needed
+    # Refresh needed — use SELECT ... FOR UPDATE to serialize concurrent
+    # refresh attempts for the same (user_id, provider). Without this,
+    # two agent loops could race: both see expired token, both refresh,
+    # and the loser uses a stale rotating refresh token → invalidation.
+    conn = await OAuthConnectionRepository.get_for_update(db, user_id, "openai")
+    if not conn or not conn.is_valid:
+        return None
+
+    # Re-check after lock — another coroutine may have already refreshed
+    if conn.token_expires_at and conn.token_expires_at > utcnow() + timedelta(minutes=5):
+        return decrypt(conn.access_token)
+
     if not conn.refresh_token:
         conn.is_valid = False
         await db.commit()
@@ -248,7 +287,7 @@ New env vars in `backend/config.py`:
 ```python
 # OpenAI OAuth
 openai_oauth_client_id: str = ""
-openai_oauth_client_secret: str = ""       # Fernet-encrypted in prod
+openai_oauth_client_secret: str = ""       # stored securely in env (Cloud Run secrets)
 openai_oauth_authorize_url: str = "https://platform.openai.com/oauth/authorize"
 openai_oauth_token_url: str = "https://platform.openai.com/oauth/token"
 openai_oauth_userinfo_url: str = "https://api.openai.com/v1/me"
@@ -286,9 +325,11 @@ Add "Sign in with OpenAI" button below the existing "Continue with Google":
 A new callback page (similar to `AuthCallbackPage`) that:
 1. Extracts `code` and `state` from URL params
 2. POSTs them to the backend callback endpoint
-3. If login flow: signs in with the returned Firebase Custom Token
+3. If login flow: signs in with the returned Firebase Custom Token (using `signInWithCustomToken` from `firebase/auth` — new import)
 4. If connect flow: shows success message, redirects to settings
-5. On error: shows error message with "Back to Login" button
+5. On error (including `email_exists`): shows error message with appropriate action button
+
+**Important:** This route must be **outside** `ProtectedRoute` in `App.tsx` (alongside `/login` and `/register`). The user has no Firebase auth yet during the login flow callback.
 
 ### 8.3 User Settings — Connected Accounts
 
@@ -345,15 +386,18 @@ Lives in `backend/services/oauth_token_service.py`. Responsibilities:
 
 ### 9.2 Agent._resolve_user_api_key() extension
 
+The existing method uses inline imports and instantiates its own `UserAPIKeyRepository`. The OAuth extension follows the same pattern (import `OAuthTokenService` inline, no service injection refactor):
+
 ```python
 async def _resolve_user_api_key(self) -> str | None:
     owner_id = self._project.owner_id
-    provider_name = self._resolve_provider_name()
+    provider_name = ProviderRouter().resolve_provider_name(self._resolved_model)
 
     # 1. Try OAuth token (OpenAI only, for now)
     if provider_name == "openai":
-        oauth_token = await self._services.oauth_token.get_valid_token(
-            owner_id, "openai", self._db
+        from backend.services.oauth_token_service import OAuthTokenService
+        oauth_token = await OAuthTokenService.get_valid_token(
+            self._db, owner_id, "openai"
         )
         if oauth_token:
             return oauth_token
@@ -362,8 +406,9 @@ async def _resolve_user_api_key(self) -> str | None:
     key_provider = _PROVIDER_TO_KEY_PROVIDER.get(provider_name)
     if not key_provider:
         return None
+    from backend.config import settings as app_settings
     return await UserAPIKeyRepository.get_decrypted_key(
-        self._db, owner_id, key_provider
+        self._db, owner_id, key_provider, app_settings.secret_encryption_key
     )
 ```
 
@@ -377,10 +422,15 @@ Single Alembic migration:
 
 ```python
 def upgrade():
+    # Widen firebase_uid to accommodate "openai:{provider_user_id}" format
+    op.alter_column("users", "firebase_uid",
+                     existing_type=sa.String(128),
+                     type_=sa.String(255))
+
     op.create_table(
         "user_oauth_connections",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=True),
+        sa.Column("user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("provider", sa.String(50), nullable=False),
         sa.Column("provider_user_id", sa.String(255), nullable=False),
         sa.Column("provider_email", sa.String(255), nullable=True),
@@ -399,13 +449,16 @@ def upgrade():
 def downgrade():
     op.drop_index("ix_oauth_conn_user")
     op.drop_table("user_oauth_connections")
+    op.alter_column("users", "firebase_uid",
+                     existing_type=sa.String(255),
+                     type_=sa.String(128))
 ```
 
 ---
 
 ## 11. Security Considerations
 
-1. **CSRF on OAuth flow:** State parameter with server-side validation. State tokens expire after 10 minutes.
+1. **CSRF on OAuth flow:** HMAC-signed state token (stateless, works across Cloud Run instances). Includes nonce + expiry. Validated on callback without server-side storage. Expires after 10 minutes.
 2. **Token storage:** Access and refresh tokens encrypted at rest with Fernet (same as UserAPIKey). Never logged or returned in API responses.
 3. **Scope minimization:** Request only the scopes needed for API access. No write access to user's OpenAI account.
 4. **Token revocation:** When user disconnects, tokens are deleted from DB. If OpenAI supports token revocation, call it.
@@ -426,7 +479,7 @@ def downgrade():
 
 ## 13. Open Questions
 
-1. **OpenAI OAuth availability:** Does OpenAI currently offer OAuth for third-party apps with API access scope? If not yet, the backend/frontend OAuth plumbing is still valid — we just need to update the endpoint URLs when it launches. In the meantime, BYOK continues to work.
+1. **OpenAI OAuth availability (potential blocker):** As of writing, OpenAI's public OAuth is primarily designed for ChatGPT plugin/action authentication (where OpenAI is the client). There is no confirmed public flow where a third-party app obtains OAuth tokens usable as API keys for `AsyncOpenAI(api_key=...)`. This is the biggest feasibility risk. **Fallback plan:** If OAuth-for-API-access doesn't exist or isn't available, the entire backend/frontend OAuth plumbing still works — it just provides authentication (sign-in with OpenAI identity) without automatic LLM funding. Users would still need BYOK API keys for actual LLM calls. The auth value (one-click sign-in) and the LLM funding value (use your subscription) are separable.
 
 2. **ChatGPT Plus vs API billing:** Does OAuth token usage bill against the user's ChatGPT subscription or their separate API account? This affects the value prop messaging but not the technical implementation.
 
