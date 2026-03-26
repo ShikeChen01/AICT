@@ -13,7 +13,7 @@ test.describe('Authentication', () => {
     await expect(page.getByPlaceholder(/password/i)).toHaveCount(0);
   });
 
-  test('seeded authenticated state lands on repositories', async ({ page }) => {
+  test('seeded authenticated state lands on projects', async ({ page }) => {
     await page.route('**/api/v1/auth/me', async (route) => {
       await route.fulfill({
         status: 200,
@@ -37,8 +37,8 @@ test.describe('Authentication', () => {
     });
 
     await setupAuth(page);
-    await page.goto('/repositories');
-    await expect(page).toHaveURL(/\/repositories$/);
+    await page.goto('/projects');
+    await expect(page).toHaveURL(/\/projects$/);
   });
 
   test('refresh on authenticated route does not get stuck loading', async ({ page }) => {
@@ -65,10 +65,10 @@ test.describe('Authentication', () => {
     });
 
     await setupAuth(page);
-    await page.goto('/repositories');
+    await page.goto('/projects');
     await page.reload();
     await expect(page.getByText('Loading...')).toHaveCount(0);
-    await expect(page).toHaveURL(/\/repositories$/);
+    await expect(page).toHaveURL(/\/projects$/);
   });
 
   test('failed /auth/me does not deadlock loading', async ({ page }) => {
@@ -81,7 +81,7 @@ test.describe('Authentication', () => {
     });
 
     await setupAuth(page);
-    await page.goto('/repositories');
+    await page.goto('/projects');
 
     await expect(page.getByText('Loading...')).toHaveCount(0);
   });
@@ -98,7 +98,7 @@ test.describe('Authentication', () => {
     });
 
     await setupAuth(page);
-    await page.goto('/repositories');
+    await page.goto('/projects');
     await expect.poll(() => observedAuthHeader).toBeTruthy();
     expect(observedAuthHeader).toMatch(/^Bearer /);
   });

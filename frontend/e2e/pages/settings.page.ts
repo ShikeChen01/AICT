@@ -1,5 +1,5 @@
 /**
- * Page Object Model for the Repository Settings page.
+ * Page Object Model for the Project Settings page.
  */
 
 import { Page, Locator, expect } from '@playwright/test';
@@ -42,9 +42,9 @@ export class SettingsPage {
 
   constructor(page: Page) {
     this.page = page;
-    this.pageTitle = page.getByRole('heading', { name: /repository settings/i });
-    this.projectName = page.locator('header .text-sm.text-gray-500');
-    this.backButton = page.locator('header button').first();
+    this.pageTitle = page.getByRole('heading', { name: /project settings/i });
+    this.projectName = page.locator('.text-sm.text-\\[var\\(--text-muted\\)\\]');
+    this.backButton = page.getByRole('link', { name: /projects/i }).first();
 
     // Settings page labels don't use htmlFor/id — use scoped locators.
     // General section: first required text input on the page
@@ -74,12 +74,12 @@ export class SettingsPage {
 
     // Actions
     this.saveButton = page.getByRole('button', { name: /save changes/i });
-    this.successMessage = page.locator('.bg-green-50 .text-sm');
-    this.errorMessage = page.locator('.bg-red-50 .text-sm');
+    this.successMessage = page.locator('text=Settings saved');
+    this.errorMessage = page.locator('[class*="color-danger"] .text-sm, [class*="danger"] span.text-sm');
   }
 
   async goto(projectId: string): Promise<void> {
-    await this.page.goto(`/repository/${projectId}/settings`);
+    await this.page.goto(`/project/${projectId}/settings`);
   }
 
   async waitForLoad(): Promise<void> {

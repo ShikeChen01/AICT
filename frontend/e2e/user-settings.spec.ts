@@ -112,13 +112,13 @@ test.describe('User Settings Page', () => {
     await expect(settingsPage.errorMessage).toBeVisible();
   });
 
-  test('back button navigates to repositories', async ({ page }) => {
+  test('back button navigates to projects', async ({ page }) => {
     const settingsPage = new UserSettingsPage(page);
     await settingsPage.goto();
     await settingsPage.waitForLoad();
 
     await settingsPage.backButton.click();
-    await expect(page).toHaveURL(/\/repositories$/);
+    await expect(page).toHaveURL(/\/projects$/);
   });
 
   test('shows save, back, and logout buttons', async ({ page }) => {

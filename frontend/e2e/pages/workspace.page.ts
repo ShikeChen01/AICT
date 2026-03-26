@@ -1,56 +1,60 @@
 /**
  * Page Object Model for the Workspace page.
+ * Updated: uses top-nav layout, routes are /project/{id}/workspace.
  */
 
 import { Page, Locator, expect } from '@playwright/test';
 
 export class WorkspacePage {
   readonly page: Page;
-  // Sidebar
-  readonly sidebar: Locator;
-  readonly projectSelector: Locator;
+
+  // Top nav (replaces old sidebar)
+  readonly topNav: Locator;
   readonly aictLogo: Locator;
+  readonly projectSelector: Locator;
   readonly workspaceLink: Locator;
   readonly kanbanLink: Locator;
-  readonly promptAssemblyLink: Locator;
-  readonly architectureLink: Locator;
+  readonly dashboardLink: Locator;
+  readonly desktopsLink: Locator;
+  readonly agentsLink: Locator;
   readonly settingsLink: Locator;
-  readonly aiUsageLink: Locator;
-  readonly userSettingsLink: Locator;
-  // Main content
+  readonly userMenu: Locator;
+
+  // Main content area
   readonly mainContent: Locator;
-  // Monitoring panel
-  readonly liveStreamPanel: Locator;
-  readonly agentsPanel: Locator;
-  readonly activityTimeline: Locator;
+
+  // Workspace-specific
+  readonly workspaceHeading: Locator;
+  readonly agentPicker: Locator;
 
   constructor(page: Page) {
     this.page = page;
-    // Sidebar
-    this.sidebar = page.locator('aside').first();
-    this.projectSelector = page.locator('#project-selector');
-    this.aictLogo = page.getByRole('heading', { name: /aict/i });
+
+    // Top navigation bar
+    this.topNav = page.locator('[role="banner"]');
+    this.aictLogo = page.locator('[aria-label*="AICT"]');
+    this.projectSelector = page.locator('[data-testid="project-switcher"], button:has-text("Projects")').first();
     this.workspaceLink = page.getByRole('link', { name: /workspace/i });
     this.kanbanLink = page.getByRole('link', { name: /kanban/i });
-    this.promptAssemblyLink = page.getByRole('link', { name: /prompt assembly/i });
-    this.architectureLink = page.getByRole('link', { name: /project architecture/i });
-    this.settingsLink = page.getByRole('link', { name: /project settings/i });
-    this.aiUsageLink = page.getByRole('link', { name: /ai usage/i });
-    this.userSettingsLink = page.getByRole('link', { name: /user settings/i });
-    // Main
-    this.mainContent = page.locator('main');
-    // Panels — use heading role to avoid matching placeholder text
-    this.liveStreamPanel = page.getByRole('heading', { name: 'Live stream' });
-    this.agentsPanel = page.getByRole('heading', { name: 'Agents' });
-    this.activityTimeline = page.getByRole('heading', { name: 'Activity timeline' });
+    this.dashboardLink = page.getByRole('link', { name: /dashboard/i });
+    this.desktopsLink = page.getByRole('link', { name: /desktops/i });
+    this.agentsLink = page.getByRole('link', { name: /agents/i });
+    this.settingsLink = page.getByRole('link', { name: /settings/i });
+    this.userMenu = page.locator('[data-testid="user-menu"], button:has(img[alt])').first();
+
+    // Main content
+    this.mainContent = page.locator('.flex.min-h-0.flex-1');
+
+    // Workspace panels
+    this.workspaceHeading = page.locator('h2:has-text("Workspace")');
+    this.agentPicker = page.locator('select, [data-testid="agent-picker"]').first();
   }
 
   async goto(projectId: string): Promise<void> {
-    await this.page.goto(`/repository/${projectId}/workspace`);
+    await this.page.goto(`/project/${projectId}/workspace`);
   }
 
   async waitForLoad(): Promise<void> {
-    await expect(this.sidebar).toBeVisible();
-    await expect(this.mainContent).toBeVisible();
+    await expect(this.topNav).toBeVisible({ timeout: 10000 });
   }
 }

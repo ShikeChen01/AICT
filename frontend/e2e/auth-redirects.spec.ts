@@ -4,7 +4,7 @@ import { setupAuthenticatedSession } from './fixtures/auth';
 
 test.describe('Authentication Redirects', () => {
   test('unauthenticated access to protected route redirects to /login', async ({ page }) => {
-    await page.goto('/repositories');
+    await page.goto('/projects');
     await expect(page).toHaveURL(/\/login$/);
   });
 
@@ -32,11 +32,11 @@ test.describe('Authentication Redirects', () => {
     });
 
     await setupAuthenticatedSession(page, process.env.API_TOKEN || 'change-me-in-production');
-    await page.goto('/repositories');
-    await expect(page).toHaveURL(/\/repositories$/);
+    await page.goto('/projects');
+    await expect(page).toHaveURL(/\/projects$/);
   });
 
-  test('authenticated user visiting /login redirects to /repositories', async ({ page }) => {
+  test('authenticated user visiting /login redirects to /projects', async ({ page }) => {
     await page.route('**/api/v1/auth/me', async (route) => {
       await route.fulfill({
         status: 200,
@@ -61,6 +61,6 @@ test.describe('Authentication Redirects', () => {
 
     await setupAuthenticatedSession(page, process.env.API_TOKEN || 'change-me-in-production');
     await page.goto('/login');
-    await expect(page).toHaveURL(/\/repositories$/);
+    await expect(page).toHaveURL(/\/projects$/);
   });
 });

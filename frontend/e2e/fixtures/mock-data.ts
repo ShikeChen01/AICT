@@ -33,6 +33,12 @@ export const MOCK_TEMPLATE_ID = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
 export const MOCK_DOCUMENT_ID = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
 export const MOCK_SECRET_ID = 'abababab-abab-abab-abab-abababababab';
 
+export const MOCK_SANDBOX_IDS = {
+  desktop1: 'dd000001-0000-0000-0000-000000000001',
+  desktop2: 'dd000002-0000-0000-0000-000000000002',
+};
+export const MOCK_SANDBOX_CONFIG_ID = 'cc000001-0000-0000-0000-000000000001';
+
 const NOW = new Date().toISOString();
 const YESTERDAY = new Date(Date.now() - 86400000).toISOString();
 
@@ -346,4 +352,87 @@ export function mockTemplates() {
       is_system_default: true,
     },
   ];
+}
+
+// ── Sandboxes / Desktops ────────────────────────────────────────────
+
+export function mockSandbox(overrides?: Record<string, unknown>) {
+  return {
+    id: MOCK_SANDBOX_IDS.desktop1,
+    user_id: MOCK_USER_ID,
+    project_id: MOCK_PROJECT_ID,
+    agent_id: null,
+    agent_name: null,
+    sandbox_config_id: null,
+    name: 'Desktop 1',
+    description: null,
+    orchestrator_sandbox_id: 'orch-unit-001',
+    unit_type: 'desktop' as const,
+    status: 'idle',
+    host: '10.128.0.38',
+    port: 9090,
+    created_at: YESTERDAY,
+    assigned_at: null,
+    ...overrides,
+  };
+}
+
+export function mockDesktops(projectId = MOCK_PROJECT_ID) {
+  return [
+    mockSandbox({
+      id: MOCK_SANDBOX_IDS.desktop1,
+      project_id: projectId,
+      name: 'Desktop 1',
+      orchestrator_sandbox_id: 'orch-unit-001',
+      status: 'idle',
+    }),
+    mockSandbox({
+      id: MOCK_SANDBOX_IDS.desktop2,
+      project_id: projectId,
+      name: 'Desktop 2',
+      orchestrator_sandbox_id: 'orch-unit-002',
+      status: 'assigned',
+      agent_id: MOCK_AGENT_IDS.engineer1,
+      agent_name: 'Engineer Jr',
+      assigned_at: NOW,
+    }),
+  ];
+}
+
+export function mockSandboxConfigs() {
+  return [
+    {
+      id: MOCK_SANDBOX_CONFIG_ID,
+      user_id: MOCK_USER_ID,
+      name: 'Default Setup',
+      description: 'Standard development environment',
+      setup_script: '#!/bin/bash\necho "setup complete"',
+      os_image: null,
+      created_at: YESTERDAY,
+      updated_at: NOW,
+    },
+  ];
+}
+
+export function mockSandboxSnapshots(sandboxId = MOCK_SANDBOX_IDS.desktop1) {
+  return [
+    {
+      id: 'snap-001',
+      sandbox_id: sandboxId,
+      label: 'Before config change',
+      k8s_snapshot_name: 'snap-k8s-001',
+      created_at: YESTERDAY,
+    },
+  ];
+}
+
+// ── Billing / Usage ─────────────────────────────────────────────────
+
+export function mockBillingUsage() {
+  return {
+    headless_seconds_used: 3600,
+    headless_seconds_included: 54000,
+    desktop_seconds_used: 1800,
+    desktop_seconds_included: 54000,
+  };
 }

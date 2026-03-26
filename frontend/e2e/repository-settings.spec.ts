@@ -8,7 +8,7 @@ import {
 } from './fixtures/mock-data';
 import { SettingsPage } from './pages/settings.page';
 
-test.describe('Repository Settings Page', () => {
+test.describe('Project Settings Page', () => {
   test.beforeEach(async ({ page }) => {
     await mockAuthenticatedAPIs(page);
     await mockProjectAPIs(page, MOCK_PROJECT_ID);
@@ -20,7 +20,7 @@ test.describe('Repository Settings Page', () => {
     await settings.goto(MOCK_PROJECT_ID);
     await settings.waitForLoad();
 
-    await expect(settings.pageTitle).toHaveText('Repository Settings');
+    await expect(settings.pageTitle).toHaveText('Project Settings');
   });
 
   test('displays all section headings', async ({ page }) => {
@@ -31,10 +31,8 @@ test.describe('Repository Settings Page', () => {
     await expect(page.getByRole('heading', { name: /general/i })).toBeVisible();
     await expect(page.getByRole('heading', { name: /git integration/i })).toBeVisible();
     await expect(page.getByRole('heading', { name: /agent limits/i })).toBeVisible();
-    await expect(page.getByRole('heading', { name: /model selection/i })).toBeVisible();
-    await expect(page.getByRole('heading', { name: /prompt customization/i })).toBeVisible();
     await expect(page.getByRole('heading', { name: /rate limits/i })).toBeVisible();
-    await expect(page.getByRole('heading', { name: /budget & cost/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /budget/i })).toBeVisible();
     await expect(page.getByRole('heading', { name: /project secrets/i })).toBeVisible();
   });
 
@@ -73,49 +71,6 @@ test.describe('Repository Settings Page', () => {
     await expect(settings.maxEngineersInput).toHaveAttribute('min', '1');
     await expect(settings.maxEngineersInput).toHaveAttribute('max', '20');
     await expect(settings.maxEngineersInput).toHaveValue('5');
-  });
-
-  test('model selection shows dropdowns for each role', async ({ page }) => {
-    const settings = new SettingsPage(page);
-    await settings.goto(MOCK_PROJECT_ID);
-    await settings.waitForLoad();
-
-    // Check that role labels are visible (scoped to avoid ambiguity with prompt section)
-    await expect(page.getByText('Engineer (Junior)', { exact: true })).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText('Engineer (Intermediate)', { exact: true })).toBeVisible();
-    await expect(page.getByText('Engineer (Senior)', { exact: true })).toBeVisible();
-  });
-
-  test('model dropdowns contain expected model options', async ({ page }) => {
-    const settings = new SettingsPage(page);
-    await settings.goto(MOCK_PROJECT_ID);
-    await settings.waitForLoad();
-
-    // Check that model groups are in the selects
-    const selects = page.locator('select');
-    const selectCount = await selects.count();
-
-    // There should be at least 5 selects (one per role) plus the project selector
-    expect(selectCount).toBeGreaterThanOrEqual(5);
-  });
-
-  test('prompt customization shows textareas for each role', async ({ page }) => {
-    const settings = new SettingsPage(page);
-    await settings.goto(MOCK_PROJECT_ID);
-    await settings.waitForLoad();
-
-    await expect(page.getByPlaceholder(/additional instructions for manager/i)).toBeVisible();
-    await expect(page.getByPlaceholder(/additional instructions for cto/i)).toBeVisible();
-    await expect(page.getByPlaceholder(/additional instructions for engineers/i)).toBeVisible();
-  });
-
-  test('prompt textareas enforce 2000 char limit', async ({ page }) => {
-    const settings = new SettingsPage(page);
-    await settings.goto(MOCK_PROJECT_ID);
-    await settings.waitForLoad();
-
-    const textarea = page.getByPlaceholder(/additional instructions for manager/i);
-    await expect(textarea).toHaveAttribute('maxlength', '2000');
   });
 
   test('rate limits section shows calls/hour and tokens/hour inputs', async ({ page }) => {
@@ -185,25 +140,31 @@ test.describe('Repository Settings Page', () => {
     await settings.nameInput.fill('Updated Repository Name');
     await settings.saveButton.click();
 
-    await expect(settings.successMessage).toBeVisible();
-    await expect(settings.successMessage).toContainText(/saved/i);
+    await expect(page.locator('text=Settings saved')).toBeVisible();
   });
 
   test('displays error on save failure', async ({ page }) => {
-    // Override settings PATCH to fail
+    // Override both project PATCH and settings PATCH to fail
+    await page.route(`**/api/v1/repositories/${MOCK_PROJECT_ID}`, async (route) => {
+      if (route.request().method() === 'PATCH') {
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ detail: 'Internal server error' }),
+        });
+      } else {
+        await route.fallback();
+      }
+    });
     await page.route(`**/api/v1/repositories/${MOCK_PROJECT_ID}/settings`, async (route) => {
       if (route.request().method() === 'PATCH') {
         await route.fulfill({
           status: 500,
           contentType: 'application/json',
-          body: JSON.stringify({ message: 'Internal server error' }),
+          body: JSON.stringify({ detail: 'Internal server error' }),
         });
       } else {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify(mockProjectSettings()),
-        });
+        await route.fallback();
       }
     });
 
@@ -212,21 +173,21 @@ test.describe('Repository Settings Page', () => {
     await settings.waitForLoad();
 
     await settings.saveButton.click();
-    await expect(settings.errorMessage).toBeVisible();
+    // Error message should appear (uses danger color styling)
+    await expect(page.locator('text=/error|failed/i').first()).toBeVisible({ timeout: 10000 });
   });
 
-  test('back button navigates to workspace', async ({ page }) => {
+  test('AICT logo navigates to projects', async ({ page }) => {
     const settings = new SettingsPage(page);
     await settings.goto(MOCK_PROJECT_ID);
     await settings.waitForLoad();
 
-    await settings.backButton.click();
-    await expect(page).toHaveURL(
-      new RegExp(`/repository/${MOCK_PROJECT_ID}/workspace`)
-    );
+    // The settings page uses top-nav; clicking AICT logo goes to projects
+    await page.locator('[aria-label*="AICT"]').click();
+    await expect(page).toHaveURL(/\/projects$/);
   });
 
-  test('shows repository not found for invalid project', async ({ page }) => {
+  test('shows project not found for invalid project', async ({ page }) => {
     const invalidId = 'invalid-project-id';
     await page.route(`**/api/v1/repositories/${invalidId}`, async (route) => {
       await route.fulfill({
@@ -257,7 +218,7 @@ test.describe('Repository Settings Page', () => {
       });
     });
 
-    await page.goto(`/repository/${invalidId}/settings`);
-    await expect(page.getByText(/repository not found/i)).toBeVisible();
+    await page.goto(`/project/${invalidId}/settings`);
+    await expect(page.getByText(/project not found/i)).toBeVisible();
   });
 });

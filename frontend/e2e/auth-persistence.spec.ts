@@ -27,12 +27,12 @@ test.describe('Authentication Persistence', () => {
     });
 
     await setupAuth(page);
-    await page.goto('/repositories');
+    await page.goto('/projects');
     await page.reload();
     await page.reload();
 
     await expect(page.getByText('Loading...')).toHaveCount(0);
-    await expect(page).toHaveURL(/\/repositories$/);
+    await expect(page).toHaveURL(/\/projects$/);
   });
 
   test('invalid /auth/me response recovers without loading deadlock', async ({ page }) => {
@@ -45,7 +45,7 @@ test.describe('Authentication Persistence', () => {
     });
 
     await setupAuth(page);
-    await page.goto('/repositories');
+    await page.goto('/projects');
 
     await expect(page.getByText('Loading...')).toHaveCount(0);
   });

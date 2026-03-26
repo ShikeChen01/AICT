@@ -43,6 +43,6 @@ test.describe('Login Page', () => {
     await mockAuthenticatedAPIs(page);
     await setupAuth(page);
     await page.goto('/login');
-    await expect(page).toHaveURL(/\/repositories$/);
+    await expect(page).toHaveURL(/\/projects$/);
   });
 });

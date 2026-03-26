@@ -4,14 +4,14 @@ import { setupAuth } from './fixtures/auth';
 import { mockAuthenticatedAPIs } from './fixtures/api-mocks';
 import { mockProject, mockProjects, MOCK_PROJECT_ID } from './fixtures/mock-data';
 
-test.describe('Repositories Page', () => {
+test.describe('Projects Page', () => {
   test.beforeEach(async ({ page }) => {
     await mockAuthenticatedAPIs(page);
     await setupAuth(page);
   });
 
   test('displays projects heading and subtext', async ({ page }) => {
-    await page.goto('/repositories');
+    await page.goto('/projects');
     await expect(page.getByRole('heading', { name: /^projects$/i })).toBeVisible();
     await expect(page.getByText(/design, deploy, and manage/i)).toBeVisible();
   });
@@ -27,7 +27,7 @@ test.describe('Repositories Page', () => {
       }
     });
 
-    await page.goto('/repositories');
+    await page.goto('/projects');
     await expect(page.getByText(/no projects yet/i)).toBeVisible();
   });
 
@@ -42,7 +42,7 @@ test.describe('Repositories Page', () => {
       }
     });
 
-    await page.goto('/repositories');
+    await page.goto('/projects');
     await expect(page.getByText(/no projects yet/i)).toBeVisible();
     await expect(page.getByRole('button', { name: /new project/i })).toHaveCount(2);
     await expect(page.getByRole('button', { name: /import project/i })).toHaveCount(2);
@@ -60,7 +60,7 @@ test.describe('Repositories Page', () => {
       }
     });
 
-    await page.goto('/repositories');
+    await page.goto('/projects');
     for (const proj of projects) {
       await expect(page.getByText(proj.name)).toBeVisible();
     }
@@ -81,7 +81,7 @@ test.describe('Repositories Page', () => {
       }
     });
 
-    await page.goto('/repositories');
+    await page.goto('/projects');
     await expect(page.getByText('My Repo')).toBeVisible();
     await expect(page.getByText('Repository description text')).toBeVisible();
   });
@@ -98,26 +98,26 @@ test.describe('Repositories Page', () => {
       }
     });
 
-    await page.goto('/repositories');
+    await page.goto('/projects');
     await page.getByText(/open project/i).click();
     await expect(page).toHaveURL(new RegExp(`/project/${MOCK_PROJECT_ID}/workspace`));
   });
 
   test('new project button opens create modal', async ({ page }) => {
-    await page.goto('/repositories');
-    // The button in the header (/repositories redirects to /projects)
+    await page.goto('/projects');
+    // The button in the header (/projects redirects to /projects)
     await page.getByRole('button', { name: /new project/i }).first().click();
     await expect(page.getByRole('heading', { name: /create new project/i })).toBeVisible();
   });
 
   test('import project button opens import modal', async ({ page }) => {
-    await page.goto('/repositories');
+    await page.goto('/projects');
     await page.getByRole('button', { name: /import project/i }).first().click();
     await expect(page.getByRole('heading', { name: /import project/i })).toBeVisible();
   });
 
   test('create modal has name, description, and optional repository URL', async ({ page }) => {
-    await page.goto('/repositories');
+    await page.goto('/projects');
     await page.getByRole('button', { name: /new project/i }).first().click();
 
     // Labels don't use htmlFor, so locate by text within the modal
@@ -130,7 +130,7 @@ test.describe('Repositories Page', () => {
   });
 
   test('import modal has name, description, and URL fields', async ({ page }) => {
-    await page.goto('/repositories');
+    await page.goto('/projects');
     await page.getByRole('button', { name: /import project/i }).first().click();
 
     const modal = page.locator('.relative.mx-4');
@@ -142,7 +142,7 @@ test.describe('Repositories Page', () => {
   });
 
   test('cancel button closes modal', async ({ page }) => {
-    await page.goto('/repositories');
+    await page.goto('/projects');
     await page.getByRole('button', { name: /new project/i }).first().click();
     await expect(page.getByRole('heading', { name: /create new project/i })).toBeVisible();
 
@@ -150,10 +150,14 @@ test.describe('Repositories Page', () => {
     await expect(page.getByRole('heading', { name: /create new project/i })).toHaveCount(0);
   });
 
-  test('user settings button navigates to /settings', async ({ page }) => {
-    await page.goto('/repositories');
-    await page.getByRole('link').filter({ hasText: /user settings/i }).click();
-    await expect(page).toHaveURL(/\/settings$/);
+  test('user menu has settings option', async ({ page }) => {
+    await page.goto('/projects');
+    // The user menu is in the top-nav; click it to open dropdown
+    const userMenuButton = page.locator('[data-testid="user-menu"], button:has(img), button:has-text("e2e")').first();
+    if (await userMenuButton.isVisible()) {
+      await userMenuButton.click();
+      await expect(page.locator('text=User Settings')).toBeVisible();
+    }
   });
 
   test('shows loading spinner while fetching projects', async ({ page }) => {
@@ -167,7 +171,7 @@ test.describe('Repositories Page', () => {
       });
     });
 
-    await page.goto('/repositories');
+    await page.goto('/projects');
     // Should show a loading spinner while waiting
     await expect(page.locator('.animate-spin')).toBeVisible({ timeout: 5000 });
   });

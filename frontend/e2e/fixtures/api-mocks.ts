@@ -18,6 +18,11 @@ import {
   mockDocuments,
   mockTemplates,
   mockSession,
+  mockSandbox,
+  mockDesktops,
+  mockSandboxConfigs,
+  mockSandboxSnapshots,
+  mockBillingUsage,
   MOCK_PROJECT_ID,
 } from './mock-data';
 
@@ -37,6 +42,9 @@ export interface ProjectMockOptions {
   documents?: Record<string, unknown>[];
   templates?: Record<string, unknown>[];
   sessions?: Record<string, unknown>[];
+  sandboxes?: Record<string, unknown>[];
+  sandboxConfigs?: Record<string, unknown>[];
+  billingUsage?: Record<string, unknown> | null;
 }
 
 /**
@@ -280,6 +288,140 @@ export async function mockProjectAPIs(
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(sessions),
+    });
+  });
+
+  // Sandboxes
+  const sandboxes = options.sandboxes ?? mockDesktops(projectId);
+  const sandboxConfigList = options.sandboxConfigs ?? mockSandboxConfigs();
+
+  await page.route(new RegExp(`/api/v1/sandboxes\\?project_id=${projectId}`), async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(sandboxes),
+    });
+  });
+
+  await page.route(new RegExp(`/api/v1/sandboxes$`), async (route) => {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON();
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify(mockSandbox({ ...body, id: 'new-desktop-id', orchestrator_sandbox_id: 'orch-new' })),
+      });
+    } else {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(sandboxes) });
+    }
+  });
+
+  await page.route(new RegExp(`/api/v1/sandboxes/[^/]+/assign$`), async (route) => {
+    const body = route.request().postDataJSON();
+    const id = route.request().url().split('/sandboxes/')[1]?.split('/')[0];
+    const sb = sandboxes.find((s: Record<string, unknown>) => s.id === id) ?? sandboxes[0];
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ...sb, agent_id: body.agent_id, status: 'assigned' }),
+    });
+  });
+
+  await page.route(new RegExp(`/api/v1/sandboxes/[^/]+/unassign$`), async (route) => {
+    const id = route.request().url().split('/sandboxes/')[1]?.split('/')[0];
+    const sb = sandboxes.find((s: Record<string, unknown>) => s.id === id) ?? sandboxes[0];
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ...sb, agent_id: null, agent_name: null, status: 'idle' }),
+    });
+  });
+
+  await page.route(new RegExp(`/api/v1/sandboxes/[^/]+/restart$`), async (route) => {
+    const id = route.request().url().split('/sandboxes/')[1]?.split('/')[0];
+    const sb = sandboxes.find((s: Record<string, unknown>) => s.id === id) ?? sandboxes[0];
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ...sb, status: 'resetting' }),
+    });
+  });
+
+  await page.route(new RegExp(`/api/v1/sandboxes/[^/]+/apply-config$`), async (route) => {
+    const id = route.request().url().split('/sandboxes/')[1]?.split('/')[0];
+    const sb = sandboxes.find((s: Record<string, unknown>) => s.id === id) ?? sandboxes[0];
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(sb),
+    });
+  });
+
+  await page.route(new RegExp(`/api/v1/sandboxes/[^/]+/snapshots$`), async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(mockSandboxSnapshots()),
+    });
+  });
+
+  await page.route(new RegExp(`/api/v1/sandboxes/[^/]+/restore$`), async (route) => {
+    const id = route.request().url().split('/sandboxes/')[1]?.split('/')[0];
+    const sb = sandboxes.find((s: Record<string, unknown>) => s.id === id) ?? sandboxes[0];
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(sb),
+    });
+  });
+
+  // DELETE sandbox
+  await page.route(new RegExp(`/api/v1/sandboxes/[^/]+$`), async (route) => {
+    if (route.request().method() === 'DELETE') {
+      await route.fulfill({ status: 204 });
+    } else if (route.request().method() === 'PATCH') {
+      const body = route.request().postDataJSON();
+      const id = route.request().url().split('/sandboxes/')[1];
+      const sb = sandboxes.find((s: Record<string, unknown>) => s.id === id) ?? sandboxes[0];
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ...sb, ...body }),
+      });
+    } else {
+      await route.continue();
+    }
+  });
+
+  // Sandbox configs (user-level)
+  await page.route('**/api/v1/sandbox-configs', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(sandboxConfigList),
+    });
+  });
+
+  // Billing usage
+  const billingUsage = options.billingUsage === undefined ? mockBillingUsage() : options.billingUsage;
+  await page.route('**/api/v1/billing/usage', async (route) => {
+    if (billingUsage === null) {
+      await route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+    } else {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(billingUsage),
+      });
+    }
+  });
+
+  // Billing subscription
+  await page.route('**/api/v1/billing/subscription', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ tier: 'free', status: 'active', current_period_end: null }),
     });
   });
 
