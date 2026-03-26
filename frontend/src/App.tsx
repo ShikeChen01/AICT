@@ -15,6 +15,7 @@ import {
   DashboardPage,
   LoginPage,
   MonitorPage,
+  OpenAICallbackPage,
   ProjectsPage,
   SandboxPage,
   RegisterPage,
@@ -88,6 +89,7 @@ function AppShell() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/auth/callback" element={<AuthCallbackPage />} />
+        <Route path="/auth/openai/callback" element={<OpenAICallbackPage />} />
         <Route path="/test-login" element={<TestLoginPage />} />
 
         <Route element={<ProtectedRoute />}>

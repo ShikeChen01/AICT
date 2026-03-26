@@ -10,6 +10,7 @@ class UserResponse(BaseModel):
     display_name: str | None
     github_token_set: bool = Field(default=False)
     tier: str = "free"
+    openai_connected: bool = False
     created_at: datetime
     updated_at: datetime
 

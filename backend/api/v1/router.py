@@ -67,3 +67,6 @@ api_router.include_router(api_keys_router)
 
 from backend.api.v1.billing import router as billing_router
 api_router.include_router(billing_router)
+
+from backend.api.v1.oauth import router as oauth_router
+api_router.include_router(oauth_router)

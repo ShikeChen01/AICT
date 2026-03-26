@@ -862,6 +862,34 @@ export async function createPortalSession(returnUrl: string): Promise<{ portal_u
   return request<{ portal_url: string }>('POST', '/billing/portal-session', { return_url: returnUrl });
 }
 
+// ─── OAuth ────────────────────────────────────────────────────────────
+
+export async function getOAuthLoginUrl(flow: 'login' | 'connect' = 'login'): Promise<{ url: string }> {
+  return request<{ url: string }>('GET', `/auth/openai/login?flow=${flow}`);
+}
+
+export async function oauthCallback(code: string, state: string): Promise<{
+  firebase_custom_token?: string;
+  connected?: boolean;
+  error?: string;
+  message?: string;
+}> {
+  return request('POST', '/auth/openai/callback', { code, state });
+}
+
+export async function getOAuthStatus(): Promise<{
+  connected: boolean;
+  email?: string;
+  scopes?: string;
+  valid?: boolean;
+}> {
+  return request('GET', '/auth/openai/status');
+}
+
+export async function disconnectOAuth(): Promise<{ ok: boolean }> {
+  return request('DELETE', '/auth/openai/disconnect');
+}
+
 // ─── WebSocket Client ────────────────────────────────────────────────
 
 type WSEventHandler = (event: WSEvent) => void;

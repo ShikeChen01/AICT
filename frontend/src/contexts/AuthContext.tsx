@@ -19,6 +19,7 @@ interface AuthContextValue {
   /** Single redirect result for this page load (survives Strict Mode remount). Call once from callback page. */
   getRedirectResultForCallback: () => Promise<UserCredential | null>;
   loginWithGoogle: () => Promise<void>;
+  loginWithOpenAI: () => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -262,6 +263,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setTokenWithLog(idToken, 'popup_sign_in');
           await refreshProfile();
         }
+      },
+      async loginWithOpenAI() {
+        const { getOAuthLoginUrl } = await import('../api/client');
+        const { url } = await getOAuthLoginUrl('login');
+        window.location.href = url;
       },
       async logout() {
         logAuthStep('logout:start', { hasFirebaseAuth: Boolean(auth) });

@@ -511,22 +511,46 @@ class SandboxService:
         auth_token = data["auth_token"]
         unit_type = data.get("unit_type", "desktop" if effective_desktop else "headless")
 
-        # ── Create DB row ─────────────────────────────────────────────
-        sandbox = Sandbox(
-            id=uuid_module.uuid4(),
-            user_id=user_id,
-            project_id=project_id,
-            sandbox_config_id=config_id,
-            name=name or f"sandbox-{orch_id[:8]}",
-            description=description,
-            orchestrator_sandbox_id=orch_id,
-            unit_type=unit_type,
-            status="ready",
-            host=host,
-            port=port,
-            auth_token=auth_token,
-        )
-        db.add(sandbox)
+        # ── Create or reclaim DB row ──────────────────────────────────
+        # Persistent desktop VMs may be reused by the pool manager, so the
+        # orchestrator_sandbox_id can already exist in the DB from a prior
+        # session.  Reclaim the record instead of failing with a unique
+        # constraint violation.
+        existing = (await db.execute(
+            select(Sandbox).where(Sandbox.orchestrator_sandbox_id == orch_id)
+        )).scalar_one_or_none()
+
+        if existing:
+            existing.user_id = user_id
+            existing.project_id = project_id
+            existing.sandbox_config_id = config_id
+            existing.name = name or f"sandbox-{orch_id[:8]}"
+            existing.description = description
+            existing.unit_type = unit_type
+            existing.status = "ready"
+            existing.host = host
+            existing.port = port
+            existing.auth_token = auth_token
+            existing.agent_id = None
+            existing.assigned_at = None
+            existing.released_at = None
+            sandbox = existing
+        else:
+            sandbox = Sandbox(
+                id=uuid_module.uuid4(),
+                user_id=user_id,
+                project_id=project_id,
+                sandbox_config_id=config_id,
+                name=name or f"sandbox-{orch_id[:8]}",
+                description=description,
+                orchestrator_sandbox_id=orch_id,
+                unit_type=unit_type,
+                status="ready",
+                host=host,
+                port=port,
+                auth_token=auth_token,
+            )
+            db.add(sandbox)
         await db.flush()
 
         # ── Health probe ──────────────────────────────────────────────

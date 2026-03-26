@@ -106,6 +106,15 @@ class Settings(BaseSettings):
     stripe_team_price_id: str = ""            # price_xxx for $50/mo Team
     tier_enforcement_enabled: bool = False    # Kill switch: disable all tier checks
 
+    # OpenAI OAuth
+    openai_oauth_client_id: str = ""
+    openai_oauth_client_secret: str = ""
+    openai_oauth_authorize_url: str = "https://platform.openai.com/oauth/authorize"
+    openai_oauth_token_url: str = "https://platform.openai.com/oauth/token"
+    openai_oauth_userinfo_url: str = "https://api.openai.com/v1/me"
+    openai_oauth_redirect_uri: str = ""
+    openai_oauth_scopes: str = "openai.api"
+
     # Logging — Cloud Logging on Cloud Run (K_SERVICE) or when USE_CLOUD_LOGGING=true
     use_cloud_logging: bool = Field(
         default_factory=lambda: (

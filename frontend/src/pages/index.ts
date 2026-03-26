@@ -11,6 +11,7 @@ export { LoginPage } from './Login';
 export { RegisterPage } from './Register';
 export { UserSettingsPage } from './UserSettings';
 export { AuthCallbackPage } from './AuthCallback';
+export { OpenAICallbackPage } from './OpenAICallback';
 export { WorkspacePage } from './Workspace';
 export { BackendLogsPage } from './BackendLogs';
 export { TestLoginPage } from './TestLogin';

@@ -1,6 +1,6 @@
 # OpenAI OAuth Integration Design
 
-> **Status:** Ready for review
+> **Status:** Implemented (local dev with mock OAuth server)
 > **Date:** 2026-03-24
 > **Scope:** Phase 1 of the ChatGPT OAuth pivot. Agent architecture redesign is a separate spec.
 

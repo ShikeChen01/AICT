@@ -533,6 +533,7 @@ export interface UserProfile {
   display_name: string | null;
   github_token_set: boolean;
   tier?: string;
+  openai_connected?: boolean;
   created_at: string;
   updated_at: string;
 }

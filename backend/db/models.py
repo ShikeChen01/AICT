@@ -90,7 +90,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
-    firebase_uid = Column(String(128), unique=True, nullable=False)
+    firebase_uid = Column(String(255), unique=True, nullable=False)
     email = Column(String(255), unique=True, nullable=False)
     display_name = Column(String(100), nullable=True)
     github_token = Column(String(512), nullable=True)
@@ -129,6 +129,35 @@ class UserAPIKey(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "provider", name="uq_user_api_keys_user_provider"),
     )
+
+
+# ── User OAuth Connections ─────────────────────────────────────────
+
+
+class UserOAuthConnection(Base):
+    """OAuth token state per user per provider (e.g. OpenAI)."""
+
+    __tablename__ = "user_oauth_connections"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="uq_oauth_conn_user_provider"),
+        UniqueConstraint("provider", "provider_user_id", name="uq_oauth_conn_provider_ext_id"),
+        Index("ix_oauth_conn_user", "user_id"),
+    )
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id = Column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    provider = Column(String(50), nullable=False)
+    provider_user_id = Column(String(255), nullable=False)
+    provider_email = Column(String(255), nullable=True)
+    access_token = Column(Text, nullable=False)
+    refresh_token = Column(Text, nullable=True)
+    token_expires_at = Column(DateTime(timezone=True), nullable=True)
+    scopes = Column(Text, nullable=True)
+    is_valid = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    user = relationship("User", backref="oauth_connections")
 
 
 # ── Billing ─────────────────────────────────────────────────────────
