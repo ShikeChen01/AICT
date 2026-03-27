@@ -40,6 +40,7 @@ import {
   applySandboxConfig,
   restoreSandboxSnapshot,
   listSandboxSnapshots,
+  checkSandboxHealth,
 } from '../api/client';
 import type { Project, Agent, SandboxConfig, Sandbox, SandboxSnapshot } from '../types';
 import { AppLayout } from '../components/Layout';
@@ -52,10 +53,12 @@ import { UpgradeBanner } from '../components/UpgradeBanner';
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const STATUS_BG: Record<string, string> = {
+  ready: 'bg-blue-500/20 text-blue-400',
   assigned: 'bg-green-500/20 text-green-400',
   idle: 'bg-gray-500/20 text-gray-400',
   resetting: 'bg-amber-500/20 text-amber-400',
   unhealthy: 'bg-red-500/20 text-red-400',
+  unreachable: 'bg-red-500/20 text-red-400',
 };
 
 // ── Page Shell ─────────────────────────────────────────────────────────────
@@ -296,11 +299,23 @@ function DesktopCard({ desktop, agents, desktops, onExpand, onConfigure, onRefre
   const { frameUrl, isConnected } = useScreenStream(desktop.orchestrator_sandbox_id);
   const statusClass = STATUS_BG[desktop.status] ?? STATUS_BG.idle;
   const [acting, setActing] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [showSnapshots, setShowSnapshots] = useState(false);
   const [snapshots, setSnapshots] = useState<SandboxSnapshot[]>([]);
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
   const [showAgentDropdown, setShowAgentDropdown] = useState(false);
   const agentDropdownRef = useRef<HTMLDivElement>(null);
+  const healthChecked = useRef(false);
+
+  // Check health once when the card mounts — detects dead sandboxes on page load
+  useEffect(() => {
+    if (healthChecked.current) return;
+    healthChecked.current = true;
+    checkSandboxHealth(desktop.id).then(result => {
+      if (!result.ok) onRefresh();
+    }).catch(() => { /* best-effort */ });
+  }, [desktop.id, onRefresh]);
 
   // One agent can only have one desktop — filter out agents already assigned to another desktop
   const assignableAgents = agents.filter(
@@ -309,8 +324,17 @@ function DesktopCard({ desktop, agents, desktops, onExpand, onConfigure, onRefre
 
   const handleAction = async (action: () => Promise<unknown>) => {
     setActing(true);
-    try { await action(); onRefresh(); }
-    finally { setActing(false); }
+    setActionError(null);
+    setActionMsg(null);
+    try {
+      await action();
+      onRefresh();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Action failed';
+      setActionError(msg);
+    } finally {
+      setActing(false);
+    }
   };
 
   const handleLoadSnapshots = async () => {
@@ -483,9 +507,14 @@ function DesktopCard({ desktop, agents, desktops, onExpand, onConfigure, onRefre
             <Settings2 className="w-3.5 h-3.5" />
           </button>
           <button
-            onClick={() => handleAction(() => restartSandbox(desktop.id))}
+            onClick={() => handleAction(async () => {
+              const result = await restartSandbox(desktop.id);
+              if (result.action === 'reprovisioned') {
+                setActionMsg('Desktop was dead and has been re-provisioned');
+              }
+            })}
             disabled={acting}
-            title="Restart"
+            title="Restart (re-provisions if container is gone)"
             className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors disabled:opacity-40"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -500,6 +529,21 @@ function DesktopCard({ desktop, agents, desktops, onExpand, onConfigure, onRefre
           </button>
           <div className="flex-1" />
         </div>
+
+        {/* Action feedback */}
+        {actionError && (
+          <div className="flex items-center gap-1.5 mt-1 px-2 py-1 rounded-md bg-red-500/10 text-[10px] text-red-400">
+            <AlertCircle className="w-3 h-3 shrink-0" />
+            <span className="truncate">{actionError}</span>
+            <button onClick={() => setActionError(null)} className="ml-auto shrink-0"><X className="w-3 h-3" /></button>
+          </div>
+        )}
+        {actionMsg && (
+          <div className="flex items-center gap-1.5 mt-1 px-2 py-1 rounded-md bg-blue-500/10 text-[10px] text-blue-400">
+            <span className="truncate">{actionMsg}</span>
+            <button onClick={() => setActionMsg(null)} className="ml-auto shrink-0"><X className="w-3 h-3" /></button>
+          </div>
+        )}
 
         {/* Snapshots */}
         <div className="mt-2 space-y-1">

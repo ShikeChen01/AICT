@@ -740,8 +740,12 @@ export async function getSandboxConnectionInfo(sandboxId: string): Promise<Sandb
   return request<SandboxConnectionInfo>('GET', `/sandboxes/${sandboxId}/connect`);
 }
 
-export async function restartSandbox(sandboxId: string): Promise<Sandbox> {
-  return request<Sandbox>('POST', `/sandboxes/${sandboxId}/restart`, undefined, 120_000);
+export async function restartSandbox(sandboxId: string): Promise<{ ok: boolean; sandbox_id: string; action: string; message: string }> {
+  return request<{ ok: boolean; sandbox_id: string; action: string; message: string }>('POST', `/sandboxes/${sandboxId}/restart`, undefined, 120_000);
+}
+
+export async function checkSandboxHealth(sandboxId: string): Promise<{ ok: boolean; sandbox_id: string; status: string }> {
+  return request<{ ok: boolean; sandbox_id: string; status: string }>('GET', `/sandboxes/${sandboxId}/health`);
 }
 
 export async function destroySandbox(sandboxId: string): Promise<void> {

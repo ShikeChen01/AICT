@@ -35,7 +35,7 @@ from backend.workers.worker_manager import get_worker_manager
 
 logger = get_logger(__name__)
 
-RECONCILE_INTERVAL_SECONDS: int = 30
+RECONCILE_INTERVAL_SECONDS: int = 180
 STUCK_ACTIVE_THRESHOLD_SECONDS: int = 600    # 10 minutes
 STUCK_MESSAGE_THRESHOLD_SECONDS: int = 60    # 1 minute
 ZOMBIE_SANDBOX_IDLE_SECONDS: int = 3600      # 1 hour — sandbox claimed but agent sleeping

@@ -480,6 +480,10 @@ class SandboxService:
         os_image, setup_script, persistent, config_requires_desktop = _resolve_config(config)
         # Explicit parameter wins; otherwise fall back to config
         effective_desktop = requires_desktop or config_requires_desktop
+        # Desktops are user-managed, long-lived resources — always persistent
+        # so the idle reaper doesn't kill them while the user is away.
+        if effective_desktop:
+            persistent = True
 
         # ── Provision via orchestrator ────────────────────────────────
         try:
@@ -824,9 +828,64 @@ class SandboxService:
         sandbox.released_at = _utcnow()
         await db.flush()
 
-    async def restart(self, db: AsyncSession, sandbox: Sandbox) -> None:
-        """Restart pod, keep PVC."""
-        await self._orchestrator.restart_sandbox(sandbox.orchestrator_sandbox_id)
+    async def restart(self, db: AsyncSession, sandbox: Sandbox) -> dict:
+        """Restart sandbox. If the container is gone, re-provision it.
+
+        Returns a dict with ``action`` ("restarted" or "reprovisioned") so the
+        caller can inform the user what actually happened.
+        """
+        # Try a normal restart first
+        try:
+            await self._orchestrator.restart_sandbox(
+                sandbox.orchestrator_sandbox_id
+            )
+            sandbox.status = "ready"
+            await db.flush()
+            return {"action": "restarted"}
+        except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException) as exc:
+            logger.warning(
+                "Restart failed for %s, will re-provision: %s",
+                sandbox.orchestrator_sandbox_id,
+                exc,
+            )
+
+        # Container is gone — re-provision with the same config
+        config: SandboxConfig | None = None
+        if sandbox.sandbox_config_id:
+            config = await db.get(SandboxConfig, sandbox.sandbox_config_id)
+        os_image, setup_script, persistent, config_desktop = _resolve_config(config)
+        effective_desktop = sandbox.unit_type == "desktop" or config_desktop
+
+        try:
+            data = await self._orchestrator.session_start(
+                persistent=persistent,
+                requires_desktop=effective_desktop,
+                setup_script=setup_script,
+                os_image=os_image,
+                project_id=str(sandbox.project_id) if sandbox.project_id else None,
+                agent_id=str(sandbox.agent_id) if sandbox.agent_id else None,
+            )
+        except Exception as prov_exc:
+            sandbox.status = "unreachable"
+            await db.flush()
+            raise RuntimeError(
+                f"Failed to re-provision sandbox: {prov_exc}"
+            ) from prov_exc
+
+        # Update DB record with new connection info
+        sandbox.orchestrator_sandbox_id = data["sandbox_id"]
+        sandbox.host = data.get("host")
+        sandbox.port = data.get("host_port", 8080)
+        sandbox.auth_token = data["auth_token"]
+        sandbox.unit_type = data.get(
+            "unit_type", "desktop" if effective_desktop else "headless"
+        )
+        sandbox.status = "ready"
+        sandbox.released_at = None
+        await db.flush()
+
+        await self._probe_health(sandbox.host, sandbox.port, sandbox.auth_token)
+        return {"action": "reprovisioned"}
 
     async def destroy(self, db: AsyncSession, sandbox: Sandbox) -> None:
         """Permanently delete sandbox from orchestrator and DB."""

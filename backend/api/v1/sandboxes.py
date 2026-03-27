@@ -431,11 +431,24 @@ async def restart_sandbox(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Restart sandbox container (keeps volume)."""
+    """Restart sandbox container (keeps volume).
+
+    If the container is gone on the orchestrator, re-provisions it with the
+    same config so the user gets their desktop back.
+    """
     sandbox = await _require_sandbox_access(db, sandbox_id, current_user.id)
     svc = _get_sandbox_service()
-    await svc.restart(db, sandbox)
-    return {"ok": True, "sandbox_id": str(sandbox_id), "message": "Sandbox restarted"}
+    try:
+        result = await svc.restart(db, sandbox)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    action = result.get("action", "restarted")
+    msg = (
+        "Sandbox restarted"
+        if action == "restarted"
+        else "Sandbox was unreachable and has been re-provisioned"
+    )
+    return {"ok": True, "sandbox_id": str(sandbox_id), "action": action, "message": msg}
 
 
 @router.get("/{sandbox_id}/connect", response_model=ConnectionInfo)
@@ -454,6 +467,33 @@ async def get_connection_info(
         port=sandbox.port or 8080,
         token=token,
     )
+
+
+@router.get("/{sandbox_id}/health")
+async def check_sandbox_health(
+    sandbox_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Check if a sandbox is actually reachable.
+
+    Pings the sandbox container directly. If unreachable, updates
+    the DB status to ``unreachable`` so the frontend can show it.
+    """
+    sandbox = await _require_sandbox_access(db, sandbox_id, current_user.id)
+    svc = _get_sandbox_service()
+    try:
+        await svc.sandbox_health(sandbox)
+        sandbox.last_health_at = __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        )
+        sandbox.status = sandbox.status if sandbox.status != "unreachable" else "ready"
+        await db.commit()
+        return {"ok": True, "sandbox_id": str(sandbox_id), "status": "healthy"}
+    except Exception:
+        sandbox.status = "unreachable"
+        await db.commit()
+        return {"ok": False, "sandbox_id": str(sandbox_id), "status": "unreachable"}
 
 
 # ── Snapshots ─────────────────────────────────────────────────────────────
