@@ -8,7 +8,8 @@
  *   Browser (noVNC) → Backend /ws/vnc proxy → Sandbox /ws/vnc → x11vnc TCP
  *
  * Features:
- *   - Auto-reconnect with exponential backoff on disconnect
+ *   - Unlimited auto-reconnect with exponential backoff (desktop VMs are persistent)
+ *   - Instant reconnect when tab becomes visible again
  *   - Interactive/view-only toggle
  *   - Connection status indicator
  */
@@ -25,8 +26,6 @@ interface VncViewProps {
   viewOnly?: boolean;
 }
 
-/** Max reconnect attempts before giving up */
-const MAX_RECONNECT_ATTEMPTS = 10;
 /** Base delay between reconnect attempts (ms). Doubles each attempt, max 30s. */
 const BASE_RECONNECT_DELAY_MS = 1000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -43,6 +42,8 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Set to true when the component is unmounted or sandboxId changes */
   const shouldStopRef = useRef(false);
+  /** Track whether the tab is visible — pause reconnects when hidden */
+  const tabVisibleRef = useRef(!document.hidden);
 
   // Sync interactive mode with viewOnly prop changes
   useEffect(() => {
@@ -145,8 +146,16 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
         setStatus('disconnected');
         rfbRef.current = null;
 
-        // Auto-reconnect unless we intentionally tore down
-        if (!shouldStopRef.current && reconnectAttemptRef.current < MAX_RECONNECT_ATTEMPTS) {
+        // Auto-reconnect unless we intentionally tore down.
+        // No attempt limit — desktop VMs are persistent, the connection
+        // should always recover.  Backoff caps at 30s between attempts.
+        // If the tab is hidden, skip scheduling — the visibilitychange
+        // handler will reconnect immediately when the user returns.
+        if (!shouldStopRef.current) {
+          if (!tabVisibleRef.current) {
+            console.log('[VNC] Tab hidden — deferring reconnect until tab is visible');
+            return;
+          }
           const attempt = reconnectAttemptRef.current;
           const delay = Math.min(
             BASE_RECONNECT_DELAY_MS * Math.pow(2, attempt),
@@ -154,7 +163,7 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
           );
           reconnectAttemptRef.current = attempt + 1;
           console.log(
-            `[VNC] Reconnecting in ${delay}ms (attempt ${attempt + 1}/${MAX_RECONNECT_ATTEMPTS})`,
+            `[VNC] Reconnecting in ${delay}ms (attempt ${attempt + 1})`,
           );
           reconnectTimerRef.current = setTimeout(() => {
             reconnectTimerRef.current = null;
@@ -184,10 +193,28 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
 
     connect();
 
+    // Reconnect immediately when the user returns to the tab.
+    // Cloud Run kills WebSocket connections after 1 hour, and browsers
+    // throttle background tabs — so the connection is often dead when
+    // the user comes back.  Reset backoff and reconnect instantly.
+    const onVisibility = () => {
+      tabVisibleRef.current = !document.hidden;
+      if (!document.hidden && !shouldStopRef.current && sandboxId && !rfbRef.current) {
+        // rfbRef is null when disconnected (set in the disconnect handler).
+        // Reset backoff and reconnect immediately.
+        console.log('[VNC] Tab visible — reconnecting immediately');
+        reconnectAttemptRef.current = 0;
+        cancelReconnect();
+        connect();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
     return () => {
       shouldStopRef.current = true;
       cancelReconnect();
       destroyRfb();
+      document.removeEventListener('visibilitychange', onVisibility);
     };
     // Reconnect when sandboxId changes; interactive is handled via separate effect
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -234,7 +261,7 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
             ? 'VNC Live'
             : status === 'connecting'
               ? 'Connecting...'
-              : reconnectAttemptRef.current > 0 && reconnectAttemptRef.current < MAX_RECONNECT_ATTEMPTS
+              : reconnectAttemptRef.current > 0
                 ? 'Reconnecting...'
                 : 'Disconnected'}
         </div>
@@ -257,26 +284,9 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
               <span className="text-sm text-gray-300 font-medium">Connecting to sandbox display…</span>
               {reconnectAttemptRef.current > 0 && (
                 <span className="text-xs text-gray-500">
-                  Attempt {reconnectAttemptRef.current}/{MAX_RECONNECT_ATTEMPTS}
+                  Attempt {reconnectAttemptRef.current}
                 </span>
               )}
-            </>
-          ) : reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS ? (
-            <>
-              <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
-                <span className="text-red-400 text-lg">✕</span>
-              </div>
-              <span className="text-sm text-gray-300 font-medium">Connection lost</span>
-              <span className="text-xs text-gray-500 max-w-sm text-center">
-                Could not reach the sandbox after {MAX_RECONNECT_ATTEMPTS} attempts.
-                The sandbox may still be starting up.
-              </span>
-              <button
-                onClick={() => { reconnectAttemptRef.current = 0; connect(); }}
-                className="mt-2 px-4 py-1.5 rounded-md text-xs font-medium bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition-colors"
-              >
-                Retry Connection
-              </button>
             </>
           ) : (
             <>
@@ -287,6 +297,12 @@ export function VncView({ sandboxId, viewOnly = false }: VncViewProps) {
                   {disconnectReason}
                 </span>
               )}
+              <button
+                onClick={() => { reconnectAttemptRef.current = 0; cancelReconnect(); destroyRfb(); connect(); }}
+                className="mt-2 px-4 py-1.5 rounded-md text-xs font-medium bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition-colors"
+              >
+                Reconnect Now
+              </button>
             </>
           )}
         </div>

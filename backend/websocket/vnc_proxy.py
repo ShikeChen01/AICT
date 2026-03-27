@@ -207,22 +207,10 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
     try:
         logger.info("VNC proxy connected to sandbox %s", sandbox_id)
 
-        # Periodic touch: tell the pool manager this sandbox is actively
-        # used via VNC so the idle reaper doesn't kill it.
-        async def _keepalive_touch() -> None:
-            from backend.services.sandbox_service import OrchestratorClient
-            orch = OrchestratorClient()
-            try:
-                while True:
-                    await asyncio.sleep(120)  # every 2 minutes
-                    try:
-                        await orch.touch_sandbox(sandbox_id)
-                    except Exception:
-                        pass  # best-effort
-            except asyncio.CancelledError:
-                pass
-
-        touch_task = asyncio.create_task(_keepalive_touch())
+        # NOTE: idle keepalive is handled by the pool manager's VNC proxy
+        # itself (it touches the unit directly while relaying bytes).
+        # Cloud Run kills this backend proxy after --timeout (3600s), but
+        # the pool manager connection survives independently.
 
         async def frontend_to_sandbox() -> None:
             """Forward binary frames from noVNC client to sandbox VNC server."""
@@ -269,7 +257,6 @@ async def proxy_vnc(sandbox_id: str, viewer_ws: WebSocket) -> None:
         )
         for task in pending:
             task.cancel()
-        touch_task.cancel()
 
     except (ConnectionRefusedError, OSError) as exc:
         logger.warning("VNC proxy connection refused for sandbox %s: %s", sandbox_id, exc)

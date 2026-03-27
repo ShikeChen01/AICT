@@ -983,6 +983,22 @@ async def vnc_proxy_ws(ws: WebSocket, unit_id: str):
         await ws.close(code=1011, reason=f"VNC upstream unreachable: {type(exc).__name__}")
         return
 
+    # Keepalive: the pool manager owns the idle timer for VNC sessions.
+    # Touch the unit every 2 min while the VNC proxy is alive so the
+    # idle reaper never kills a desktop with an active viewer.
+    async def _vnc_keepalive():
+        try:
+            while True:
+                await asyncio.sleep(120)
+                u2 = _pool.get(unit_id)
+                if u2:
+                    u2.touch_command()
+                    _pool.update(u2)
+        except asyncio.CancelledError:
+            pass
+
+    touch_task = asyncio.create_task(_vnc_keepalive())
+
     try:
         async def frontend_to_sandbox():
             while True:
@@ -1004,6 +1020,7 @@ async def vnc_proxy_ws(ws: WebSocket, unit_id: str):
     except Exception:
         pass
     finally:
+        touch_task.cancel()
         try:
             await upstream.close()
         except Exception:
