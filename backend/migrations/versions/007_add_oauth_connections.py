@@ -1,11 +1,11 @@
 """Add user_oauth_connections table and widen firebase_uid.
 
 Revision ID: 007_oauth
-Revises: 006_add_v5_api_keys_and_billing
+Revises: 006_add_v5
 """
 
 revision = "007_oauth"
-down_revision = "006_add_v5_api_keys_and_billing"
+down_revision = "006_add_v5"
 
 import sqlalchemy as sa
 from alembic import op
