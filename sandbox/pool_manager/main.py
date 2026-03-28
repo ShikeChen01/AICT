@@ -1140,6 +1140,80 @@ async def vm_restore(
     return JSONResponse({"ok": True, "restored": body.snapshot})
 
 
+# ── REST proxy for desktop sub-VMs ────────────────────────────────────────────
+#
+# Cloud Run cannot reach desktop sub-VMs directly (iptables DNAT through
+# Docker's FORWARD chain is unreliable). This proxy forwards REST requests
+# to the sub-VM's bridge IP, same pattern as the VNC WebSocket proxy above.
+# Headless containers use normal Docker port mapping and don't need this.
+
+
+@app.api_route(
+    "/api/sandbox/{unit_id}/proxy/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE"],
+)
+async def proxy_to_sandbox(
+    unit_id: str,
+    path: str,
+    request: Request,
+    _: None = Depends(require_master_token),
+):
+    """Forward any REST request to a unit's sandbox server.
+
+    Routes:
+      - Desktop VMs: via bridge IP (192.168.100.x:8080)
+      - Headless containers: via localhost:{host_port}
+    """
+    u = _pool.get(unit_id)
+    if u is None:
+        raise HTTPException(status_code=404, detail="Unit not found")
+
+    if u.is_desktop and u.vm_ip:
+        base = f"http://{u.vm_ip}:{config.CONTAINER_INTERNAL_PORT}"
+    else:
+        base = f"http://127.0.0.1:{u.host_port}"
+
+    url = f"{base}/{path}"
+    headers = {"Authorization": f"Bearer {u.auth_token}"}
+
+    # Touch idle timer on every proxied command
+    u.touch_command()
+    _pool.update(u)
+
+    body = await request.body()
+    timeout = httpx.Timeout(
+        read=180.0,  # long-running shell commands
+        connect=10.0,
+        write=10.0,
+        pool=10.0,
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.request(
+                method=request.method,
+                url=url,
+                headers=headers,
+                content=body if body else None,
+                params=dict(request.query_params),
+            )
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail=f"Sandbox timeout: {exc}")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Sandbox unreachable: {exc}")
+
+    # Forward response — handle binary (screenshots) and JSON
+    content_type = resp.headers.get("content-type", "")
+    if "image/" in content_type or "octet-stream" in content_type:
+        from fastapi.responses import Response
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            media_type=content_type,
+        )
+    return JSONResponse(content=resp.json() if resp.content else {}, status_code=resp.status_code)
+
+
 # ── Debug / observability ─────────────────────────────────────────────────────
 
 

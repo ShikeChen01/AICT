@@ -1003,37 +1003,56 @@ class SandboxService:
     # Path 2: Sandbox manipulation (shell, VNC, input)
     # ══════════════════════════════════════════════════════════════════
 
-    async def _resolve_host_port(self, sandbox: Sandbox) -> tuple[str, int]:
-        """Return (host, port) for reaching a sandbox, using dev tunnel if needed."""
+    async def _resolve_host_port(
+        self, sandbox: Sandbox, *, path_prefix: str = ""
+    ) -> tuple[str, int, str]:
+        """Return (host, port, path_prefix) for reaching a sandbox.
+
+        Desktop VMs on the sandbox VM use the pool manager's REST proxy
+        because iptables DNAT through Docker's FORWARD chain is unreliable.
+        The pool manager bridges to the sub-VM's bridge IP internally.
+
+        Headless containers use direct Docker port mapping (works fine).
+        """
         import os
         if os.getenv("ENV", "").lower() == "development" and not os.getenv("K_SERVICE"):
             from backend.services.sandbox_tunnel import get_tunnel_manager
             try:
-                return await get_tunnel_manager().get_host_port(
+                h, p = await get_tunnel_manager().get_host_port(
                     sandbox.orchestrator_sandbox_id, sandbox.port or 8080,
                 )
+                return (h, p, path_prefix)
             except Exception as exc:
                 logger.warning("Dev tunnel failed for sandbox %s: %s", sandbox.orchestrator_sandbox_id, exc)
-        return (sandbox.host, sandbox.port)
+
+        # Desktop VMs: route through pool manager proxy to avoid broken DNAT
+        if sandbox.unit_type == "desktop":
+            pm_host = settings.sandbox_vm_internal_host or settings.sandbox_vm_host
+            pm_port = settings.sandbox_vm_pool_port
+            proxy_prefix = f"/api/sandbox/{sandbox.orchestrator_sandbox_id}/proxy"
+            return (pm_host, pm_port, proxy_prefix)
+
+        return (sandbox.host, sandbox.port, path_prefix)
 
     async def execute_command(
         self, sandbox: Sandbox, command: str, timeout: int = 120
     ) -> ShellResult:
-        host, port = await self._resolve_host_port(sandbox)
+        host, port, prefix = await self._resolve_host_port(sandbox)
         return await self._client.execute_shell(
-            host, port, sandbox.auth_token, command, timeout
+            host, port, sandbox.auth_token, command, timeout,
+            path_prefix=prefix,
         )
 
     async def take_screenshot(self, sandbox: Sandbox) -> bytes:
-        host, port = await self._resolve_host_port(sandbox)
+        host, port, prefix = await self._resolve_host_port(sandbox)
         return await self._client.get_screenshot(
-            host, port, sandbox.auth_token
+            host, port, sandbox.auth_token, path_prefix=prefix,
         )
 
     async def mouse_move(self, sandbox: Sandbox, x: int, y: int) -> dict:
-        host, port = await self._resolve_host_port(sandbox)
+        host, port, prefix = await self._resolve_host_port(sandbox)
         return await self._client.mouse_move(
-            host, port, sandbox.auth_token, x, y
+            host, port, sandbox.auth_token, x, y, path_prefix=prefix,
         )
 
     async def mouse_click(
@@ -1044,10 +1063,11 @@ class SandboxService:
         button: int = 1,
         click_type: str = "single",
     ) -> dict:
-        host, port = await self._resolve_host_port(sandbox)
+        host, port, prefix = await self._resolve_host_port(sandbox)
         return await self._client.mouse_click(
             host, port, sandbox.auth_token,
             x=x, y=y, button=button, click_type=click_type,
+            path_prefix=prefix,
         )
 
     async def mouse_scroll(
@@ -1058,16 +1078,17 @@ class SandboxService:
         direction: str = "down",
         clicks: int = 3,
     ) -> dict:
-        host, port = await self._resolve_host_port(sandbox)
+        host, port, prefix = await self._resolve_host_port(sandbox)
         return await self._client.mouse_scroll(
             host, port, sandbox.auth_token,
             x=x, y=y, direction=direction, clicks=clicks,
+            path_prefix=prefix,
         )
 
     async def mouse_location(self, sandbox: Sandbox) -> dict:
-        host, port = await self._resolve_host_port(sandbox)
+        host, port, prefix = await self._resolve_host_port(sandbox)
         return await self._client.mouse_location(
-            host, port, sandbox.auth_token
+            host, port, sandbox.auth_token, path_prefix=prefix,
         )
 
     async def keyboard_press(
@@ -1076,27 +1097,28 @@ class SandboxService:
         keys: str | None = None,
         text: str | None = None,
     ) -> dict:
-        host, port = await self._resolve_host_port(sandbox)
+        host, port, prefix = await self._resolve_host_port(sandbox)
         return await self._client.keyboard_press(
-            host, port, sandbox.auth_token, keys=keys, text=text
+            host, port, sandbox.auth_token, keys=keys, text=text,
+            path_prefix=prefix,
         )
 
     async def start_recording(self, sandbox: Sandbox) -> dict:
-        host, port = await self._resolve_host_port(sandbox)
+        host, port, prefix = await self._resolve_host_port(sandbox)
         return await self._client.start_recording(
-            host, port, sandbox.auth_token
+            host, port, sandbox.auth_token, path_prefix=prefix,
         )
 
     async def stop_recording(self, sandbox: Sandbox) -> bytes:
-        host, port = await self._resolve_host_port(sandbox)
+        host, port, prefix = await self._resolve_host_port(sandbox)
         return await self._client.stop_recording(
-            host, port, sandbox.auth_token
+            host, port, sandbox.auth_token, path_prefix=prefix,
         )
 
     async def sandbox_health(self, sandbox: Sandbox) -> dict:
-        host, port = await self._resolve_host_port(sandbox)
+        host, port, prefix = await self._resolve_host_port(sandbox)
         return await self._client.health_check(
-            host, port, sandbox.auth_token
+            host, port, sandbox.auth_token, path_prefix=prefix,
         )
 
     # ══════════════════════════════════════════════════════════════════

@@ -51,7 +51,16 @@ class SandboxClient:
 
     Each method creates a fresh httpx.AsyncClient or WebSocket connection
     and closes it when done. No in-memory connection cache or singleton state.
+
+    The ``path_prefix`` parameter is used for desktop VMs whose traffic is
+    proxied through the pool manager (e.g. ``/api/sandbox/{id}/proxy``).
+    When set, REST endpoints become ``{prefix}/shell/execute`` instead of
+    ``/shell/execute``.
     """
+
+    @staticmethod
+    def _base_url(host: str, port: int) -> str:
+        return f"http://{host}:{port}"
 
     # ── Shell execution ───────────────────────────────────────────────────────
 
@@ -62,11 +71,16 @@ class SandboxClient:
         auth_token: str,
         command: str,
         timeout: int = 120,
+        *,
+        path_prefix: str = "",
     ) -> ShellResult:
         """Execute a shell command via REST, with WS fallback for older sandboxes."""
         try:
-            return await self._execute_shell_rest(host, port, auth_token, command, timeout)
+            return await self._execute_shell_rest(host, port, auth_token, command, timeout, path_prefix=path_prefix)
         except RuntimeError as exc:
+            if path_prefix:
+                # WS fallback doesn't work through the proxy — re-raise
+                raise
             logger.warning(
                 "Shell REST path unavailable for %s:%s, falling back to WS shell: %s",
                 host,
@@ -82,9 +96,11 @@ class SandboxClient:
         auth_token: str,
         command: str,
         timeout: int = 120,
+        *,
+        path_prefix: str = "",
     ) -> ShellResult:
         """Execute a shell command via the sandbox server REST endpoint."""
-        rest_base_url = f"http://{host}:{port}"
+        rest_base_url = self._base_url(host, port)
         async with httpx.AsyncClient(
             base_url=rest_base_url,
             headers={"Authorization": f"Bearer {auth_token}"},
@@ -92,7 +108,7 @@ class SandboxClient:
         ) as client:
             try:
                 resp = await client.post(
-                    "/shell/execute",
+                    f"{path_prefix}/shell/execute",
                     json={"command": command, "timeout": timeout},
                 )
             except Exception as exc:
@@ -242,142 +258,122 @@ class SandboxClient:
 
     # ── REST operations ───────────────────────────────────────────────────────
 
-    async def health_check(self, host: str, port: int, auth_token: str) -> dict[str, Any]:
-        rest_base_url = f"http://{host}:{port}"
+    async def health_check(self, host: str, port: int, auth_token: str, *, path_prefix: str = "") -> dict[str, Any]:
         async with httpx.AsyncClient(
-            base_url=rest_base_url,
+            base_url=self._base_url(host, port),
             headers={"Authorization": f"Bearer {auth_token}"},
             timeout=30.0,
         ) as client:
-            resp = await client.get("/health")
+            resp = await client.get(f"{path_prefix}/health")
             resp.raise_for_status()
             return resp.json()
 
-    async def get_screenshot(self, host: str, port: int, auth_token: str) -> bytes:
-        rest_base_url = f"http://{host}:{port}"
+    async def get_screenshot(self, host: str, port: int, auth_token: str, *, path_prefix: str = "") -> bytes:
         async with httpx.AsyncClient(
-            base_url=rest_base_url,
+            base_url=self._base_url(host, port),
             headers={"Authorization": f"Bearer {auth_token}"},
             timeout=30.0,
         ) as client:
-            resp = await client.get("/screenshot", timeout=20.0)
+            resp = await client.get(f"{path_prefix}/screenshot", timeout=20.0)
             resp.raise_for_status()
             return resp.content
 
-    async def mouse_move(self, host: str, port: int, auth_token: str, x: int, y: int) -> dict[str, Any]:
-        rest_base_url = f"http://{host}:{port}"
+    async def mouse_move(self, host: str, port: int, auth_token: str, x: int, y: int, *, path_prefix: str = "") -> dict[str, Any]:
         async with httpx.AsyncClient(
-            base_url=rest_base_url,
+            base_url=self._base_url(host, port),
             headers={"Authorization": f"Bearer {auth_token}"},
             timeout=30.0,
         ) as client:
-            resp = await client.post("/mouse/move", json={"x": x, "y": y})
+            resp = await client.post(f"{path_prefix}/mouse/move", json={"x": x, "y": y})
             resp.raise_for_status()
             return resp.json()
 
     async def mouse_click(
-        self,
-        host: str,
-        port: int,
-        auth_token: str,
-        x: int | None = None,
-        y: int | None = None,
-        button: int = 1,
-        click_type: str = "single",
+        self, host: str, port: int, auth_token: str,
+        x: int | None = None, y: int | None = None,
+        button: int = 1, click_type: str = "single",
+        *, path_prefix: str = "",
     ) -> dict[str, Any]:
-        rest_base_url = f"http://{host}:{port}"
         payload: dict[str, Any] = {"button": button, "click_type": click_type}
         if x is not None:
             payload["x"] = x
         if y is not None:
             payload["y"] = y
         async with httpx.AsyncClient(
-            base_url=rest_base_url,
+            base_url=self._base_url(host, port),
             headers={"Authorization": f"Bearer {auth_token}"},
             timeout=30.0,
         ) as client:
-            resp = await client.post("/mouse/click", json=payload)
+            resp = await client.post(f"{path_prefix}/mouse/click", json=payload)
             resp.raise_for_status()
             return resp.json()
 
     async def mouse_scroll(
-        self,
-        host: str,
-        port: int,
-        auth_token: str,
-        x: int | None = None,
-        y: int | None = None,
-        direction: str = "down",
-        clicks: int = 3,
+        self, host: str, port: int, auth_token: str,
+        x: int | None = None, y: int | None = None,
+        direction: str = "down", clicks: int = 3,
+        *, path_prefix: str = "",
     ) -> dict[str, Any]:
-        rest_base_url = f"http://{host}:{port}"
         payload: dict[str, Any] = {"direction": direction, "clicks": clicks}
         if x is not None:
             payload["x"] = x
         if y is not None:
             payload["y"] = y
         async with httpx.AsyncClient(
-            base_url=rest_base_url,
+            base_url=self._base_url(host, port),
             headers={"Authorization": f"Bearer {auth_token}"},
             timeout=30.0,
         ) as client:
-            resp = await client.post("/mouse/scroll", json=payload)
+            resp = await client.post(f"{path_prefix}/mouse/scroll", json=payload)
             resp.raise_for_status()
             return resp.json()
 
-    async def mouse_location(self, host: str, port: int, auth_token: str) -> dict[str, Any]:
-        rest_base_url = f"http://{host}:{port}"
+    async def mouse_location(self, host: str, port: int, auth_token: str, *, path_prefix: str = "") -> dict[str, Any]:
         async with httpx.AsyncClient(
-            base_url=rest_base_url,
+            base_url=self._base_url(host, port),
             headers={"Authorization": f"Bearer {auth_token}"},
             timeout=30.0,
         ) as client:
-            resp = await client.get("/mouse/location")
+            resp = await client.get(f"{path_prefix}/mouse/location")
             resp.raise_for_status()
             return resp.json()
 
     async def keyboard_press(
-        self,
-        host: str,
-        port: int,
-        auth_token: str,
-        keys: str | None = None,
-        text: str | None = None,
+        self, host: str, port: int, auth_token: str,
+        keys: str | None = None, text: str | None = None,
+        *, path_prefix: str = "",
     ) -> dict[str, Any]:
-        rest_base_url = f"http://{host}:{port}"
         payload: dict[str, str] = {}
         if keys:
             payload["keys"] = keys
         if text:
             payload["text"] = text
         async with httpx.AsyncClient(
-            base_url=rest_base_url,
+            base_url=self._base_url(host, port),
             headers={"Authorization": f"Bearer {auth_token}"},
             timeout=30.0,
         ) as client:
-            resp = await client.post("/keyboard", json=payload)
+            resp = await client.post(f"{path_prefix}/keyboard", json=payload)
             resp.raise_for_status()
             return resp.json()
 
-    async def start_recording(self, host: str, port: int, auth_token: str) -> dict[str, Any]:
-        rest_base_url = f"http://{host}:{port}"
+    async def start_recording(self, host: str, port: int, auth_token: str, *, path_prefix: str = "") -> dict[str, Any]:
         async with httpx.AsyncClient(
-            base_url=rest_base_url,
+            base_url=self._base_url(host, port),
             headers={"Authorization": f"Bearer {auth_token}"},
             timeout=30.0,
         ) as client:
-            resp = await client.post("/record/start", timeout=10.0)
+            resp = await client.post(f"{path_prefix}/record/start", timeout=10.0)
             resp.raise_for_status()
             return resp.json()
 
-    async def stop_recording(self, host: str, port: int, auth_token: str) -> bytes:
-        rest_base_url = f"http://{host}:{port}"
+    async def stop_recording(self, host: str, port: int, auth_token: str, *, path_prefix: str = "") -> bytes:
         async with httpx.AsyncClient(
-            base_url=rest_base_url,
+            base_url=self._base_url(host, port),
             headers={"Authorization": f"Bearer {auth_token}"},
             timeout=30.0,
         ) as client:
-            resp = await client.post("/record/stop", timeout=60.0)
+            resp = await client.post(f"{path_prefix}/record/stop", timeout=60.0)
             resp.raise_for_status()
             return resp.content
 
