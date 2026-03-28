@@ -30,6 +30,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    and_,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.types import TypeDecorator
@@ -276,7 +277,7 @@ class Sandbox(Base):
 
     user = relationship("User", foreign_keys=[user_id])
     project = relationship("Project")
-    agent = relationship("Agent", back_populates="sandbox")
+    agent = relationship("Agent", foreign_keys=[agent_id], overlaps="sandbox,desktop")
     config = relationship("SandboxConfig", back_populates="sandboxes")
     snapshots = relationship("SandboxSnapshot", back_populates="sandbox", cascade="all, delete-orphan")
     file_saves = relationship("SandboxFileSave", back_populates="sandbox")
@@ -706,7 +707,20 @@ class Agent(Base):
 
     project = relationship("Project", back_populates="agents")
     template = relationship("AgentTemplate", back_populates="agents", foreign_keys=[template_id])
-    sandbox = relationship("Sandbox", back_populates="agent", uselist=False)
+    sandbox = relationship(
+        "Sandbox",
+        primaryjoin="and_(Agent.id == foreign(Sandbox.agent_id), Sandbox.unit_type == 'headless')",
+        uselist=False,
+        viewonly=True,
+        overlaps="desktop",
+    )
+    desktop = relationship(
+        "Sandbox",
+        primaryjoin="and_(Agent.id == foreign(Sandbox.agent_id), Sandbox.unit_type == 'desktop')",
+        uselist=False,
+        viewonly=True,
+        overlaps="sandbox",
+    )
     current_task = relationship("Task", foreign_keys=[current_task_id])
     agent_sessions = relationship(
         "AgentSession", back_populates="agent", cascade="all, delete-orphan"

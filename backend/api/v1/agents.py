@@ -36,7 +36,9 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 async def _ensure_agent_access(db: AsyncSession, agent_id: UUID, user_id: UUID) -> Agent:
     result = await db.execute(
-        select(Agent).options(selectinload(Agent.sandbox)).where(Agent.id == agent_id)
+        select(Agent)
+        .options(selectinload(Agent.sandbox), selectinload(Agent.desktop))
+        .where(Agent.id == agent_id)
     )
     agent = result.scalar_one_or_none()
     if not agent:
@@ -56,7 +58,7 @@ async def list_agents(
         await require_project_access(db, project_id, current_user.id)
     result = await db.execute(
         select(Agent)
-        .options(selectinload(Agent.sandbox))
+        .options(selectinload(Agent.sandbox), selectinload(Agent.desktop))
         .where(Agent.project_id == project_id)
         .order_by(Agent.created_at, Agent.display_name)
     )
@@ -77,6 +79,7 @@ async def list_agents(
             status=agent.status,
             current_task_id=agent.current_task_id,
             sandbox_id=str(agent.sandbox.id) if agent.sandbox else None,
+            desktop_id=str(agent.desktop.id) if agent.desktop else None,
             memory=agent.memory,
             created_at=agent.created_at,
             updated_at=agent.updated_at,
@@ -99,7 +102,7 @@ async def list_agent_status(
         await require_project_access(db, project_id, current_user.id)
     result = await db.execute(
         select(Agent)
-        .options(selectinload(Agent.sandbox))
+        .options(selectinload(Agent.sandbox), selectinload(Agent.desktop))
         .where(Agent.project_id == project_id)
         .order_by(Agent.created_at, Agent.display_name)
     )
@@ -147,6 +150,7 @@ async def list_agent_status(
             status=agent.status,
             current_task_id=agent.current_task_id,
             sandbox_id=str(agent.sandbox.id) if agent.sandbox else None,
+            desktop_id=str(agent.desktop.id) if agent.desktop else None,
             memory=agent.memory,
             created_at=agent.created_at,
             updated_at=agent.updated_at,
@@ -178,6 +182,7 @@ async def get_agent(
         status=agent.status,
         current_task_id=agent.current_task_id,
         sandbox_id=str(agent.sandbox.id) if agent.sandbox else None,
+        desktop_id=str(agent.desktop.id) if agent.desktop else None,
         memory=agent.memory,
         created_at=agent.created_at,
         updated_at=agent.updated_at,
@@ -228,6 +233,7 @@ async def create_agent(
         status=agent.status,
         current_task_id=agent.current_task_id,
         sandbox_id=None,
+        desktop_id=None,
         memory=agent.memory,
         created_at=agent.created_at,
         updated_at=agent.updated_at,
@@ -407,6 +413,7 @@ async def update_agent(
         agent.token_allocations = alloc
 
     sandbox = agent.sandbox  # capture before commit expires the relationship
+    desktop = agent.desktop
     await db.commit()
     await db.refresh(agent)
     return AgentResponse(
@@ -421,6 +428,7 @@ async def update_agent(
         status=agent.status,
         current_task_id=agent.current_task_id,
         sandbox_id=str(sandbox.id) if sandbox else None,
+        desktop_id=str(desktop.id) if desktop else None,
         memory=agent.memory,
         created_at=agent.created_at,
         updated_at=agent.updated_at,
@@ -483,6 +491,7 @@ async def get_agent_context(
         available_tools=available_tools,
         recent_messages=[],
         sandbox_id=str(agent.sandbox.id) if agent.sandbox else None,
+        desktop_id=str(agent.desktop.id) if agent.desktop else None,
         sandbox_active=bool(agent.sandbox),
     )
 

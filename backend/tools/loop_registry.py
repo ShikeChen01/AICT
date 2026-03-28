@@ -47,6 +47,18 @@ from backend.tools.executors.sandbox import (
     run_sandbox_record_screen,
     run_sandbox_end_record_screen,
 )
+from backend.tools.executors.desktop import (
+    run_desktop_screenshot,
+    run_desktop_mouse_move,
+    run_desktop_mouse_click,
+    run_desktop_mouse_scroll,
+    run_desktop_keyboard_press,
+    run_desktop_open_url,
+    run_desktop_list_windows,
+    run_desktop_focus_window,
+    run_desktop_get_clipboard,
+    run_desktop_set_clipboard,
+)
 from backend.tools.executors.agents import (
     run_spawn_engineer,
     run_list_agents,
@@ -74,6 +86,19 @@ _SANDBOX_TOOL_NAMES = frozenset({
     "sandbox_keyboard_press",
     "sandbox_record_screen",
     "sandbox_end_record_screen",
+})
+
+_DESKTOP_TOOL_NAMES = frozenset({
+    "desktop_screenshot",
+    "desktop_mouse_move",
+    "desktop_mouse_click",
+    "desktop_mouse_scroll",
+    "desktop_keyboard_press",
+    "desktop_open_url",
+    "desktop_list_windows",
+    "desktop_focus_window",
+    "desktop_get_clipboard",
+    "desktop_set_clipboard",
 })
 
 
@@ -143,6 +168,16 @@ _TOOL_EXECUTORS: dict[str, ToolExecutor | None] = {
     "sandbox_keyboard_press": run_sandbox_keyboard_press,
     "sandbox_record_screen": run_sandbox_record_screen,
     "sandbox_end_record_screen": run_sandbox_end_record_screen,
+    "desktop_screenshot": run_desktop_screenshot,
+    "desktop_mouse_move": run_desktop_mouse_move,
+    "desktop_mouse_click": run_desktop_mouse_click,
+    "desktop_mouse_scroll": run_desktop_mouse_scroll,
+    "desktop_keyboard_press": run_desktop_keyboard_press,
+    "desktop_open_url": run_desktop_open_url,
+    "desktop_list_windows": run_desktop_list_windows,
+    "desktop_focus_window": run_desktop_focus_window,
+    "desktop_get_clipboard": run_desktop_get_clipboard,
+    "desktop_set_clipboard": run_desktop_set_clipboard,
     "create_task": run_create_task,
     "assign_task": run_assign_task,
     "update_task_status": run_update_task_status,
@@ -262,7 +297,7 @@ def get_tool_defs_for_role(role: str) -> list[dict]:
     return [
         {"name": t.name, "description": t.description, "input_schema": t.input_schema}
         for t in _TOOLS
-        if sandbox_ok or t.name not in _SANDBOX_TOOL_NAMES
+        if sandbox_ok or (t.name not in _SANDBOX_TOOL_NAMES and t.name not in _DESKTOP_TOOL_NAMES)
     ]
 
 
@@ -289,7 +324,7 @@ async def get_tool_defs_for_agent(agent_id, role: str, db) -> list[dict]:
     for tc in db_tools:
         if not tc.enabled:
             continue
-        if not sandbox_ok and tc.tool_name in _SANDBOX_TOOL_NAMES:
+        if not sandbox_ok and (tc.tool_name in _SANDBOX_TOOL_NAMES or tc.tool_name in _DESKTOP_TOOL_NAMES):
             continue
         result.append({
             "name": tc.tool_name,

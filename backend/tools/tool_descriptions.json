@@ -920,6 +920,269 @@
     ]
   },
   {
+    "name": "desktop_screenshot",
+    "description": "Capture a screenshot of the assigned desktop VM display.",
+    "detailed_description": [
+      "Capture the current state of the desktop VM virtual display as a JPEG image.",
+      "The desktop VM is a persistent, user-assigned VM with full GUI (not the headless sandbox).",
+      "When using a vision-capable model, the screenshot is injected directly into the",
+      "conversation as an image you can see and analyze. Use this to observe the current",
+      "state of any GUI application running on the desktop, identify UI elements, read",
+      "text on screen, and plan mouse/keyboard interactions."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "desktop_mouse_move",
+    "description": "Move mouse cursor to (x, y) on the desktop VM display.",
+    "detailed_description": [
+      "Move the mouse cursor to the specified coordinates on the desktop VM virtual display.",
+      "The desktop VM is a persistent, user-assigned VM (not the headless sandbox).",
+      "Coordinates are in pixels (0,0 = top-left of the display)."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "integer",
+          "description": "X coordinate (0\u20131024)"
+        },
+        "y": {
+          "type": "integer",
+          "description": "Y coordinate (0\u2013768)"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ]
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "desktop_mouse_click",
+    "description": "Click the mouse at optional (x, y) coordinates on the desktop VM display.",
+    "detailed_description": [
+      "Click the mouse button at the specified coordinates on the desktop VM, or at",
+      "the current cursor position if x/y are omitted. The desktop VM is a persistent,",
+      "user-assigned VM (not the headless sandbox). Supports left/middle/right buttons",
+      "and single/double/triple clicks. After clicking, take a desktop_screenshot to verify."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "integer",
+          "description": "X coordinate (0\u20131024). Omit to click at current position."
+        },
+        "y": {
+          "type": "integer",
+          "description": "Y coordinate (0\u2013768). Omit to click at current position."
+        },
+        "button": {
+          "type": "integer",
+          "description": "Mouse button: 1=left (default), 2=middle, 3=right",
+          "default": 1
+        },
+        "click_type": {
+          "type": "string",
+          "description": "Click type: 'single' (default), 'double', or 'triple'",
+          "enum": [
+            "single",
+            "double",
+            "triple"
+          ],
+          "default": "single"
+        }
+      }
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "desktop_mouse_scroll",
+    "description": "Scroll the mouse wheel at optional (x, y) coordinates on the desktop VM display.",
+    "detailed_description": [
+      "Scroll the mouse wheel at the specified coordinates on the desktop VM, or at",
+      "the current cursor position if x/y are omitted. The desktop VM is a persistent,",
+      "user-assigned VM (not the headless sandbox). Supports up/down/left/right scrolling.",
+      "Use 'clicks' to control the scroll distance (default 3)."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "integer",
+          "description": "X coordinate (0\u20131024). Omit to scroll at current position."
+        },
+        "y": {
+          "type": "integer",
+          "description": "Y coordinate (0\u2013768). Omit to scroll at current position."
+        },
+        "direction": {
+          "type": "string",
+          "description": "Scroll direction: 'up', 'down' (default), 'left', or 'right'",
+          "enum": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ],
+          "default": "down"
+        },
+        "clicks": {
+          "type": "integer",
+          "description": "Number of scroll clicks (default 3)",
+          "default": 3
+        }
+      }
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "desktop_keyboard_press",
+    "description": "Send key press or type text on the desktop VM display.",
+    "detailed_description": [
+      "Send keyboard input to the desktop VM. The desktop VM is a persistent,",
+      "user-assigned VM (not the headless sandbox). Use 'keys' for special key combos",
+      "(e.g. 'ctrl+c', 'Return', 'Escape', 'alt+F4') or 'text' to type a string of",
+      "characters. Exactly one of 'keys' or 'text' must be provided."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "keys": {
+          "type": "string",
+          "description": "xdotool key combo (e.g. 'ctrl+c', 'Return')"
+        },
+        "text": {
+          "type": "string",
+          "description": "Raw text to type into the focused window"
+        }
+      }
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "desktop_open_url",
+    "description": "Open a URL in Google Chrome on the desktop VM.",
+    "detailed_description": [
+      "Launch Google Chrome on the desktop VM and navigate to the specified URL.",
+      "The desktop VM is a persistent, user-assigned VM with full GUI.",
+      "Chrome is started with flags to suppress first-run dialogs and info bars.",
+      "The command returns immediately; use desktop_screenshot to verify the page loaded."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The URL to open in Google Chrome."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "desktop_list_windows",
+    "description": "List all open windows on the desktop VM display.",
+    "detailed_description": [
+      "List all visible windows on the desktop VM using wmctrl (with xdotool fallback).",
+      "Returns window IDs, titles, and process information. Use this to discover which",
+      "applications are open before focusing or interacting with them."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "desktop_focus_window",
+    "description": "Focus a window on the desktop VM by title or window ID.",
+    "detailed_description": [
+      "Bring a window to the foreground on the desktop VM. Provide either a window",
+      "title (partial match) or a window ID (from desktop_list_windows). Uses wmctrl",
+      "with xdotool fallback. After focusing, use desktop_screenshot to verify."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Window title or partial title to match."
+        },
+        "window_id": {
+          "type": "string",
+          "description": "Window ID (hex, from desktop_list_windows)."
+        }
+      }
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "desktop_get_clipboard",
+    "description": "Get the clipboard contents from the desktop VM.",
+    "detailed_description": [
+      "Read the current clipboard (selection clipboard) contents from the desktop VM.",
+      "Uses xclip with xsel fallback. Returns the clipboard text, or indicates if",
+      "the clipboard is empty."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
+    "name": "desktop_set_clipboard",
+    "description": "Set the clipboard contents on the desktop VM.",
+    "detailed_description": [
+      "Write text to the desktop VM clipboard (selection clipboard) using xclip.",
+      "The content can then be pasted into any application on the desktop using",
+      "Ctrl+V or desktop_keyboard_press with keys='ctrl+v'."
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string",
+          "description": "The text content to place on the clipboard."
+        }
+      },
+      "required": [
+        "content"
+      ]
+    },
+    "allowed_roles": [
+      "*"
+    ]
+  },
+  {
     "name": "search_knowledge",
     "description": "Search the project knowledge base for relevant documents.",
     "detailed_description": [

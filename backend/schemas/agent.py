@@ -26,6 +26,7 @@ class AgentResponse(BaseModel):
     status: str
     current_task_id: UUID | None
     sandbox_id: str | None
+    desktop_id: str | None = None
     memory: dict | None = None
     created_at: datetime
     updated_at: datetime
@@ -85,4 +86,5 @@ class AgentContextResponse(BaseModel):
     available_tools: list[AgentTool] = Field(default_factory=list)
     recent_messages: list[dict] = Field(default_factory=list, description="Last N messages in agent context")
     sandbox_id: str | None = None
+    desktop_id: str | None = None
     sandbox_active: bool = False

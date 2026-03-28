@@ -740,7 +740,10 @@ class SandboxService:
         """
         # ── 1. Check existing assignment ────────────────────────────────
         existing = await db.execute(
-            select(Sandbox).where(Sandbox.agent_id == agent.id)
+            select(Sandbox).where(
+                Sandbox.agent_id == agent.id,
+                Sandbox.unit_type == "headless",
+            )
         )
         existing_sandbox = existing.scalar_one_or_none()
         if existing_sandbox:
