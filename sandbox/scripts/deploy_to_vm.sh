@@ -57,9 +57,10 @@ gcloud compute ssh "${VM_USER}@${GCP_INSTANCE}" \
     --zone="${GCP_ZONE}" \
     --command="curl -sf -H 'Authorization: Bearer ${TOKEN_FOR_FLUSH}' http://localhost:9090/api/sandbox/list \
         | python3 -c \"import sys,json,urllib.request; \
-            sandboxes=json.load(sys.stdin); \
-            [urllib.request.urlopen(urllib.request.Request('http://localhost:9090/api/sandbox/'+s['sandbox_id'],method='DELETE',headers={'Authorization':'Bearer ${TOKEN_FOR_FLUSH}'})) for s in sandboxes]; \
-            print(f'Flushed {len(sandboxes)} containers.')\" 2>&1 || echo 'No containers to flush.'"
+            units=json.load(sys.stdin); \
+            headless=[u for u in units if u['unit_type']=='headless']; \
+            [urllib.request.urlopen(urllib.request.Request('http://localhost:9090/api/unit/'+u['unit_id'],method='DELETE',headers={'Authorization':'Bearer ${TOKEN_FOR_FLUSH}'})) for u in headless]; \
+            print(f'Flushed {len(headless)} headless containers (skipped {len(units)-len(headless)} desktops).')\" 2>&1 || echo 'No containers to flush.'"
 
 # ── 3. Verify pool manager ────────────────────────────────────────────────────
 

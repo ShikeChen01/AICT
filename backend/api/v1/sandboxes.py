@@ -288,6 +288,10 @@ async def list_sandboxes(
     else:
         sandboxes = await svc.list_for_user(db, current_user.id)
 
+    # Best-effort sync with pool manager's live unit status
+    await svc.sync_pool_status(db, sandboxes)
+    await db.commit()
+
     return [_sandbox_to_response(sb) for sb in sandboxes]
 
 

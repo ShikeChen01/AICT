@@ -1149,6 +1149,52 @@ class SandboxService:
     async def list_images(self) -> list[dict]:
         return await self._orchestrator.list_images()
 
+    # ══════════════════════════════════════════════════════════════════
+    # Pool status sync
+    # ══════════════════════════════════════════════════════════════════
+
+    # Pool manager status → DB status mapping
+    _POOL_STATUS_MAP = {
+        "idle": "idle",
+        "assigned": "assigned",
+        "resetting": "resetting",
+        "unhealthy": "unhealthy",
+    }
+
+    async def sync_pool_status(
+        self, db: AsyncSession, sandboxes: list[Sandbox]
+    ) -> None:
+        """Best-effort sync of DB sandbox status from pool manager units.
+
+        Queries the pool manager once, cross-references by
+        orchestrator_sandbox_id, and updates any rows that have drifted.
+        Commits nothing — caller is responsible for flush/commit.
+        """
+        if not sandboxes:
+            return
+        try:
+            units = await self._orchestrator.list_sandboxes()
+        except Exception as exc:
+            logger.debug("Pool status sync skipped (pool manager unreachable): %s", exc)
+            return
+
+        unit_map: dict[str, str] = {
+            u["unit_id"]: u.get("status", "")
+            for u in units
+            if "unit_id" in u
+        }
+
+        for sb in sandboxes:
+            pool_status = unit_map.get(sb.orchestrator_sandbox_id)
+            if pool_status is None:
+                # Unit no longer exists in pool manager
+                if sb.status not in ("released", "unhealthy"):
+                    sb.status = "released"
+                continue
+            mapped = self._POOL_STATUS_MAP.get(pool_status)
+            if mapped and mapped != sb.status:
+                sb.status = mapped
+
     # ── Internal helpers ──────────────────────────────────────────────
 
     async def _load_sandbox(self, db: AsyncSession, sandbox_id: UUID) -> Sandbox:

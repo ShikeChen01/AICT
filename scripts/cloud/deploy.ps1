@@ -90,7 +90,7 @@ $yamlLines = @(
 )
 
 if ($env:SANDBOX_VM_HOST -or $env:SANDBOX_VM_INTERNAL_HOST) {
-    Write-Host "Using legacy sandbox VM configuration."
+    Write-Host "Using sandbox VM configuration."
     $yamlLines += "SANDBOX_VM_HOST: '$($env:SANDBOX_VM_HOST)'"
     $yamlLines += "SANDBOX_VM_INTERNAL_HOST: '$($env:SANDBOX_VM_INTERNAL_HOST)'"
     $yamlLines += "SANDBOX_VM_POOL_PORT: '$($env:SANDBOX_VM_POOL_PORT)'"

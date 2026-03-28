@@ -28,10 +28,14 @@ function statusColor(status: string | null): string {
   switch (status) {
     case 'assigned':
     case 'idle':
+    case 'ready':
       return 'bg-green-100 text-green-800';
     case 'resetting':
+    case 'provisioning':
       return 'bg-amber-100 text-amber-800';
     case 'unhealthy':
+    case 'unreachable':
+    case 'released':
       return 'bg-red-100 text-red-800';
     default:
       return 'bg-gray-100 text-gray-600';
