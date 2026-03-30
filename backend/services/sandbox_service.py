@@ -806,14 +806,17 @@ class SandboxService:
         result = await db.execute(
             select(Sandbox).where(Sandbox.agent_id == agent.id)
         )
-        sandbox = result.scalar_one_or_none()
-        if not sandbox:
+        sandboxes = list(result.scalars().all())
+        if not sandboxes:
             return
 
-        await self.release_to_pool(db, sandbox)
-
         from sqlalchemy.orm.attributes import set_committed_value
-        set_committed_value(agent, "sandbox", None)
+        for sandbox in sandboxes:
+            await self.release_to_pool(db, sandbox)
+            if sandbox.unit_type == "desktop":
+                set_committed_value(agent, "desktop", None)
+            else:
+                set_committed_value(agent, "sandbox", None)
 
     # ══════════════════════════════════════════════════════════════════
     # Sandbox infrastructure operations

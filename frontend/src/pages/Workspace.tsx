@@ -174,13 +174,13 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
   // Auto-select first agent with sandbox, or first agent
   useEffect(() => {
     if (!selectedAgentId && agents.length > 0) {
-      const withSandbox = agents.find(a => a.sandbox_id);
+      const withSandbox = agents.find(a => a.sandbox_id || a.desktop_id);
       setSelectedAgentId(withSandbox?.id ?? agents[0].id);
     }
   }, [agents, selectedAgentId]);
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId);
-  const hasSandbox = Boolean(selectedAgent?.sandbox_id);
+  const hasSandbox = Boolean(selectedAgent?.sandbox_id || selectedAgent?.desktop_id);
   const buffer = selectedAgentId
     ? getBuffer(selectedAgentId)
     : { agentId: '', sessionId: null, chunks: [], isStreaming: false, lastActivity: 0 };
@@ -297,8 +297,8 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
         >
           {/* VNC Screen */}
           <div className="min-h-0 relative" style={{ height: `${screenPct}%`, background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)' }}>
-            {hasSandbox && selectedAgent?.sandbox_id ? (
-              <VncViewWrapper projectId={projectId} agentId={selectedAgent.id} sandboxId={selectedAgent.sandbox_id} />
+            {hasSandbox && selectedAgent && (selectedAgent.desktop_id || selectedAgent.sandbox_id) ? (
+              <VncViewWrapper projectId={projectId} agentId={selectedAgent.id} sandboxId={(selectedAgent.desktop_id || selectedAgent.sandbox_id)!} />
             ) : (
               <div className="flex items-center justify-center h-full text-[var(--text-muted)] gap-2">
                 <MonitorOff className="w-6 h-6" />
@@ -443,7 +443,7 @@ function AgentPickerDropdown({
                 <span className={cn('text-xs px-1.5 py-0.5 rounded ml-auto shrink-0', ROLE_BADGE[agent.role]?.bg, ROLE_BADGE[agent.role]?.text)}>
                   {agent.role}
                 </span>
-                {agent.sandbox_id && <Monitor className="w-3 h-3 shrink-0 text-[var(--color-success)]" />}
+                {(agent.sandbox_id || agent.desktop_id) && <Monitor className="w-3 h-3 shrink-0 text-[var(--color-success)]" />}
               </button>
             ))}
             {agents.length === 0 && (

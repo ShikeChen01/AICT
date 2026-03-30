@@ -34,7 +34,7 @@ async def execute(
         raise HTTPException(status_code=403, detail="agent_id must match authenticated agent")
 
     result = await db.execute(
-        select(Agent).options(selectinload(Agent.sandbox)).where(Agent.id == body.agent_id)
+        select(Agent).options(selectinload(Agent.sandbox), selectinload(Agent.desktop)).where(Agent.id == body.agent_id)
     )
     agent = result.scalar_one_or_none()
     if not agent:

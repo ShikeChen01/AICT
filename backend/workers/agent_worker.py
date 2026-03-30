@@ -132,7 +132,7 @@ class AgentWorker:
                     try:
                         result = await db.execute(
                             select(AgentRecord)
-                            .options(selectinload(AgentRecord.sandbox))
+                            .options(selectinload(AgentRecord.sandbox), selectinload(AgentRecord.desktop))
                             .where(AgentRecord.id == self.agent_id)
                         )
                         agent_record = result.scalar_one_or_none()

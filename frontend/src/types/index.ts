@@ -86,6 +86,7 @@ export interface Agent {
   status: AgentStatus;
   current_task_id: UUID | null;
   sandbox_id: string | null;
+  desktop_id: string | null;
   sandbox_persist: boolean;
   sandbox_config_id: UUID | null;
   memory?: Record<string, unknown> | null;

@@ -143,6 +143,8 @@ class TestEventFactories:
         assert event.data["status"] == "in_progress"
 
     def test_create_agent_status_event(self):
+        sandbox = type("Sandbox", (), {"id": uuid.uuid4()})()
+        desktop = type("Desktop", (), {"id": uuid.uuid4()})()
         agent = type("Agent", (), {
             "id": uuid.uuid4(),
             "project_id": uuid.uuid4(),
@@ -150,12 +152,16 @@ class TestEventFactories:
             "display_name": "CTO",
             "status": "busy",
             "current_task_id": uuid.uuid4(),
+            "sandbox": sandbox,
+            "desktop": desktop,
         })()
 
         event = create_agent_status_event(agent)
         assert event.type == EventType.AGENT_STATUS
         assert event.data["role"] == "cto"
         assert event.data["status"] == "busy"
+        assert event.data["sandbox_id"] == str(sandbox.id)
+        assert event.data["desktop_id"] == str(desktop.id)
 
 
 class TestConnectionInfo:
