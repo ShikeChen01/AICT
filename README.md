@@ -2,7 +2,7 @@
 
 **Multi-AI Agent Orchestration Platform for Software Engineering**
 
-> **Archive Notice** — Claude Code costs $4,000/month in API usage on top of a $280 subscription. The economics of building on top of frontier LLM APIs are brutal: either you train and build your own model, or you die. This is a near-production-grade implementation layer — a serious attempt, not a toy — but turning it into a sustainable product at these API costs is unrealistic. I'm out. This is a public archive to showcase the features I built.
+> **Archive Notice** — Claude Code costs $4,000/month in API usage on top of a $280 subscription. The economics of building on top of frontier LLM APIs are brutal: either you train and build your own model, or you die. This is a near-production-grade implementation layer — a serious attempt, not a toy. But, turning it into a sustainable product at these API costs is unrealistic. I'm out. This is a public archive to showcase the features I built.
 
 AICT orchestrates multiple AI agents — Manager, CTO, and Engineers — to collaboratively build software. Each agent runs in an independent async loop with its own LLM, tools, and persistent memory. Agents communicate through structured channels, manage tasks on a kanban board, and execute code in sandboxed desktop environments with full VNC access.
 
@@ -319,7 +319,7 @@ This project addresses one piece of that puzzle: **multi-AI orchestration of pro
 
 ## License
 
-This project is for portfolio/showcase purposes.
+MIT, If you make money off this, just remember to hire me LOL
 
 ## Author
 
