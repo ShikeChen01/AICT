@@ -61,11 +61,12 @@ class TestResolveHeadless:
              patch.dict("os.environ", {"ENV": "production", "K_SERVICE": "true"}, clear=False):
             from backend.services.sandbox_service import SandboxService
             svc = SandboxService()
-            host, port, prefix = await svc._resolve_host_port(sandbox)
+            host, port, prefix, token = await svc._resolve_host_port(sandbox)
 
         assert host == "10.0.0.1"
         assert port == 8080
         assert prefix == ""
+        assert token == sandbox.auth_token
 
     @pytest.mark.asyncio
     async def test_headless_ignores_pool_manager_settings(self):
@@ -75,11 +76,12 @@ class TestResolveHeadless:
              patch.dict("os.environ", {"ENV": "production", "K_SERVICE": "true"}, clear=False):
             from backend.services.sandbox_service import SandboxService
             svc = SandboxService()
-            host, port, prefix = await svc._resolve_host_port(sandbox)
+            host, port, prefix, token = await svc._resolve_host_port(sandbox)
 
         assert host == "172.16.0.5"
         assert port == 7777
         assert prefix == ""
+        assert token == sandbox.auth_token
 
 
 # ── 2. _resolve_host_port — desktop ─────────────────────────────────────────
@@ -97,11 +99,12 @@ class TestResolveDesktop:
              patch.dict("os.environ", {"ENV": "production", "K_SERVICE": "true"}, clear=False):
             from backend.services.sandbox_service import SandboxService
             svc = SandboxService()
-            host, port, prefix = await svc._resolve_host_port(sandbox)
+            host, port, prefix, token = await svc._resolve_host_port(sandbox)
 
         assert host == PM_HOST
         assert port == PM_PORT
         assert prefix == "/api/sandbox/desk-abc123/proxy"
+        assert token == "test-master-token"
 
     @pytest.mark.asyncio
     async def test_desktop_uses_internal_host_when_available(self):
@@ -115,10 +118,11 @@ class TestResolveDesktop:
              patch.dict("os.environ", {"ENV": "production", "K_SERVICE": "true"}, clear=False):
             from backend.services.sandbox_service import SandboxService
             svc = SandboxService()
-            host, port, prefix = await svc._resolve_host_port(sandbox)
+            host, port, prefix, token = await svc._resolve_host_port(sandbox)
 
         # Internal host takes precedence
         assert host == "internal.host.local"
+        assert token == "test-master-token"
 
     @pytest.mark.asyncio
     async def test_desktop_falls_back_to_public_host(self):
@@ -132,9 +136,10 @@ class TestResolveDesktop:
              patch.dict("os.environ", {"ENV": "production", "K_SERVICE": "true"}, clear=False):
             from backend.services.sandbox_service import SandboxService
             svc = SandboxService()
-            host, port, prefix = await svc._resolve_host_port(sandbox)
+            host, port, prefix, token = await svc._resolve_host_port(sandbox)
 
         assert host == "public.host.com"
+        assert token == "test-master-token"
 
 
 # ── 3. Service methods delegate to client ────────────────────────────────────
@@ -329,9 +334,10 @@ class TestAuthTokenForwarding:
             assert call[0][2] == "shell-tok-42"
 
     @pytest.mark.asyncio
-    async def test_desktop_auth_token_forwarded(self):
-        """Desktop sandboxes also forward their token, even though routing
-        goes through the pool manager."""
+    async def test_desktop_uses_master_token(self):
+        """Desktop sandboxes use the pool manager master token, not the
+        sandbox's individual auth_token. The pool manager's require_master_token
+        validates this before forwarding to the sandbox VM."""
         sandbox = make_sandbox(
             unit_type="desktop",
             auth_token="desktop-tok",
@@ -351,7 +357,7 @@ class TestAuthTokenForwarding:
             await svc.sandbox_health(sandbox)
 
             call = mock_client.health_check.call_args
-            # Even for desktop, auth_token comes from sandbox object
-            assert call[0][2] == "desktop-tok"
+            # Desktop uses master token, NOT sandbox.auth_token
+            assert call[0][2] == "test-master-token"
             # And path_prefix routes through pool manager
             assert call[1]["path_prefix"] == "/api/sandbox/desk-proxy-1/proxy"
